@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Firm Portal — NYCMalpractice.ai</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .portal-layout { max-width: 900px; margin: 0 auto; padding: 2rem 1.5rem 4rem; position: relative; z-index: 1; }
+    .portal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 2rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border); }
+    .portal-logo { font-family: 'Playfair Display', serif; font-size: 1.2rem; font-weight: 700; color: var(--accent); }
+    .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+    .stat-card { padding: 1.25rem; text-align: center; }
+    .stat-n { font-size: 2rem; font-weight: 700; color: var(--text); }
+    .stat-l { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+    .section-title { font-size: 0.85rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 1.5rem 0 0.75rem; }
+    table { width: 100%; border-collapse: collapse; }
+    th { text-align: left; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border); }
+    td { padding: 0.75rem; font-size: 0.85rem; border-bottom: 1px solid var(--border); }
+    .tier-badge { display: inline-block; padding: 0.2rem 0.55rem; border-radius: 6px; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+    .tier-warm    { background: rgba(158,58,90,0.15); color: #c9809a; }
+    .tier-hot     { background: rgba(122,32,64,0.2);  color: #9e5070; }
+    .tier-premium { background: rgba(201,58,106,0.15); color: #c9607a; }
+    .tier-cold    { background: rgba(107,122,148,0.15); color: #8a9ab0; }
+    .status-badge { display: inline-block; padding: 0.2rem 0.55rem; border-radius: 6px; font-size: 0.7rem; font-weight: 600; }
+    .status-pending  { background: rgba(251,191,36,0.1); color: #fbbf24; }
+    .status-accepted { background: rgba(74,222,128,0.1); color: #4ade80; }
+    .status-declined { background: rgba(248,113,113,0.1); color: #f87171; }
+    .portal-login { max-width: 380px; margin: 3rem auto 0; text-align: center; }
+    .spec-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.4rem; margin-top: 0.5rem; }
+    .spec-item { display: flex; align-items: center; gap: 0.45rem; padding: 0.5rem 0.65rem; border: 1px solid var(--border); border-radius: 7px; cursor: pointer; }
+    .spec-item input { accent-color: var(--accent); }
+    .spec-item span { font-size: 0.8rem; }
+    .save-btn { display: inline-flex; align-items: center; justify-content: center; padding: 0.6rem 1.5rem; background: linear-gradient(135deg, #7a2040, #9e3a5a); border: none; border-radius: 8px; color: #fff; font-family: 'Inter', sans-serif; font-size: 0.85rem; font-weight: 600; cursor: pointer; transition: opacity 0.2s; }
+    .save-btn:hover { opacity: 0.88; }
+    .manage-btn { font-size: 0.78rem; color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 0.3rem 0.7rem; cursor: pointer; background: transparent; transition: border-color 0.2s; }
+    .manage-btn:hover { border-color: var(--accent); color: var(--text); }
+  </style>
+</head>
+<body>
+  <div class="bg-blob blob-1"></div>
+  <div class="bg-blob blob-2"></div>
+
+  <!-- Login -->
+  <div class="portal-layout" id="loginView">
+    <div style="text-align:center;margin-bottom:2rem">
+      <span style="font-size:1.6rem">⚕️</span>
+      <div style="font-family:'Playfair Display',serif;font-size:1.3rem;font-weight:700;color:var(--accent)">Firm Portal</div>
+    </div>
+    <div class="glass-panel portal-login">
+      <div style="font-weight:700;margin-bottom:0.35rem">Access Your Portal</div>
+      <div style="font-size:0.85rem;color:var(--muted);margin-bottom:1.25rem">Enter your firm email to receive a portal link.</div>
+      <input type="email" id="loginEmail" placeholder="intake@yourfirm.com" style="width:100%;background:rgba(255,255,255,0.04);border:1px solid var(--border);border-radius:10px;color:var(--text);font-family:'Inter',sans-serif;font-size:0.92rem;padding:0.65rem 1rem;outline:none;margin-bottom:0.75rem">
+      <button onclick="sendPortalLink()" style="width:100%;padding:0.65rem;background:linear-gradient(135deg,#7a2040,#9e3a5a);border:none;border-radius:10px;color:#fff;font-family:'Inter',sans-serif;font-size:0.9rem;font-weight:600;cursor:pointer">Send Portal Link →</button>
+      <div id="loginMsg" style="font-size:0.82rem;color:var(--muted);margin-top:0.75rem;text-align:center"></div>
+    </div>
+  </div>
+
+  <!-- Portal -->
+  <div class="portal-layout" id="portalView" style="display:none">
+    <div class="portal-header">
+      <div>
+        <div class="portal-logo">⚕️ NYCMalpractice.ai</div>
+        <div style="font-size:0.8rem;color:var(--muted)" id="firmNameEl"></div>
+      </div>
+      <div style="display:flex;gap:0.75rem;align-items:center">
+        <button class="manage-btn" onclick="openBillingPortal()">Manage Billing</button>
+        <a href="/" style="font-size:0.82rem;color:var(--muted);text-decoration:none">← Back to Chat</a>
+      </div>
+    </div>
+
+    <!-- Stats -->
+    <div class="stat-grid">
+      <div class="glass-panel stat-card"><div class="stat-n" id="statTotal">—</div><div class="stat-l">Total Leads</div></div>
+      <div class="glass-panel stat-card"><div class="stat-n" id="statAccepted">—</div><div class="stat-l">Accepted</div></div>
+      <div class="glass-panel stat-card"><div class="stat-n" id="statPending">—</div><div class="stat-l">Pending</div></div>
+      <div class="glass-panel stat-card">
+        <div class="stat-n" id="statStatus" style="font-size:1rem;padding-top:0.35rem">—</div>
+        <div class="stat-l">Subscription</div>
+      </div>
+    </div>
+
+    <!-- Profile -->
+    <div class="section-title">Practice Areas</div>
+    <div class="glass-panel" style="padding:1.25rem">
+      <div class="spec-grid" id="specGrid">
+        <label class="spec-item"><input type="checkbox" value="surgical_error"><span>Surgical Errors</span></label>
+        <label class="spec-item"><input type="checkbox" value="misdiagnosis"><span>Failure to Diagnose</span></label>
+        <label class="spec-item"><input type="checkbox" value="medication_error"><span>Medication Errors</span></label>
+        <label class="spec-item"><input type="checkbox" value="birth_injury"><span>Birth Injuries</span></label>
+        <label class="spec-item"><input type="checkbox" value="anesthesia_error"><span>Anesthesia Errors</span></label>
+        <label class="spec-item"><input type="checkbox" value="hospital_negligence"><span>Hospital Negligence</span></label>
+        <label class="spec-item"><input type="checkbox" value="nursing_home"><span>Nursing Home Neglect</span></label>
+        <label class="spec-item"><input type="checkbox" value="dental"><span>Dental Malpractice</span></label>
+        <label class="spec-item"><input type="checkbox" value="other"><span>All Malpractice</span></label>
+      </div>
+      <div style="margin-top:1rem;display:flex;align-items:center;gap:0.75rem">
+        <button class="save-btn" onclick="saveProfile()">Save Changes</button>
+        <span id="saveMsg" style="font-size:0.8rem;color:var(--success);display:none">Saved!</span>
+      </div>
+    </div>
+
+    <!-- Leads -->
+    <div class="section-title">Recent Leads</div>
+    <div class="glass-panel" style="padding:1.25rem;overflow-x:auto">
+      <table id="leadsTable">
+        <thead><tr><th>Type</th><th>Tier</th><th>Price</th><th>Status</th><th>Received</th><th></th></tr></thead>
+        <tbody id="leadsBody"></tbody>
+      </table>
+      <div id="noLeads" style="text-align:center;color:var(--muted);padding:2rem;display:none">No leads yet. You'll be notified when matching leads arrive.</div>
+    </div>
+  </div>
+
+  <script>
+    const MALP_LABELS = {
+      surgical_error:      'Surgical Error',
+      misdiagnosis:        'Failure to Diagnose',
+      medication_error:    'Medication Error',
+      birth_injury:        'Birth Injury',
+      anesthesia_error:    'Anesthesia Error',
+      hospital_negligence: 'Hospital Negligence',
+      nursing_home:        'Nursing Home',
+      dental:              'Dental Malpractice',
+      other:               'Malpractice',
+    };
+
+    const token = new URLSearchParams(window.location.search).get('token');
+
+    async function sendPortalLink() {
+      const email = document.getElementById('loginEmail').value.trim();
+      if (!email) return;
+      const res  = await fetch('/api/firms/portal-link', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) });
+      const data = await res.json();
+      document.getElementById('loginMsg').textContent = data.ok ? 'Check your email for a portal link.' : (data.error || 'Error sending link.');
+    }
+
+    async function openBillingPortal() {
+      window.location.href = `/api/billing/portal?token=${token}`;
+    }
+
+    async function saveProfile() {
+      const specs = [...document.querySelectorAll('#specGrid input:checked')].map(i => i.value);
+      await fetch('/api/portal/profile', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, specializations: specs }) });
+      const msg = document.getElementById('saveMsg');
+      msg.style.display = 'inline';
+      setTimeout(() => msg.style.display = 'none', 2000);
+    }
+
+    if (token) {
+      document.getElementById('loginView').style.display  = 'none';
+      document.getElementById('portalView').style.display = 'block';
+
+      (async () => {
+        const res  = await fetch(`/api/portal?token=${token}`);
+        const data = await res.json();
+        if (data.error) { document.getElementById('loginView').style.display = 'block'; document.getElementById('portalView').style.display = 'none'; return; }
+
+        document.getElementById('firmNameEl').textContent = data.firm?.name || '';
+        const leads    = data.leads || [];
+        const total    = leads.length;
+        const accepted = leads.filter(l => l.status === 'accepted').length;
+        const pending  = leads.filter(l => l.status === 'pending').length;
+        document.getElementById('statTotal').textContent    = total;
+        document.getElementById('statAccepted').textContent = accepted;
+        document.getElementById('statPending').textContent  = pending;
+        document.getElementById('statStatus').textContent   = data.firm?.subscription_active ? '✓ Active' : 'Inactive';
+        document.getElementById('statStatus').style.color   = data.firm?.subscription_active ? 'var(--success)' : '#f87171';
+
+        if (data.firm?.specializations?.length) {
+          document.querySelectorAll('#specGrid input').forEach(cb => {
+            cb.checked = data.firm.specializations.includes(cb.value);
+          });
+        }
+
+        if (leads.length === 0) { document.getElementById('noLeads').style.display = 'block'; return; }
+        const tbody = document.getElementById('leadsBody');
+        tbody.innerHTML = leads.map(l => `
+          <tr>
+            <td>${MALP_LABELS[l.case_type] || l.case_type || '—'}</td>
+            <td><span class="tier-badge tier-${l.tier}">${l.tier}</span></td>
+            <td>$${parseFloat(l.price_paid).toFixed(0)}</td>
+            <td><span class="status-badge status-${l.status}">${l.status}</span></td>
+            <td style="color:var(--muted)">${new Date(l.created_at).toLocaleDateString()}</td>
+            <td>${l.status === 'pending' ? `<a href="lead.html?id=${l.id}&token=${token}" style="font-size:0.78rem;color:var(--accent)">View →</a>` : ''}</td>
+          </tr>
+        `).join('');
+      })();
+    }
+  </script>
+</body>
+</html>

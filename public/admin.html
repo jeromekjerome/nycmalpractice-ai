@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin — NYCMalpractice.ai</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .admin-layout { max-width: 1100px; margin: 0 auto; padding: 2rem 1.5rem 4rem; position: relative; z-index: 1; }
+    .admin-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 2rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border); }
+    .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+    .stat-card { padding: 1.25rem; text-align: center; }
+    .stat-n { font-size: 2rem; font-weight: 700; color: var(--text); }
+    .stat-l { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+    .section-title { font-size: 0.82rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 1.5rem 0 0.75rem; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    th { text-align: left; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); padding: 0.45rem 0.65rem; border-bottom: 1px solid var(--border); white-space: nowrap; }
+    td { padding: 0.65rem; border-bottom: 1px solid var(--border); }
+    .badge { display: inline-block; padding: 0.18rem 0.5rem; border-radius: 5px; font-size: 0.67rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; }
+    .b-active   { background: rgba(58,158,104,0.15); color: #3a9e68; }
+    .b-inactive { background: rgba(248,113,113,0.1); color: #f87171; }
+    .b-subscribed { background: rgba(74,222,128,0.1); color: #4ade80; }
+    .admin-login { max-width: 360px; margin: 3rem auto 0; }
+    .admin-input { width:100%;background:rgba(255,255,255,0.04);border:1px solid var(--border);border-radius:10px;color:var(--text);font-family:'Inter',sans-serif;font-size:0.9rem;padding:0.65rem 1rem;outline:none;margin-bottom:0.75rem }
+    .admin-btn { width:100%;padding:0.65rem;background:linear-gradient(135deg,#7a2040,#9e3a5a);border:none;border-radius:10px;color:#fff;font-family:'Inter',sans-serif;font-size:0.9rem;font-weight:600;cursor:pointer }
+    .action-btn { font-size:0.75rem;padding:0.25rem 0.55rem;border-radius:5px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;transition:border-color 0.2s }
+    .action-btn:hover { border-color:var(--accent);color:var(--text) }
+  </style>
+</head>
+<body>
+  <div class="bg-blob blob-1"></div>
+  <div class="bg-blob blob-2"></div>
+
+  <div class="admin-layout" id="loginView">
+    <div style="text-align:center;margin-bottom:2rem">
+      <div style="font-family:'Playfair Display',serif;font-size:1.3rem;font-weight:700;color:var(--accent)">⚕️ Admin</div>
+    </div>
+    <div class="glass-panel admin-login">
+      <div style="font-weight:700;margin-bottom:1rem;text-align:center">Admin Access</div>
+      <input type="password" class="admin-input" id="secretInput" placeholder="Admin secret">
+      <button class="admin-btn" onclick="adminLogin()">Enter →</button>
+      <div id="loginErr" style="font-size:0.8rem;color:#f87171;margin-top:0.5rem;text-align:center;display:none">Invalid secret</div>
+    </div>
+  </div>
+
+  <div class="admin-layout" id="adminView" style="display:none">
+    <div class="admin-header">
+      <div style="font-family:'Playfair Display',serif;font-size:1.2rem;font-weight:700;color:var(--accent)">⚕️ NYCMalpractice.ai Admin</div>
+      <a href="/" style="font-size:0.82rem;color:var(--muted);text-decoration:none">← Back to Chat</a>
+    </div>
+
+    <div class="stat-grid">
+      <div class="glass-panel stat-card"><div class="stat-n" id="statTotal">—</div><div class="stat-l">Total Firms</div></div>
+      <div class="glass-panel stat-card"><div class="stat-n" id="statActive">—</div><div class="stat-l">Subscribed</div></div>
+      <div class="glass-panel stat-card"><div class="stat-n" id="statLeads">—</div><div class="stat-l">Total Leads</div></div>
+    </div>
+
+    <div class="section-title">Law Firms</div>
+    <div class="glass-panel" style="padding:1.25rem;overflow-x:auto">
+      <table>
+        <thead>
+          <tr>
+            <th>Firm</th><th>Email</th><th>Phone</th><th>Status</th><th>Subscription</th><th>Specializations</th><th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="firmsBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    const MALP_LABELS = {
+      surgical_error:      'Surgical',
+      misdiagnosis:        'Diagnosis',
+      medication_error:    'Medication',
+      birth_injury:        'Birth',
+      anesthesia_error:    'Anesthesia',
+      hospital_negligence: 'Hospital',
+      nursing_home:        'Nursing Home',
+      dental:              'Dental',
+      other:               'All',
+    };
+
+    let adminSecret = sessionStorage.getItem('malpractice_admin_secret') || '';
+    if (adminSecret) loadAdmin();
+
+    function adminLogin() {
+      const s = document.getElementById('secretInput').value;
+      if (!s) return;
+      adminSecret = s;
+      sessionStorage.setItem('malpractice_admin_secret', s);
+      loadAdmin();
+    }
+
+    async function loadAdmin() {
+      const res = await fetch('/api/admin/firms', { headers: { 'x-admin-secret': adminSecret } });
+      if (res.status === 401) { document.getElementById('loginErr').style.display = 'block'; return; }
+      const data = await res.json();
+
+      document.getElementById('loginView').style.display = 'none';
+      document.getElementById('adminView').style.display = 'block';
+
+      document.getElementById('statTotal').textContent  = data.counts?.total || 0;
+      document.getElementById('statActive').textContent = data.counts?.active || 0;
+      document.getElementById('statLeads').textContent  = data.leadCounts?.total || 0;
+
+      const tbody = document.getElementById('firmsBody');
+      tbody.innerHTML = (data.firms || []).map(f => `
+        <tr>
+          <td>${f.name}</td>
+          <td style="color:var(--muted)">${f.email}</td>
+          <td style="color:var(--muted)">${f.phone || '—'}</td>
+          <td><span class="badge ${f.active ? 'b-active' : 'b-inactive'}">${f.active ? 'Active' : 'Inactive'}</span></td>
+          <td>${f.subscription_active ? '<span class="badge b-subscribed">Subscribed</span>' : '<span style="color:var(--muted);font-size:0.78rem">None</span>'}</td>
+          <td style="color:var(--muted);font-size:0.78rem">${(f.specializations || []).map(s => MALP_LABELS[s] || s).join(', ') || 'All'}</td>
+          <td style="display:flex;gap:0.35rem;flex-wrap:wrap">
+            <button class="action-btn" onclick="toggleFirm(${f.id}, ${!f.active})">${f.active ? 'Deactivate' : 'Activate'}</button>
+            <button class="action-btn" onclick="sendPortalLink(${f.id})">Send Link</button>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    async function toggleFirm(id, active) {
+      await fetch(`/api/admin/firms/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', 'x-admin-secret': adminSecret }, body: JSON.stringify({ active }) });
+      loadAdmin();
+    }
+
+    async function sendPortalLink(id) {
+      const res  = await fetch(`/api/admin/firms/${id}/send-link`, { method: 'POST', headers: { 'x-admin-secret': adminSecret } });
+      const data = await res.json();
+      alert(data.ok ? 'Portal link sent.' : 'Error: ' + data.error);
+    }
+  </script>
+</body>
+</html>

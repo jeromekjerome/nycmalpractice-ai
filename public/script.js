@@ -1,10 +1,16 @@
 // Copyright (c) 2026 Jerome W. Dewald. All rights reserved.
 
+// ─── Analytics ───────────────────────────────────────────────────────────────
+function track(eventName, params = {}) {
+  if (typeof mixpanel !== 'undefined') mixpanel.track(eventName, params);
+}
+
 // ─── Session & State ─────────────────────────────────────────────────────────
 let sessionId = getCookie('malpractice_session');
 if (!sessionId) {
   sessionId = crypto.randomUUID();
   setCookie('malpractice_session', sessionId, 90);
+  track('session_start', { app: 'malpractice-ai', mode: 'personal' });
 }
 
 let conversationHistory = [];
@@ -18,6 +24,7 @@ const estateLbl   = document.getElementById('estateLabel');
 
 modeToggle.addEventListener('change', async () => {
   currentMode = modeToggle.checked ? 'estate' : 'personal';
+  track('mode_toggle', { app: 'malpractice-ai', mode: currentMode });
   document.body.classList.toggle('estate-mode', modeToggle.checked);
 
   personalLbl.classList.toggle('active', !modeToggle.checked);
@@ -72,6 +79,11 @@ async function submitQuestion() {
 
   isLoading = true;
   setLoading(true);
+  track('chat_message_sent', {
+    app: 'malpractice-ai',
+    mode: currentMode,
+    turn_number: conversationHistory.filter(m => m.role === 'user').length + 1,
+  });
   appendMessage('user', q);
   input.value = '';
 
@@ -147,6 +159,7 @@ function renderCases(cases) {
 }
 
 function renderCaseAnalysis(analysis) {
+  track('case_analysis_viewed', { app: 'malpractice-ai', verdict: analysis.verdict, score: analysis.score });
   const card    = document.getElementById('analysisCard');
   const content = document.getElementById('analysisContent');
 

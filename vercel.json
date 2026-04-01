@@ -1,8 +1,13 @@
 {
   "version": 2,
-  "builds": [{ "src": "server.js", "use": "@vercel/node" }],
+  "builds": [
+    { "src": "server.js",      "use": "@vercel/node" },
+    { "src": "blog-server.js", "use": "@vercel/node" }
+  ],
   "routes": [
-    { "src": "/(.*)", "dest": "/server.js" }
+    { "src": "/blog",       "dest": "/blog-server.js" },
+    { "src": "/blog/(.*)", "dest": "/blog-server.js" },
+    { "src": "/(.*)",      "dest": "/server.js" }
   ],
   "crons": [
     { "path": "/api/cron", "schedule": "0 7 * * *" }

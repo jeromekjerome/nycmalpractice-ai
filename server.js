@@ -346,7 +346,7 @@ app.get('/api/cron/overdue-leads', async (req, res) => {
 });
 
 // ─── Start ────────────────────────────────────────────────────────────────────
-if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+if (process.env.NODE_ENV !== 'test' && (process.env.NODE_ENV !== 'production' || !process.env.VERCEL)) {
   import('./cron.js').then(({ startCronJobs }) => startCronJobs());
   const PORT = process.env.PORT || 3003;
   app.listen(PORT, () => console.log(`MalpracticeAI running on http://localhost:${PORT}`));

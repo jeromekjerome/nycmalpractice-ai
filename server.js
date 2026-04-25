@@ -35,6 +35,9 @@ let modelHealthSnapshot = {
   aux: { active: auxModels[0] || null, fallbacks_available: auxModels.slice(1) },
   embedding: { active: embeddingModels[0] || null, fallbacks_available: embeddingModels.slice(1) },
 };
+const MODEL_HEALTH_TTL_MS = Number.parseInt(process.env.MODEL_HEALTH_TTL_MS || '60000', 10);
+let modelHealthLastCheckedAt = 0;
+let modelHealthRefreshPromise = null;
 
 app.use(cors());
 app.use('/api/webhooks/stripe', express.raw({ type: 'application/json' }));
@@ -366,23 +369,44 @@ app.get('/api/cron/overdue-leads', async (req, res) => {
 });
 
 app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'malpractice-ai' }));
-app.get('/health/models', (_req, res) => res.json(modelHealthSnapshot));
+app.get('/health/models', async (_req, res) => {
+  await refreshModelHealthSnapshot();
+  res.json(modelHealthSnapshot);
+});
 
-async function refreshModelHealthSnapshot() {
-  modelHealthSnapshot = await probeAllModelChains(openai, {
+async function refreshModelHealthSnapshot({ force = false } = {}) {
+  const now = Date.now();
+  const isFresh = modelHealthLastCheckedAt && (now - modelHealthLastCheckedAt) < MODEL_HEALTH_TTL_MS;
+  if (!force && isFresh) return modelHealthSnapshot;
+  if (modelHealthRefreshPromise) return modelHealthRefreshPromise;
+
+  modelHealthRefreshPromise = probeAllModelChains(openai, {
     answerModels,
     auxModels,
     embeddingModels,
-  });
-  console.log('[Health] Model callable check:', JSON.stringify(modelHealthSnapshot));
+  })
+    .then((snapshot) => {
+      modelHealthSnapshot = snapshot;
+      modelHealthLastCheckedAt = Date.now();
+      console.log('[Health] Model callable check:', JSON.stringify(modelHealthSnapshot));
+      return modelHealthSnapshot;
+    })
+    .catch((err) => {
+      console.error('[Health] Model probe refresh failed:', err.message);
+      return modelHealthSnapshot;
+    })
+    .finally(() => {
+      modelHealthRefreshPromise = null;
+    });
+
+  return modelHealthRefreshPromise;
 }
 
 // ─── Start ────────────────────────────────────────────────────────────────────
 if (process.env.NODE_ENV !== 'test' && (process.env.NODE_ENV !== 'production' || !process.env.VERCEL)) {
   import('./cron.js').then(({ startCronJobs }) => startCronJobs());
   const PORT = process.env.PORT || 3003;
-  refreshModelHealthSnapshot()
-    .catch((err) => console.error('[Health] Startup model probe failed:', err.message))
+  refreshModelHealthSnapshot({ force: true })
     .finally(() => {
       app.listen(PORT, () => console.log(`MalpracticeAI running on http://localhost:${PORT}`));
     });

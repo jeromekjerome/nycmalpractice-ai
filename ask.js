@@ -3,8 +3,17 @@
 import OpenAI from 'openai';
 import { searchMalpracticeCases, extractCaseType } from './courtlistener.js';
 import { scoreLead } from './auction.js';
+import { buildModelList, chatCompletionsWithFallback } from './openaiModelFailover.js';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const ANSWER_MODELS = buildModelList(
+  process.env.OPENAI_MODEL_ANSWER || 'gpt-4o',
+  process.env.OPENAI_MODEL_ANSWER_FALLBACKS || 'gpt-5.4-mini,gpt-4.1'
+);
+const AUX_MODELS = buildModelList(
+  process.env.OPENAI_MODEL_AUX || 'gpt-4o-mini',
+  process.env.OPENAI_MODEL_AUX_FALLBACKS || 'gpt-5.4-mini,gpt-4.1'
+);
 
 const CASE_TYPE_NAMES = {
   surgical_error:      'Surgical Error / Operating Room Negligence',
@@ -48,7 +57,7 @@ export async function answerUserQuestion({ question, mode = 'personal', sessionI
   ];
 
   const parallelTasks = [
-    openai.chat.completions.create({ model: 'gpt-4o', messages, temperature: 0.7, max_tokens: 1000 }),
+    chatCompletionsWithFallback(openai, { models: ANSWER_MODELS, messages, temperature: 0.7, max_tokens: 1000 }),
     turn >= 2 ? scoreLead(question, history, caseType, mode)                         : Promise.resolve(null),
     turn >= 3 ? analyzeMalpracticeSituation(question, history, cases, caseType, mode) : Promise.resolve(null),
   ];
@@ -153,8 +162,8 @@ async function analyzeMalpracticeSituation(question, history, cases, caseType, m
       .map(c => c.caseName + (c.snippet ? ': ' + c.snippet.substring(0, 150) : ''))
       .join('\n');
 
-    const res = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+    const res = await chatCompletionsWithFallback(openai, {
+      models: AUX_MODELS,
       messages: [{
         role: 'user',
         content: `You are a NYC medical malpractice case analyst evaluating the position of the ${perspective}.

@@ -11,10 +11,30 @@ import { scoreLead, createAuction, deliverColdLead, getAuctionStatus, placeBid, 
 import { registerFirm, sendVerificationCode, verifyPhoneCode, validateToken, updateFirmSubscription, getFirm, updateFirmProfile, createMagicLink } from './firms.js';
 import nodemailer from 'nodemailer';
 import { createSubscriptionCheckout, createPortalSession, constructWebhookEvent } from './stripe.js';
+import OpenAI from 'openai';
+import { buildModelList, probeAllModelChains } from './openaiModelFailover.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
 const sql = neon(process.env.DATABASE_URL);
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const answerModels = buildModelList(
+  process.env.OPENAI_MODEL_ANSWER || 'gpt-4o',
+  process.env.OPENAI_MODEL_ANSWER_FALLBACKS || 'gpt-5.4-mini,gpt-4.1'
+);
+const auxModels = buildModelList(
+  process.env.OPENAI_MODEL_AUX || 'gpt-4o-mini',
+  process.env.OPENAI_MODEL_AUX_FALLBACKS || 'gpt-5.4-mini,gpt-4.1'
+);
+const embeddingModels = buildModelList(
+  process.env.OPENAI_MODEL_EMBEDDING || 'text-embedding-3-small',
+  process.env.OPENAI_MODEL_EMBEDDING_FALLBACKS || 'text-embedding-3-large'
+);
+let modelHealthSnapshot = {
+  answer: { active: answerModels[0] || null, fallbacks_available: answerModels.slice(1) },
+  aux: { active: auxModels[0] || null, fallbacks_available: auxModels.slice(1) },
+  embedding: { active: embeddingModels[0] || null, fallbacks_available: embeddingModels.slice(1) },
+};
 
 app.use(cors());
 app.use('/api/webhooks/stripe', express.raw({ type: 'application/json' }));
@@ -345,11 +365,27 @@ app.get('/api/cron/overdue-leads', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'malpractice-ai' }));
+app.get('/health/models', (_req, res) => res.json(modelHealthSnapshot));
+
+async function refreshModelHealthSnapshot() {
+  modelHealthSnapshot = await probeAllModelChains(openai, {
+    answerModels,
+    auxModels,
+    embeddingModels,
+  });
+  console.log('[Health] Model callable check:', JSON.stringify(modelHealthSnapshot));
+}
+
 // ─── Start ────────────────────────────────────────────────────────────────────
 if (process.env.NODE_ENV !== 'test' && (process.env.NODE_ENV !== 'production' || !process.env.VERCEL)) {
   import('./cron.js').then(({ startCronJobs }) => startCronJobs());
   const PORT = process.env.PORT || 3003;
-  app.listen(PORT, () => console.log(`MalpracticeAI running on http://localhost:${PORT}`));
+  refreshModelHealthSnapshot()
+    .catch((err) => console.error('[Health] Startup model probe failed:', err.message))
+    .finally(() => {
+      app.listen(PORT, () => console.log(`MalpracticeAI running on http://localhost:${PORT}`));
+    });
 }
 
 export default app;

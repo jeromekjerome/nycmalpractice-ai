@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex">
+  <title>Your Lead — NYCMalpractice.ai</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .firm-page { max-width: 780px; margin: 0 auto; }
+    .tier-badge { display: inline-block; padding: 4px 12px; border-radius: 99px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.75rem; border: 1px solid currentColor; color: var(--accent); }
+    .page-title { font-family: 'Playfair Display', serif; font-size: 1.6rem; margin-bottom: 0.3rem; }
+    .subtitle { color: var(--muted); font-size: 0.9rem; margin-bottom: 1rem; }
+    .panel { padding: 1.25rem; margin-bottom: 1rem; }
+    .panel-title { font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 0.75rem; }
+    .contact-grid { display: grid; grid-template-columns: 140px 1fr; gap: 0.4rem 1rem; font-size: 0.92rem; }
+    @media (max-width: 560px) { .contact-grid { grid-template-columns: 1fr; } }
+    .contact-grid dt { color: var(--muted); }
+    .contact-grid a { color: var(--accent); }
+    .note { font-size: 0.75rem; color: var(--muted); margin-top: 0.75rem; }
+    .dim { display: flex; align-items: center; gap: 0.6rem; font-size: 0.8rem; margin-bottom: 0.5rem; }
+    .dim-label { width: 110px; color: var(--muted); }
+    .dim-bar { flex: 1; height: 6px; background: rgba(255,255,255,0.07); border-radius: 99px; overflow: hidden; }
+    .dim-fill { height: 100%; background: var(--accent); border-radius: 99px; }
+    .dim-value { width: 34px; text-align: right; color: var(--muted); font-size: 0.75rem; }
+    .turn { padding: 0.75rem 0.9rem; border-radius: 8px; margin-bottom: 0.6rem; font-size: 0.88rem; line-height: 1.6; white-space: pre-wrap; }
+    .turn-client { background: rgba(255,255,255,0.04); border-left: 3px solid var(--accent); }
+    .turn-ai { border: 1px solid var(--border); }
+    .turn-who { display: block; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 0.25rem; white-space: normal; }
+    .actions { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+    .action-btn { padding: 0.7rem 1.25rem; border-radius: 8px; font: inherit; font-size: 0.9rem; font-weight: 600; cursor: pointer; border: 1px solid transparent; }
+    .action-btn.primary { background: linear-gradient(135deg, var(--accent2), var(--accent)); color: #fff; border: none; }
+    .action-btn.secondary { background: transparent; color: var(--text); border-color: var(--border); }
+    .action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .notice { margin-top: 0.75rem; padding: 0.75rem 1rem; border-radius: 8px; font-size: 0.85rem; }
+    .notice.error { background: rgba(229,92,92,0.1); border: 1px solid rgba(229,92,92,0.3); color: #e55c5c; }
+    .notice.success { background: rgba(58,158,104,0.1); border: 1px solid rgba(58,158,104,0.3); color: var(--success); }
+    .status-banner { padding: 1rem 1.25rem; margin-bottom: 1rem; font-size: 0.92rem; }
+  </style>
+</head>
+<body>
+  <div class="bg-blob blob-1"></div>
+  <div class="bg-blob blob-2"></div>
+
+  <div class="layout">
+    <header class="header">
+      <div class="logo"><span class="logo-icon">⚕️</span><span class="logo-text">NYCMalpractice.ai</span></div>
+    </header>
+
+    <main class="firm-page">
+      <p id="loadingView" style="text-align:center;padding:3rem;color:var(--muted)">Loading lead…</p>
+
+      <div id="leadView" style="display:none">
+        <span class="tier-badge" id="tierBadge"></span>
+        <h1 class="page-title" id="pageTitle">Malpractice lead</h1>
+        <p class="subtitle" id="subtitle"></p>
+
+        <div class="glass-panel status-banner" id="statusBanner" style="display:none"></div>
+
+        <section class="glass-panel panel" id="contactPanel">
+          <h2 class="panel-title">Client contact</h2>
+          <dl class="contact-grid">
+            <dt>Name</dt><dd id="contactName">—</dd>
+            <dt>Phone</dt><dd id="contactPhone">—</dd>
+            <dt>Best time to call</dt><dd id="contactTime">—</dd>
+            <dt>Who is asking</dt><dd id="contactWho">—</dd>
+          </dl>
+          <p class="note" id="consentNote"></p>
+        </section>
+
+        <section class="glass-panel panel">
+          <h2 class="panel-title">Case summary</h2>
+          <p id="preview" style="font-size:0.9rem;line-height:1.65"></p>
+          <div id="dimensions" style="margin-top:0.75rem"></div>
+        </section>
+
+        <section class="glass-panel panel">
+          <h2 class="panel-title">Conversation</h2>
+          <div id="transcript"></div>
+        </section>
+
+        <section class="glass-panel panel" id="actionsPanel">
+          <h2 class="panel-title">Your decision</h2>
+          <div class="actions">
+            <button class="action-btn primary" id="acceptButton" type="button">Accept lead</button>
+            <button class="action-btn secondary" id="declineButton" type="button">Decline lead</button>
+          </div>
+          <div id="declineConfirm" style="display:none;margin-top:0.75rem">
+            <p style="font-size:0.88rem">Declining this lead: <strong id="declinePolicy"></strong>.</p>
+            <div class="actions" style="margin-top:0.5rem">
+              <button class="action-btn secondary" id="confirmDecline" type="button">Yes, decline</button>
+              <button class="action-btn secondary" id="cancelDecline" type="button">Keep the lead</button>
+            </div>
+          </div>
+          <div id="actionMessage" role="status"></div>
+        </section>
+      </div>
+
+      <div id="missingView" class="glass-panel panel" style="display:none">
+        <p>The details for this lead are not on file.</p>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const CASE_TYPES = {
+      surgical_error: 'Surgical Error', misdiagnosis: 'Failure to Diagnose / Misdiagnosis', medication_error: 'Medication Error',
+      birth_injury: 'Birth Injury', anesthesia_error: 'Anesthesia Error', hospital_negligence: 'Hospital Negligence',
+      nursing_home: 'Nursing Home Neglect', dental: 'Dental Malpractice', other: 'Medical Malpractice',
+    };
+    const DIMENSIONS = [
+      ['injury_severity', 'Injury severity'], ['causation_clarity', 'Causation'], ['sol_status', 'Deadline status'],
+      ['expert_viability', 'Expert support'], ['damages_magnitude', 'Damages'],
+    ];
+
+    const params = new URLSearchParams(location.search);
+    const leadId = params.get('id');
+    const token  = params.get('token');
+    const $ = id => document.getElementById(id);
+    let lead;
+
+    const formatPhone = digits => (/^\d{10}$/.test(digits || '') ? `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}` : digits || '—');
+    const formatDate = value => (value ? new Date(value).toLocaleString('en-US', { timeZone: 'America/New_York', dateStyle: 'medium', timeStyle: 'short' }) + ' ET' : '');
+
+    function notice(text, kind) {
+      const box = document.createElement('div');
+      box.className = `notice ${kind}`;
+      box.textContent = text;
+      $('actionMessage').replaceChildren(box);
+    }
+
+    async function loadLead() {
+      try {
+        const res  = await fetch(`/api/leads/${encodeURIComponent(leadId)}?token=${encodeURIComponent(token)}`);
+        const data = await res.json();
+        if (!res.ok) { $('loadingView').textContent = data.error || 'This lead link could not be opened.'; return; }
+        lead = data;
+        $('loadingView').style.display = 'none';
+        render(data);
+      } catch {
+        $('loadingView').textContent = 'Network error — refresh the page to try again.';
+      }
+    }
+
+    function render(data) {
+      $('leadView').style.display = '';
+      const info = data.leadData || {};
+      $('tierBadge').textContent = `${data.tier || 'cold'} lead`;
+      $('pageTitle').textContent = `${CASE_TYPES[data.caseType] || 'Medical Malpractice'} lead`;
+      $('subtitle').textContent = data.status === 'pending'
+        ? `Accept or decline within ${data.daysLeft} day${data.daysLeft === 1 ? '' : 's'}. Price paid: $${Number(data.pricePaid || 0).toFixed(2)}.`
+        : `Price paid: $${Number(data.pricePaid || 0).toFixed(2)}.`;
+
+      if (!data.leadData) { $('missingView').style.display = ''; }
+
+      const contact = info.contact || {};
+      $('contactName').textContent = contact.name || '—';
+      if (contact.phone) {
+        const link = document.createElement('a');
+        link.href = `tel:+1${contact.phone}`;
+        link.textContent = formatPhone(contact.phone);
+        $('contactPhone').replaceChildren(link);
+      }
+      $('contactTime').textContent = contact.bestTime || 'No preference given';
+      $('contactWho').textContent = info.mode === 'estate' ? 'Family member / estate (wrongful death)' : 'Injured patient';
+      $('consentNote').textContent = contact.consentedAt
+        ? `The client agreed to be contacted by phone or text on ${formatDate(contact.consentedAt)}. Use these details only for this matter.`
+        : '';
+
+      $('preview').textContent = info.preview || '';
+      const rows = DIMENSIONS.filter(([key]) => info.dimensions && info.dimensions[key] != null).map(([key, label]) => {
+        const value = Math.max(0, Math.min(10, Number(info.dimensions[key]) || 0));
+        const row = document.createElement('div');
+        row.className = 'dim';
+        row.innerHTML = '<span class="dim-label"></span><div class="dim-bar"><div class="dim-fill"></div></div><span class="dim-value"></span>';
+        row.querySelector('.dim-label').textContent = label;
+        row.querySelector('.dim-fill').style.width = `${value * 10}%`;
+        row.querySelector('.dim-value').textContent = `${value}/10`;
+        return row;
+      });
+      $('dimensions').replaceChildren(...rows);
+
+      // The conversation is the client's own words: always inserted as text, never as HTML.
+      const turns = (Array.isArray(info.history) ? info.history : []).map(entry => {
+        const turn = document.createElement('div');
+        turn.className = `turn ${entry.role === 'user' ? 'turn-client' : 'turn-ai'}`;
+        const who = document.createElement('span');
+        who.className = 'turn-who';
+        who.textContent = entry.role === 'user' ? 'Client' : 'NYCMalpractice.ai';
+        turn.append(who, document.createTextNode(String(entry.content || '')));
+        return turn;
+      });
+      $('transcript').replaceChildren(...turns);
+
+      if (data.status !== 'pending') {
+        $('actionsPanel').style.display = 'none';
+        const banner = $('statusBanner');
+        banner.style.display = '';
+        banner.textContent = `This lead has been ${data.status}.`;
+      }
+      $('declinePolicy').textContent = data.declinePolicy?.message || 'see the decline policy';
+    }
+
+    async function respond(action) {
+      const buttons = document.querySelectorAll('#actionsPanel button');
+      buttons.forEach(button => { button.disabled = true; });
+      try {
+        const res  = await fetch(`/api/leads/${encodeURIComponent(leadId)}/${action}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) { notice(data.error || 'That did not work. Please try again.', 'error'); return; }
+        $('declineConfirm').style.display = 'none';
+        if (action === 'accept') {
+          notice('Lead accepted. Please contact the client promptly.', 'success');
+        } else {
+          notice(`Lead declined.${data.refundAmount ? ` Refund: $${Number(data.refundAmount).toFixed(2)}.` : ''}`, 'success');
+        }
+        document.querySelector('#actionsPanel .actions').style.display = 'none';
+      } catch {
+        notice('Network error — try again.', 'error');
+      } finally {
+        buttons.forEach(button => { button.disabled = false; });
+      }
+    }
+
+    $('acceptButton').addEventListener('click', () => respond('accept'));
+    $('declineButton').addEventListener('click', () => { $('declineConfirm').style.display = ''; });
+    $('cancelDecline').addEventListener('click', () => { $('declineConfirm').style.display = 'none'; });
+    $('confirmDecline').addEventListener('click', () => respond('decline'));
+
+    if (!leadId || !token) {
+      $('loadingView').textContent = 'This lead link is incomplete.';
+    } else {
+      loadLead();
+    }
+  </script>
+</body>
+</html>

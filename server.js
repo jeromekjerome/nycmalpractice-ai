@@ -7,13 +7,13 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { neon } from '@neondatabase/serverless';
 import { answerUserQuestion } from './ask.js';
-import { scoreLead, createAuction, deliverColdLead, getAuctionStatus, placeBid, acceptLead, declineLead, TIER_CONFIG } from './auction.js';
+import { createAuction, deliverColdLead, getAuctionStatus, placeBid, acceptLead, declineLead, notifyOperatorOfContactRequest, TIER_CONFIG } from './auction.js';
 import { registerFirm, sendVerificationCode, verifyPhoneCode, validateToken, updateFirmSubscription, getFirm, updateFirmProfile, createMagicLink } from './firms.js';
 import nodemailer from 'nodemailer';
 import { createSubscriptionCheckout, createPortalSession, constructWebhookEvent } from './stripe.js';
 import OpenAI from 'openai';
 import { buildModelList, probeAllModelChains } from './openaiModelFailover.js';
-import { APP_URL } from './site.js';
+import { APP_URL, CONTACT_CONSENT_TEXT, CONTACT_FORM_FROM_STEP } from './site.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -87,25 +87,17 @@ app.post('/api/ask', async (req, res) => {
     } catch (dbErr) { console.warn('DB log failed:', dbErr.message); }
 
     const updatedHistory = [...history, { role: 'user', content: question }, { role: 'assistant', content: result.answer }];
-    const replyDue = followUpDeadline();
-    await finishBeforeReply('saving the conversation', upsertConversation(sessionId, mode, result.caseType, updatedHistory), replyDue);
+    // A qualifying lead score is kept with the conversation. The lead goes to firms only from
+    // /api/contact, once the visitor has given contact details and agreed to be contacted.
+    const leadScore = result.leadScore ? { ...result.leadScore, scoredAt: new Date().toISOString() } : null;
+    await finishBeforeReply('saving the conversation', upsertConversation(sessionId, mode, result.caseType, updatedHistory, leadScore), followUpDeadline());
 
-    if (result.leadScore) {
-      const score    = result.leadScore;
-      const leadData = { caseType: result.caseType, mode, question, history: updatedHistory, preview: score.preview, scoredAt: new Date().toISOString() };
-
-      const alreadyProcessed = await sql`SELECT 1 FROM user_interactions WHERE session_id = ${sessionId} AND lead_email_sent = TRUE LIMIT 1`;
-      if (alreadyProcessed.length === 0) {
-        await sql`UPDATE user_interactions SET lead_email_sent = TRUE WHERE session_id = ${sessionId}`;
-        if (score.tier === 'cold') {
-          await finishBeforeReply('cold lead delivery', deliverColdLead(sessionId, result.caseType, score, leadData), replyDue);
-        } else {
-          await finishBeforeReply('auction creation', createAuction(sessionId, result.caseType, score, leadData), replyDue);
-        }
-      }
-    }
-
-    res.json({ answer: result.answer, cases: result.cases || [], caseType: result.caseType || null, caseAnalysis: result.caseAnalysis || null, leadTier: result.leadScore?.tier || null });
+    res.json({
+      answer: result.answer, cases: result.cases || [], caseType: result.caseType || null,
+      caseAnalysis: result.caseAnalysis || null, leadTier: result.leadScore?.tier || null,
+      // From the referral step on, the page offers the contact form.
+      contactForm: result.turn >= CONTACT_FORM_FROM_STEP,
+    });
   } catch (err) {
     console.error('Error in /api/ask:', err);
     res.status(500).json({ error: 'Internal server error' });
@@ -115,10 +107,62 @@ app.post('/api/ask', async (req, res) => {
 // ─── Conversation History ─────────────────────────────────────────────────────
 app.get('/api/conversations/:sessionId', async (req, res) => {
   try {
-    const [conv] = await sql`SELECT session_id, mode, case_type, history, name, phone, updated_at FROM conversations WHERE session_id = ${req.params.sessionId} LIMIT 1`;
+    const [conv] = await sql`SELECT session_id, mode, case_type, history, name, phone, contact_consent_at, updated_at FROM conversations WHERE session_id = ${req.params.sessionId} LIMIT 1`;
     if (!conv) return res.json({ history: [], name: null, phone: null });
     res.json(conv);
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ─── Contact request ──────────────────────────────────────────────────────────
+// A lead goes to law firms only from here: once the visitor has given a name and phone number in the
+// contact form and agreed to the consent text. The lead carries those details, so the firm that takes
+// it can reach the visitor.
+app.post('/api/contact', async (req, res) => {
+  const { sessionId, name, phone, bestTime, consent } = req.body || {};
+  const cleanName = typeof name === 'string' ? name.trim().replace(/\s+/g, ' ') : '';
+  const digits    = typeof phone === 'string' ? phone.replace(/\D/g, '') : '';
+  const cleanTime = typeof bestTime === 'string' ? bestTime.trim().replace(/\s+/g, ' ').slice(0, 100) : '';
+  if (typeof sessionId !== 'string' || !sessionId) return res.status(400).json({ error: 'sessionId required' });
+  if (cleanName.length < 2 || cleanName.length > 100) return res.status(400).json({ error: 'Please enter your name.' });
+  if (!(digits.length === 10 || (digits.length === 11 && digits.startsWith('1')))) return res.status(400).json({ error: 'Please enter a 10-digit phone number.' });
+  if (consent !== true) return res.status(400).json({ error: 'Please check the box to agree to be contacted.' });
+
+  try {
+    const [conv] = await sql`SELECT mode, case_type, history, lead_score FROM conversations WHERE session_id = ${sessionId} LIMIT 1`;
+    if (!conv) return res.status(404).json({ error: 'We could not find your conversation. Please send a message first.' });
+
+    const phoneNumber = digits.slice(-10);
+    const [saved] = await sql`
+      UPDATE conversations
+      SET name = ${cleanName}, phone = ${phoneNumber}, best_time = ${cleanTime || null},
+          contact_consent_at = NOW(), contact_consent_text = ${CONTACT_CONSENT_TEXT}, updated_at = NOW()
+      WHERE session_id = ${sessionId}
+      RETURNING contact_consent_at`;
+
+    const score = conv.lead_score;
+    if (score?.tier) {
+      // Once per session, as before.
+      const alreadyProcessed = await sql`SELECT 1 FROM user_interactions WHERE session_id = ${sessionId} AND lead_email_sent = TRUE LIMIT 1`;
+      if (alreadyProcessed.length === 0) {
+        await sql`UPDATE user_interactions SET lead_email_sent = TRUE WHERE session_id = ${sessionId}`;
+        const leadData = {
+          caseType: conv.case_type, mode: conv.mode, history: conv.history,
+          preview: score.preview, score: score.score, dimensions: score.dimensions, scoredAt: score.scoredAt || null,
+          contact: { name: cleanName, phone: phoneNumber, bestTime: cleanTime || null, consentedAt: saved?.contact_consent_at || null },
+        };
+        const handOff = score.tier === 'cold'
+          ? deliverColdLead(sessionId, conv.case_type, score, leadData)
+          : createAuction(sessionId, conv.case_type, score, leadData);
+        await finishBeforeReply('lead hand-off', handOff, followUpDeadline());
+      }
+    } else {
+      await finishBeforeReply('contact request notice', notifyOperatorOfContactRequest(conv.case_type, conv.mode), followUpDeadline());
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Error in /api/contact:', err);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
+  }
 });
 
 // ─── Firm Registration ────────────────────────────────────────────────────────
@@ -231,6 +275,9 @@ app.get('/api/leads/:id', async (req, res) => {
   if (lead.auction_id) {
     const [auction] = await sql`SELECT lead_data, lead_preview, quality_score, tier, score_dimensions FROM auctions WHERE id = ${lead.auction_id}`;
     fullData = { ...auction?.lead_data, preview: auction?.lead_preview, score: auction?.quality_score, tier: auction?.tier, dimensions: auction?.score_dimensions };
+  } else if (lead.lead_data) {
+    // A cold lead has no auction: the lead row keeps what the firm bought.
+    fullData = { ...lead.lead_data, tier: lead.tier };
   }
   const daysLeft     = Math.max(0, Math.ceil((new Date(lead.accept_deadline) - new Date()) / (1000 * 60 * 60 * 24)));
   const coldCount    = (tokenData.cold_decline_count || 0) + 1;
@@ -336,7 +383,7 @@ app.post('/api/reset-session', async (req, res) => {
 });
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-async function upsertConversation(sessionId, mode, caseType, history) {
+async function upsertConversation(sessionId, mode, caseType, history, leadScore = null) {
   const userText   = history.filter(h => h.role === 'user').map(h => h.content).join(' ');
   const phoneMatch = userText.match(/\b(\+?1?\s?[-.]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})\b/);
   const phone      = phoneMatch ? phoneMatch[0].replace(/[\s.-]/g, '') : null;
@@ -346,13 +393,14 @@ async function upsertConversation(sessionId, mode, caseType, history) {
   const bestTime   = timeMatch ? timeMatch[1].trim() : null;
 
   await sql`
-    INSERT INTO conversations (session_id, mode, case_type, history, name, phone, best_time, updated_at)
-    VALUES (${sessionId}, ${mode}, ${caseType}, ${JSON.stringify(history)}, ${name}, ${phone}, ${bestTime}, NOW())
+    INSERT INTO conversations (session_id, mode, case_type, history, name, phone, best_time, lead_score, updated_at)
+    VALUES (${sessionId}, ${mode}, ${caseType}, ${JSON.stringify(history)}, ${name}, ${phone}, ${bestTime}, ${leadScore ? JSON.stringify(leadScore) : null}, NOW())
     ON CONFLICT (session_id) DO UPDATE SET
       mode = EXCLUDED.mode, case_type = COALESCE(EXCLUDED.case_type, conversations.case_type),
       history = EXCLUDED.history, name = COALESCE(EXCLUDED.name, conversations.name),
       phone = COALESCE(EXCLUDED.phone, conversations.phone),
-      best_time = COALESCE(EXCLUDED.best_time, conversations.best_time), updated_at = NOW()
+      best_time = COALESCE(EXCLUDED.best_time, conversations.best_time),
+      lead_score = COALESCE(EXCLUDED.lead_score, conversations.lead_score), updated_at = NOW()
   `;
 }
 

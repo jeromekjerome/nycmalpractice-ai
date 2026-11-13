@@ -32,6 +32,7 @@ modeToggle.addEventListener('change', async () => {
 
   // Reset session for new mode
   conversationHistory = [];
+  contactShared = false;
   await fetch('/api/reset-session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId }) }).catch(() => {});
   sessionId = crypto.randomUUID();
   setCookie('malpractice_session', sessionId, 90);
@@ -84,7 +85,7 @@ async function submitQuestion() {
     mode: currentMode,
     turn_number: conversationHistory.filter(m => m.role === 'user').length + 1,
   });
-  appendMessage('user', q);
+  appendMessage('user', escHtml(q));
   input.value = '';
 
   const thinking = appendThinking();
@@ -108,6 +109,7 @@ async function submitQuestion() {
 
     if (data.cases?.length) renderCases(data.cases);
     if (data.caseAnalysis)  renderCaseAnalysis(data.caseAnalysis);
+    if (data.contactForm)   offerContactForm();
 
   } catch (err) {
     thinking.remove();
@@ -121,6 +123,50 @@ async function submitQuestion() {
 document.getElementById('userInput').addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitQuestion(); }
 });
+
+// ─── Contact form ─────────────────────────────────────────────────────────────
+// Offered from the referral step. Nothing goes to a law firm until the visitor submits it with the
+// consent box checked; the server then hands the lead off with these details.
+let contactShared = false;
+
+function offerContactForm() {
+  if (contactShared || document.querySelector('#conversation .contact-card')) return;
+  const form = document.getElementById('contactFormTemplate').content.firstElementChild.cloneNode(true);
+  form.addEventListener('submit', submitContactForm);
+  document.getElementById('conversation').appendChild(form);
+  form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+async function submitContactForm(event) {
+  event.preventDefault();
+  const form    = event.currentTarget;
+  const errorEl = form.querySelector('.contact-error');
+  const button  = form.querySelector('.contact-submit');
+  errorEl.textContent = '';
+  if (!form.elements.consent.checked) { errorEl.textContent = 'Please check the box to agree to be contacted.'; return; }
+  const body = {
+    sessionId,
+    name: form.elements.name.value,
+    phone: form.elements.phone.value,
+    bestTime: form.elements.bestTime.value,
+    consent: true,
+  };
+  button.disabled = true;
+  try {
+    const res  = await fetch('/api/contact', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) { errorEl.textContent = data.error || 'Something went wrong. Please try again.'; return; }
+    contactShared = true;
+    const done = document.createElement('div');
+    done.className = 'msg msg-ai contact-done';
+    done.textContent = 'Thank you. Your request has been received, and a qualified New York malpractice attorney may contact you.';
+    form.replaceWith(done);
+  } catch {
+    errorEl.textContent = 'Network error — please check your connection and try again.';
+  } finally {
+    button.disabled = false;
+  }
+}
 
 // ─── Render Helpers ───────────────────────────────────────────────────────────
 function appendMessage(role, html) {
@@ -242,6 +288,7 @@ function getCookie(name) {
   try {
     const res  = await fetch(`/api/conversations/${sessionId}`);
     const data = await res.json();
+    if (data.contact_consent_at) contactShared = true;
     if (!data.history?.length) return;
 
     conversationHistory = data.history;

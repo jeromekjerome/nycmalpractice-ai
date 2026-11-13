@@ -88,7 +88,7 @@ export async function answerUserQuestion({ question, mode = 'personal', sessionI
   const [completion, leadScore, caseAnalysis] = await Promise.all(parallelTasks);
   const answer = completion.choices[0].message.content;
 
-  return { answer, cases, caseType, leadScore, caseAnalysis };
+  return { answer, cases, caseType, leadScore, caseAnalysis, turn };
 }
 
 // ─── System Prompts ────────────────────────────────────────────────────────────
@@ -129,11 +129,11 @@ TURN 3: Provide a preliminary assessment covering: (1) whether the timeline appe
 
   if (turn === 4) return base + `
 
-TURN 4: Explain that malpractice cases require expert medical testimony to establish the standard of care — this is why specialist attorneys who already have medical expert networks are essential. Ask if they'd like to be connected with a qualified NYC malpractice attorney for a free consultation.`;
+TURN 4: Explain that malpractice cases require expert medical testimony to establish the standard of care — this is why specialist attorneys who already have medical expert networks are essential. Ask if they'd like to be connected with a qualified NYC malpractice attorney for a free consultation. If they would, tell them they can use the contact form below this reply; do not ask them to type their phone number into the chat.`;
 
   return base + `
 
-TURN ${turn}: Ask for their name, phone number, and best time to call so we can connect them with a qualified NYC malpractice attorney. Consultations are free and firms work on contingency.`;
+TURN ${turn}: If they want to speak with a qualified NYC malpractice attorney, invite them to use the contact form below this reply to share their name, phone number and best time to call. Never ask them to type contact details into the chat. Consultations are free and firms work on contingency. Otherwise keep answering their questions.`;
 }
 
 function buildEstatePrompt(turn, caseContext, caseType) {
@@ -172,11 +172,11 @@ TURN 3: Provide a preliminary assessment covering: (1) the 2-year wrongful death
 
   if (turn === 4) return base + `
 
-TURN 4: Explain that wrongful death malpractice claims involve both the legal system and the medical expert world simultaneously — a specialist attorney handles both. The estate needs representation promptly, especially if the 2-year deadline is approaching. Ask if they'd like a referral.`;
+TURN 4: Explain that wrongful death malpractice claims involve both the legal system and the medical expert world simultaneously — a specialist attorney handles both. The estate needs representation promptly, especially if the 2-year deadline is approaching. Ask if they'd like a referral. If they would, tell them they can use the contact form below this reply; do not ask them to type their phone number into the chat.`;
 
   return base + `
 
-TURN ${turn}: Ask for their name, phone number, and best time to call so we can connect them with a qualified NYC wrongful death / malpractice attorney. Consultations are free.`;
+TURN ${turn}: If they want to speak with a qualified NYC wrongful death / malpractice attorney, invite them to use the contact form below this reply to share their name, phone number and best time to call. Never ask them to type contact details into the chat. Consultations are free. Otherwise keep answering their questions.`;
 }
 
 // ─── Case Situation Analysis ───────────────────────────────────────────────────

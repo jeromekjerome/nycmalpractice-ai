@@ -67,6 +67,11 @@ async function setup() {
       updated_at  TIMESTAMPTZ DEFAULT NOW()
     )
   `;
+  // Columns added after the table was first created. CREATE TABLE IF NOT EXISTS never adds a column to
+  // a table that already exists, so each one is added here explicitly.
+  await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS lead_score JSONB`;               // latest qualifying lead score
+  await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS contact_consent_at TIMESTAMPTZ`; // when the visitor agreed to be contacted
+  await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS contact_consent_text TEXT`;      // the exact wording agreed to
 
   await sql`
     CREATE TABLE IF NOT EXISTS user_interactions (
@@ -128,6 +133,8 @@ async function setup() {
       created_at        TIMESTAMPTZ DEFAULT NOW()
     )
   `;
+  // A cold lead has no auction row, so the lead itself keeps what the firm bought.
+  await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_data JSONB`;
 
   console.log('Database setup complete.');
 }

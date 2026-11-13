@@ -150,6 +150,20 @@
 
   </div>
 
+  <!-- Contact form, offered from the referral step. The consent sentence must match CONTACT_CONSENT_TEXT in site.js. -->
+  <template id="contactFormTemplate">
+    <form class="contact-card" novalidate>
+      <div class="contact-title">Request a free consultation</div>
+      <p class="contact-intro">Tell us how a qualified New York malpractice attorney can reach you. Nothing about your case is sent to a law firm unless you agree below.</p>
+      <label class="contact-label">Your name<input class="contact-input" name="name" autocomplete="name" maxlength="100"></label>
+      <label class="contact-label">Phone number<input class="contact-input" name="phone" type="tel" autocomplete="tel" maxlength="20"></label>
+      <label class="contact-label">Best time to call (optional)<input class="contact-input" name="bestTime" maxlength="100" placeholder="for example, weekday mornings"></label>
+      <label class="contact-consent"><input type="checkbox" name="consent"><span>I agree that NYCMalpractice.ai may share my name, phone number, preferred time to call and this conversation with one or more licensed New York attorneys, who may contact me by phone or text message about my possible claim. Message and data rates may apply. I can withdraw this consent at any time by emailing privacy@nycmalpractice.ai.</span></label>
+      <div class="contact-error" role="alert"></div>
+      <button class="submit-btn contact-submit" type="submit">Send my request</button>
+    </form>
+  </template>
+
   <script src="script.js"></script>
 </body>
 </html>

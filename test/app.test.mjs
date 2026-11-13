@@ -36,6 +36,7 @@ const { default: app } = await import('../server.js');
 const { clearSearchCache, extractCaseType, searchMalpracticeCases } = await import('../courtlistener.js');
 const { scoreLead } = await import('../auction.js');
 const { CONVERSATION_RETENTION_DAYS } = await import('../retention.js');
+const { CONTACT_CONSENT_TEXT } = await import('../site.js');
 const { getBlogPosts, getBlogPost } = await import('../blog.js');
 const { default: blogApp } = await import('../blog-server.js');
 
@@ -422,79 +423,251 @@ test('the nightly job deletes conversations after the 90 days the privacy policy
 
 // ─── Work that must finish before the reply ───────────────────────────────────
 
-test('POST /api/ask saves the conversation and hands off the lead before it replies', async () => {
-  // On a serverless host nothing runs after the response, so both must be complete by then.
+test('POST /api/ask saves the conversation and the lead score before it replies, and sends nothing to firms', async () => {
+  // A lead goes to firms only after the contact form (see /api/contact).
   await withoutMail(async () => {
-    for (const [score, tier, handOff] of [[84, 'hot', 'auction'], [60, 'cold', 'firms']]) {
-      clearSearchCache();
-      const world = fakeWorld({ leadScore: leadScoreOf(score) });
-      const slow = slowFollowUpWorld(world, 120);
-      const server = await startServer(app);
-      try {
-        await withOutboundHttp(slow.handler, async () => {
-          const { response, body } = await postJson(server.baseUrl, '/api/ask', {
-            question: 'I found out in March that the spot on my scan was cancer.',
-            mode: 'personal',
-            sessionId: `sess-follow-up-${tier}`,
-            history: QUALIFYING_HISTORY,
-          });
-          assert.equal(response.status, 200);
-          assert.equal(body.leadTier, tier);
-          // Checked at the moment the reply arrives, with no waiting.
-          assert.ok(slow.finished.includes('conversation'), `${tier}: the conversation was not saved before the reply`);
-          assert.ok(slow.finished.includes(handOff), `${tier}: the lead hand-off had not finished before the reply`);
+    clearSearchCache();
+    const world = fakeWorld({ leadScore: leadScoreOf(84) });
+    const slow = slowFollowUpWorld(world, 120);
+    const server = await startServer(app);
+    try {
+      await withOutboundHttp(slow.handler, async () => {
+        const { response, body } = await postJson(server.baseUrl, '/api/ask', {
+          question: 'I found out in March that the spot on my scan was cancer.',
+          mode: 'personal',
+          sessionId: 'sess-score-kept',
+          history: QUALIFYING_HISTORY,
         });
-      } finally {
-        await server.close();
-      }
+        assert.equal(response.status, 200);
+        assert.equal(body.leadTier, 'hot');
+        assert.equal(body.contactForm, false, 'the contact form was offered before the referral step');
+        // Checked at the moment the reply arrives, with no waiting.
+        assert.ok(slow.finished.includes('conversation'), 'the conversation was not saved before the reply');
+      });
+      const upsert = world.calls.sql.find(call => /^INSERT INTO conversations \(session_id, mode/.test(call.query));
+      const kept = JSON.parse(upsert.params.find(param => typeof param === 'string' && param.startsWith('{"viable"')));
+      assert.equal(kept.tier, 'hot');
+      assert.ok(kept.scoredAt, 'the score is kept with the time it was given');
+      assert.ok(!world.calls.sql.some(call => /INSERT INTO auctions|FROM firms WHERE active/.test(call.query)), 'a lead went to firms without the visitor asking');
+    } finally {
+      await server.close();
     }
   });
 });
 
-test('POST /api/ask still replies when the lead hand-off outlasts the cap or fails', async () => {
+test('POST /api/ask still replies when saving the conversation fails', async () => {
+  clearSearchCache();
+  const world = fakeWorld({ answer: `The scan should have been reported. ${DISCLAIMER}` });
+  const failing = async (url, init) => {
+    if (url.endsWith('/sql') && /INSERT INTO conversations \(session_id, mode/.test(JSON.parse(init.body).query)) {
+      return jsonResponse({ message: 'database unavailable' }, 500);
+    }
+    return world.handler(url, init);
+  };
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(failing, async () => {
+      const { response, body } = await postJson(server.baseUrl, '/api/ask', {
+        question: 'I found out in March that the spot on my scan was cancer.',
+        mode: 'personal',
+        sessionId: 'sess-save-failing',
+        history: QUALIFYING_HISTORY,
+      });
+      assert.equal(response.status, 200);
+      assert.ok(body.answer.includes('The scan should have been reported.'));
+    });
+  } finally {
+    await server.close();
+  }
+});
+
+// ─── Contact form and consent ─────────────────────────────────────────────────
+
+const JSONB = 3802;
+const TEXT = 25;
+const INT = 23;
+const TIMESTAMPTZ = 1184;
+
+function rowsResponse(fields, rows, command = 'SELECT') {
+  return jsonResponse({ fields: fields.map(([name, dataTypeID]) => ({ name, dataTypeID })), rows, command, rowCount: rows.length, rowAsArray: true });
+}
+
+const CONTACT_HISTORY = [
+  ...QUALIFYING_HISTORY,
+  { role: 'user', content: 'Yes, I would like to talk to a lawyer.' },
+  { role: 'assistant', content: 'You can use the contact form below this reply.' },
+];
+
+/** The outside world for /api/contact: a saved conversation, optional firms, and the lead tables. */
+function contactWorld({ leadScore = null, alreadyHandedOff = false, firms = [], conversation = true } = {}) {
+  const world = fakeWorld();
+  const handler = async (url, init) => {
+    if (url.endsWith('/sql')) {
+      const { query, params } = JSON.parse(init.body);
+      const q = query.replace(/\s+/g, ' ').trim();
+      const record = () => world.calls.sql.push({ query: q, params });
+      if (/^SELECT mode, case_type, history, lead_score FROM conversations/.test(q)) {
+        record();
+        return conversation
+          ? rowsResponse([['mode', TEXT], ['case_type', TEXT], ['history', JSONB], ['lead_score', JSONB]],
+            [['personal', 'misdiagnosis', JSON.stringify(CONTACT_HISTORY), leadScore ? JSON.stringify(leadScore) : null]])
+          : rowsResponse([], []);
+      }
+      if (/^UPDATE conversations SET name/.test(q)) {
+        record();
+        return rowsResponse([['contact_consent_at', TIMESTAMPTZ]], [['2026-11-14 10:00:00+00']], 'UPDATE');
+      }
+      if (/^SELECT 1 FROM user_interactions/.test(q)) {
+        record();
+        return alreadyHandedOff ? rowsResponse([['flag', INT]], [['1']]) : rowsResponse([], []);
+      }
+      if (/FROM firms WHERE active/.test(q)) {
+        record();
+        return rowsResponse([['id', INT], ['name', TEXT], ['email', TEXT], ['stripe_customer_id', TEXT], ['stripe_payment_method_id', TEXT]],
+          firms.map(firm => [String(firm.id), firm.name, firm.email, null, null]));
+      }
+      if (/^INSERT INTO leads/.test(q)) {
+        record();
+        return rowsResponse([['id', INT]], [['501']], 'INSERT');
+      }
+    }
+    return world.handler(url, init);
+  };
+  return { calls: world.calls, handler };
+}
+
+const CONTACT = { name: '  Jane   Roe ', phone: '(555) 123-4567', bestTime: 'weekday mornings', consent: true };
+const leadDataOf = call => JSON.parse(call.params.find(param => typeof param === 'string' && param.startsWith('{"caseType"')));
+
+test('POST /api/contact checks the name, the phone number and the consent', async () => {
+  const world = contactWorld({ leadScore: leadScoreOf(84) });
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(world.handler, async () => {
+      for (const [change, error] of [
+        [{ name: '' }, 'Please enter your name.'],
+        [{ phone: '555-1234' }, 'Please enter a 10-digit phone number.'],
+        [{ consent: false }, 'Please check the box to agree to be contacted.'],
+        [{ consent: 'yes' }, 'Please check the box to agree to be contacted.'],
+      ]) {
+        const { response, body } = await postJson(server.baseUrl, '/api/contact', { sessionId: 'sess-contact-checks', ...CONTACT, ...change });
+        assert.equal(response.status, 400, JSON.stringify(change));
+        assert.equal(body.error, error);
+      }
+    });
+    assert.ok(!world.calls.sql.some(call => /UPDATE conversations SET name/.test(call.query)), 'invalid details were saved');
+  } finally {
+    await server.close();
+  }
+
+  const empty = contactWorld({ conversation: false });
+  const again = await startServer(app);
+  try {
+    await withOutboundHttp(empty.handler, async () => {
+      const { response } = await postJson(again.baseUrl, '/api/contact', { sessionId: 'sess-no-conversation', ...CONTACT });
+      assert.equal(response.status, 404);
+    });
+  } finally {
+    await again.close();
+  }
+});
+
+test('POST /api/contact with consent hands the lead off with the contact details before it replies', async () => {
+  await withoutMail(async () => {
+    // A hot lead opens an auction; the winner will see the details.
+    const hot = contactWorld({ leadScore: { ...leadScoreOf(84), tier: 'hot', reserve: 200, scoredAt: '2026-11-14T09:59:00Z' } });
+    const slowHot = slowFollowUpWorld(hot, 120);
+    let server = await startServer(app);
+    try {
+      await withOutboundHttp(slowHot.handler, async () => {
+        const { response, body } = await postJson(server.baseUrl, '/api/contact', { sessionId: 'sess-contact-hot', ...CONTACT });
+        assert.equal(response.status, 200);
+        assert.deepEqual(body, { ok: true });
+        assert.ok(slowHot.finished.includes('auction'), 'the auction had not been created before the reply');
+      });
+    } finally {
+      await server.close();
+    }
+    const saved = hot.calls.sql.find(call => /^UPDATE conversations SET name/.test(call.query));
+    assert.ok(saved.params.includes('Jane Roe'));
+    assert.ok(saved.params.includes('5551234567'));
+    assert.ok(saved.params.includes(CONTACT_CONSENT_TEXT), 'the consent text stored is not the one the page shows');
+    const auction = leadDataOf(hot.calls.sql.find(call => /INSERT INTO auctions/.test(call.query)));
+    assert.deepEqual(auction.contact, { name: 'Jane Roe', phone: '5551234567', bestTime: 'weekday mornings', consentedAt: '2026-11-14T10:00:00.000Z' });
+    assert.equal(auction.history.length, CONTACT_HISTORY.length);
+    assert.equal(auction.preview, 'Delayed cancer diagnosis after a misread scan.');
+
+    // A cold lead goes to each matching firm, and the lead row keeps what the firm bought.
+    const cold = contactWorld({ leadScore: { ...leadScoreOf(60), tier: 'cold', reserve: 25 }, firms: [{ id: 7, name: 'Test Firm', email: 'firm@example.test' }] });
+    server = await startServer(app);
+    try {
+      await withOutboundHttp(cold.handler, async () => {
+        const { response } = await postJson(server.baseUrl, '/api/contact', { sessionId: 'sess-contact-cold', ...CONTACT });
+        assert.equal(response.status, 200);
+      });
+    } finally {
+      await server.close();
+    }
+    const lead = leadDataOf(cold.calls.sql.find(call => /^INSERT INTO leads/.test(call.query)));
+    assert.equal(lead.contact.phone, '5551234567');
+    assert.equal(lead.score, 60);
+  });
+});
+
+test('POST /api/contact sends nothing to firms without a qualifying score or a second time', async () => {
+  await withoutMail(async () => {
+    for (const [label, options] of [
+      ['no qualifying score', { leadScore: null }],
+      ['already handed off', { leadScore: leadScoreOf(84), alreadyHandedOff: true }],
+    ]) {
+      const world = contactWorld(options);
+      const server = await startServer(app);
+      try {
+        await withOutboundHttp(world.handler, async () => {
+          const { response, body } = await postJson(server.baseUrl, '/api/contact', { sessionId: 'sess-contact-' + label.replace(/ /g, '-'), ...CONTACT });
+          assert.equal(response.status, 200, label);
+          assert.deepEqual(body, { ok: true });
+        });
+      } finally {
+        await server.close();
+      }
+      assert.ok(world.calls.sql.some(call => /^UPDATE conversations SET name/.test(call.query)), `${label}: the request was not recorded`);
+      assert.ok(!world.calls.sql.some(call => /INSERT INTO (auctions|leads)/.test(call.query)), `${label}: a lead went to firms`);
+    }
+  });
+});
+
+test('POST /api/contact still replies when the lead hand-off outlasts the cap or fails', async () => {
   const previousCap = process.env.ASK_FOLLOW_UP_WORK_CAP_MS;
   process.env.ASK_FOLLOW_UP_WORK_CAP_MS = '100';
   const server = await startServer(app);
   try {
     await withoutMail(async () => {
       // 1) A hand-off that takes far longer than the cap: the reply does not wait for it.
-      clearSearchCache();
-      const world = fakeWorld({ leadScore: leadScoreOf(84) });
+      const world = contactWorld({ leadScore: { ...leadScoreOf(84), tier: 'hot', reserve: 200 } });
       const slow = slowFollowUpWorld(world, kind => (kind === 'auction' ? 1500 : 0));
       await withOutboundHttp(slow.handler, async () => {
-        const { response, body } = await postJson(server.baseUrl, '/api/ask', {
-          question: 'I found out in March that the spot on my scan was cancer.',
-          mode: 'personal',
-          sessionId: 'sess-follow-up-capped',
-          history: QUALIFYING_HISTORY,
-        });
+        const { response, body } = await postJson(server.baseUrl, '/api/contact', { sessionId: 'sess-contact-capped', ...CONTACT });
         assert.equal(response.status, 200);
-        assert.equal(body.leadTier, 'hot');
+        assert.deepEqual(body, { ok: true });
         assert.ok(slow.started.includes('auction'), 'the hand-off was started');
         assert.ok(!slow.finished.includes('auction'), 'the reply waited for a hand-off that outlasted the cap');
-        assert.ok(slow.finished.includes('conversation'));
         // Let the slow statement finish inside the fake world before it is torn down.
         assert.ok(await waitFor(() => slow.finished.includes('auction'), 5000));
       });
 
-      // 2) A hand-off and a conversation save that fail: the visitor still gets the answer.
-      clearSearchCache();
-      const failingWorld = fakeWorld({ leadScore: leadScoreOf(84), answer: `The scan should have been reported. ${DISCLAIMER}` });
+      // 2) A hand-off that fails: the request is still recorded and the visitor still gets an answer.
+      const failingWorld = contactWorld({ leadScore: { ...leadScoreOf(84), tier: 'hot', reserve: 200 } });
       const failing = async (url, init) => {
-        if (url.endsWith('/sql') && /INSERT INTO (auctions|conversations \(session_id, mode)/.test(JSON.parse(init.body).query)) {
+        if (url.endsWith('/sql') && /INSERT INTO auctions/.test(JSON.parse(init.body).query)) {
           return jsonResponse({ message: 'database unavailable' }, 500);
         }
         return failingWorld.handler(url, init);
       };
       await withOutboundHttp(failing, async () => {
-        const { response, body } = await postJson(server.baseUrl, '/api/ask', {
-          question: 'I found out in March that the spot on my scan was cancer.',
-          mode: 'personal',
-          sessionId: 'sess-follow-up-failing',
-          history: QUALIFYING_HISTORY,
-        });
+        const { response, body } = await postJson(server.baseUrl, '/api/contact', { sessionId: 'sess-contact-failing', ...CONTACT });
         assert.equal(response.status, 200);
-        assert.ok(body.answer.includes('The scan should have been reported.'));
+        assert.deepEqual(body, { ok: true });
       });
     });
   } finally {
@@ -502,6 +675,47 @@ test('POST /api/ask still replies when the lead hand-off outlasts the cap or fai
     if (previousCap === undefined) delete process.env.ASK_FOLLOW_UP_WORK_CAP_MS;
     else process.env.ASK_FOLLOW_UP_WORK_CAP_MS = previousCap;
   }
+});
+
+test('GET /api/leads/:id shows a cold lead from the data kept on the lead', async () => {
+  const leadData = { caseType: 'misdiagnosis', mode: 'personal', history: CONTACT_HISTORY, preview: 'Delayed cancer diagnosis.', score: 60, contact: { name: 'Jane Roe', phone: '5551234567', bestTime: null, consentedAt: '2026-11-14T10:00:00.000Z' } };
+  const handler = async (url, init) => {
+    const q = JSON.parse(init.body).query.replace(/\s+/g, ' ');
+    if (/FROM firm_tokens/.test(q)) {
+      return rowsResponse([['firm_id', INT], ['name', TEXT], ['cold_decline_count', INT], ['auction_decline_count', INT]], [['7', 'Test Firm', '0', '0']]);
+    }
+    if (/FROM leads WHERE id/.test(q)) {
+      return rowsResponse(
+        [['id', INT], ['status', TEXT], ['case_type', TEXT], ['tier', TEXT], ['price_paid', 1700], ['accept_deadline', TIMESTAMPTZ], ['auction_id', INT], ['lead_data', JSONB]],
+        [['501', 'pending', 'misdiagnosis', 'cold', '25.00', '2030-01-01 00:00:00+00', null, JSON.stringify(leadData)]],
+      );
+    }
+    return jsonResponse(EMPTY_ROWS);
+  };
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(handler, async () => {
+      const response = await fetch(`${server.baseUrl}/api/leads/501?token=firm-token`);
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.tier, 'cold');
+      assert.equal(body.leadData.contact.name, 'Jane Roe');
+      assert.equal(body.leadData.history.length, CONTACT_HISTORY.length);
+      assert.equal(body.leadData.tier, 'cold');
+    });
+  } finally {
+    await server.close();
+  }
+});
+
+test('the contact form shows the consent text the server stores, and the policy matches the flow', () => {
+  const page = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
+  assert.ok(page.includes(CONTACT_CONSENT_TEXT), 'the page shows different consent wording from the one stored');
+  const policy = readFileSync(new URL('../public/privacy.html', import.meta.url), 'utf8').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+  assert.match(policy, /Nothing about your case goes to a law firm unless you use the contact form and agree to be contacted/);
+  assert.match(policy, /Firms pay us for these referrals/);
+  assert.doesNotMatch(policy, /implicit consent/);
+  assert.doesNotMatch(policy, /We do not sell your data\./);
 });
 
 // ─── Case law search ──────────────────────────────────────────────────────────
@@ -716,7 +930,7 @@ test('each visitor message gets the next step of the conversation script', async
     [1, 'TURN 2:'],
     [2, 'TURN 3:'],
     [3, 'TURN 4:'],
-    [4, 'TURN 5: Ask for their name'],
+    [4, 'TURN 5: If they want to speak with a qualified NYC malpractice attorney'],
   ];
   for (const [earlier, expected] of steps) {
     clearSearchCache();
@@ -726,21 +940,27 @@ test('each visitor message gets the next step of the conversation script', async
       { role: 'assistant', content: `Reply ${i + 1}.` },
     ]).flat();
     const server = await startServer(app);
+    let contactForm;
     try {
       await withOutboundHttp(world.handler, async () => {
-        const { response } = await postJson(server.baseUrl, '/api/ask', {
+        const { response, body } = await postJson(server.baseUrl, '/api/ask', {
           question: `Visitor message ${earlier + 1}.`,
           mode: 'personal',
           sessionId: `sess-step-${earlier + 1}`,
           history,
         });
         assert.equal(response.status, 200);
+        contactForm = body.contactForm;
       });
       const system = world.calls.openai.find(call => call.kind === 'answer').request.messages[0].content;
       assert.ok(system.includes(expected), `visitor message ${earlier + 1} did not get ${expected}`);
       // Lead scoring starts with the second message; the case analysis comes with the assessment step.
       assert.equal(world.calls.openai.some(call => call.kind === 'scoreLead'), earlier + 1 >= 2, `lead scoring on visitor message ${earlier + 1}`);
       assert.equal(world.calls.openai.some(call => call.kind === 'caseAnalysis'), earlier + 1 >= 3, `case analysis on visitor message ${earlier + 1}`);
+      // The contact form is offered from the referral step, and the AI points to it instead of asking for a number.
+      assert.equal(contactForm, earlier + 1 >= 4, `contact form on visitor message ${earlier + 1}`);
+      assert.equal(system.includes('contact form below this reply'), earlier + 1 >= 4, `form mentioned on visitor message ${earlier + 1}`);
+      assert.ok(!system.includes('Ask for their name, phone number'), `visitor message ${earlier + 1} is asked to type contact details`);
     } finally {
       await server.close();
     }

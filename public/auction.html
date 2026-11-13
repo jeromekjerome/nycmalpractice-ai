@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex">
+  <title>Lead Auction — NYCMalpractice.ai</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .firm-page { max-width: 780px; margin: 0 auto; }
+    .tier-badge { display: inline-block; padding: 4px 12px; border-radius: 99px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.75rem; border: 1px solid currentColor; }
+    .page-title { font-family: 'Playfair Display', serif; font-size: 1.6rem; margin-bottom: 0.3rem; }
+    .stat-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; margin: 1rem 0; }
+    @media (max-width: 640px) { .stat-row, .two-col { grid-template-columns: 1fr; } }
+    .stat-box { background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 10px; padding: 0.85rem; text-align: center; }
+    .stat-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); margin-bottom: 0.3rem; }
+    .stat-value { font-size: 1.3rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .stat-value.accent { color: var(--accent); }
+    .stat-value.urgent { color: #e55c5c; }
+    .two-col { display: grid; grid-template-columns: 1fr 280px; gap: 1rem; }
+    .panel { padding: 1.25rem; margin-bottom: 1rem; }
+    .panel-title { font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 0.75rem; }
+    .note { font-size: 0.75rem; color: var(--muted); font-style: italic; margin-top: 0.75rem; }
+    .dim { display: flex; align-items: center; gap: 0.6rem; font-size: 0.8rem; margin-bottom: 0.5rem; }
+    .dim-label { width: 110px; color: var(--muted); }
+    .dim-bar { flex: 1; height: 6px; background: rgba(255,255,255,0.07); border-radius: 99px; overflow: hidden; }
+    .dim-fill { height: 100%; background: var(--accent); border-radius: 99px; }
+    .dim-value { width: 34px; text-align: right; color: var(--muted); font-size: 0.75rem; }
+    .bid-row { display: flex; gap: 0.5rem; margin-top: 0.75rem; }
+    .bid-input { flex: 1; padding: 0.7rem 1rem; background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font: inherit; font-size: 1rem; font-weight: 600; }
+    .bid-input:focus { outline: none; border-color: var(--accent); }
+    .action-btn { padding: 0.7rem 1.25rem; background: linear-gradient(135deg, var(--accent2), var(--accent)); border: none; border-radius: 8px; color: #fff; font: inherit; font-size: 0.9rem; font-weight: 600; cursor: pointer; }
+    .action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .leading { margin-bottom: 0.75rem; padding: 6px 12px; border-radius: 99px; border: 1px solid rgba(58,158,104,0.4); color: var(--success); font-size: 0.78rem; font-weight: 600; text-align: center; }
+    .history-row { display: flex; justify-content: space-between; font-size: 0.8rem; padding: 0.4rem 0; border-bottom: 1px solid var(--border); color: var(--muted); }
+    .history-row strong { color: var(--text); }
+    .notice { margin-top: 0.75rem; padding: 0.75rem 1rem; border-radius: 8px; font-size: 0.85rem; }
+    .notice.error { background: rgba(229,92,92,0.1); border: 1px solid rgba(229,92,92,0.3); color: #e55c5c; }
+    .notice.success { background: rgba(58,158,104,0.1); border: 1px solid rgba(58,158,104,0.3); color: var(--success); }
+    .closed { padding: 1.5rem; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="bg-blob blob-1"></div>
+  <div class="bg-blob blob-2"></div>
+
+  <div class="layout">
+    <header class="header">
+      <div class="logo"><span class="logo-icon">⚕️</span><span class="logo-text">NYCMalpractice.ai</span></div>
+      <span class="beta-badge" id="firmLabel">Loading…</span>
+    </header>
+
+    <main class="firm-page">
+      <p id="loadingView" style="text-align:center;padding:3rem;color:var(--muted)">Loading auction…</p>
+
+      <div id="auctionView" style="display:none">
+        <span class="tier-badge" id="tierBadge"></span>
+        <h1 class="page-title" id="pageTitle">Malpractice Lead Auction</h1>
+
+        <div class="stat-row">
+          <div class="stat-box"><div class="stat-label">Current bid</div><div class="stat-value accent" id="currentBid">—</div></div>
+          <div class="stat-box"><div class="stat-label">Quality score</div><div class="stat-value" id="qualityScore">—</div></div>
+          <div class="stat-box"><div class="stat-label">Time left</div><div class="stat-value" id="countdown">—</div></div>
+        </div>
+
+        <div class="two-col">
+          <div>
+            <section class="glass-panel panel">
+              <h2 class="panel-title">Case summary</h2>
+              <p id="preview" style="font-size:0.9rem;line-height:1.65"></p>
+              <p class="note">The client's name, phone number and conversation go only to the winning firm.</p>
+            </section>
+
+            <section class="glass-panel panel">
+              <h2 class="panel-title">Place your bid</h2>
+              <div class="leading" id="leadingBadge" style="display:none">You are currently the highest bidder</div>
+              <p style="font-size:0.82rem;color:var(--muted)">Minimum next bid: <strong id="minBid" style="color:var(--text)">—</strong></p>
+              <form class="bid-row" id="bidForm">
+                <input class="bid-input" type="number" id="bidAmount" min="0" step="1" aria-label="Bid amount in dollars">
+                <button class="action-btn" type="submit" id="bidButton">Bid now</button>
+              </form>
+              <div id="bidMessage" role="status"></div>
+              <div id="bidHistory" style="margin-top:1rem"></div>
+            </section>
+          </div>
+
+          <section class="glass-panel panel">
+            <h2 class="panel-title">Score breakdown</h2>
+            <div id="dimensions"></div>
+          </section>
+        </div>
+      </div>
+
+      <div id="closedView" class="glass-panel closed" style="display:none">
+        <h2 id="closedTitle">Auction closed</h2>
+        <p id="closedMessage" style="color:var(--muted);margin-top:0.5rem"></p>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const CASE_TYPES = {
+      surgical_error: 'Surgical Error', misdiagnosis: 'Failure to Diagnose / Misdiagnosis', medication_error: 'Medication Error',
+      birth_injury: 'Birth Injury', anesthesia_error: 'Anesthesia Error', hospital_negligence: 'Hospital Negligence',
+      nursing_home: 'Nursing Home Neglect', dental: 'Dental Malpractice', other: 'Medical Malpractice',
+    };
+    const DIMENSIONS = [
+      ['injury_severity', 'Injury severity'], ['causation_clarity', 'Causation'], ['sol_status', 'Deadline status'],
+      ['expert_viability', 'Expert support'], ['damages_magnitude', 'Damages'],
+    ];
+
+    const params    = new URLSearchParams(location.search);
+    const auctionId = params.get('id');
+    const token     = params.get('token');
+    const $ = id => document.getElementById(id);
+    let secsLeft = 0;
+    let poll;
+
+    const money = value => `$${Number(value || 0).toFixed(2)}`;
+
+    function notice(text, kind) {
+      const box = document.createElement('div');
+      box.className = `notice ${kind}`;
+      box.textContent = text;
+      $('bidMessage').replaceChildren(box);
+    }
+
+    async function loadAuction() {
+      try {
+        const res  = await fetch(`/api/auctions/${encodeURIComponent(auctionId)}?token=${encodeURIComponent(token)}`);
+        const data = await res.json();
+        if (!res.ok) {
+          $('loadingView').textContent = data.error || 'This auction link could not be opened.';
+          clearInterval(poll);
+          return;
+        }
+        $('loadingView').style.display = 'none';
+        $('firmLabel').textContent = data.firmName || 'Your firm';
+        if (data.status !== 'open') { clearInterval(poll); showClosed(data); return; }
+        render(data);
+      } catch {
+        $('loadingView').textContent = 'Network error — refresh the page to try again.';
+      }
+    }
+
+    function render(data) {
+      $('auctionView').style.display = '';
+      const config = data.tierConfig || data.config || {};
+      const badge = $('tierBadge');
+      badge.textContent = `${config.label || data.tier} lead`;
+      badge.style.color = config.color || 'var(--accent)';
+      $('pageTitle').textContent = `${CASE_TYPES[data.caseType] || 'Medical Malpractice'} — lead auction`;
+      $('preview').textContent = data.preview || '';
+      $('currentBid').textContent = money(data.currentBid);
+      $('qualityScore').textContent = data.qualityScore != null ? `${data.qualityScore}/100` : '—';
+      const minBid = Number(data.currentBid || 0) + 1;
+      $('minBid').textContent = money(minBid);
+      const input = $('bidAmount');
+      input.min = minBid;
+      if (!input.value || Number(input.value) < minBid) input.value = minBid;
+      $('leadingBadge').style.display = data.isLeading ? '' : 'none';
+      secsLeft = Number(data.secsLeft || 0);
+      tick();
+
+      const rows = DIMENSIONS.filter(([key]) => data.dimensions && data.dimensions[key] != null).map(([key, label]) => {
+        const value = Math.max(0, Math.min(10, Number(data.dimensions[key]) || 0));
+        const row = document.createElement('div');
+        row.className = 'dim';
+        row.innerHTML = '<span class="dim-label"></span><div class="dim-bar"><div class="dim-fill"></div></div><span class="dim-value"></span>';
+        row.querySelector('.dim-label').textContent = label;
+        row.querySelector('.dim-fill').style.width = `${value * 10}%`;
+        row.querySelector('.dim-value').textContent = `${value}/10`;
+        return row;
+      });
+      $('dimensions').replaceChildren(...rows);
+
+      const bids = (data.recentBids || []).slice(0, 8).map(bid => {
+        const row = document.createElement('div');
+        row.className = 'history-row';
+        row.innerHTML = '<span>Anonymous bidder</span><strong></strong>';
+        row.querySelector('strong').textContent = money(bid.amount);
+        return row;
+      });
+      $('bidHistory').replaceChildren(...bids);
+    }
+
+    function showClosed(data) {
+      $('auctionView').style.display = 'none';
+      $('closedView').style.display = '';
+      if (data.status === 'cancelled') {
+        $('closedTitle').textContent = 'No bids — auction cancelled';
+        $('closedMessage').textContent = 'This lead received no bids.';
+      } else {
+        $('closedTitle').textContent = 'Auction closed';
+        $('closedMessage').textContent = 'The winning firm receives the lead details by email.';
+      }
+    }
+
+    function tick() {
+      const h = Math.floor(secsLeft / 3600);
+      const m = Math.floor((secsLeft % 3600) / 60);
+      const s = secsLeft % 60;
+      const el = $('countdown');
+      el.textContent = h > 0 ? `${h}h ${String(m).padStart(2, '0')}m` : `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+      el.classList.toggle('urgent', secsLeft < 300);
+    }
+
+    $('bidForm').addEventListener('submit', async event => {
+      event.preventDefault();
+      const amount = Number($('bidAmount').value);
+      if (!amount || amount <= 0) { notice('Enter a valid bid amount.', 'error'); return; }
+      const button = $('bidButton');
+      button.disabled = true;
+      try {
+        const res  = await fetch(`/api/auctions/${encodeURIComponent(auctionId)}/bid`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, amount }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          notice(`Bid of ${money(amount)} placed. You are the highest bidder.`, 'success');
+          loadAuction();
+        } else {
+          notice(data.error || 'The bid was not accepted.', 'error');
+        }
+      } catch {
+        notice('Network error — try again.', 'error');
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    if (!auctionId || !token) {
+      $('loadingView').textContent = 'This auction link is incomplete.';
+    } else {
+      loadAuction();
+      poll = setInterval(loadAuction, 6000);
+      setInterval(() => { if (secsLeft > 0) { secsLeft -= 1; tick(); } }, 1000);
+    }
+  </script>
+</body>
+</html>

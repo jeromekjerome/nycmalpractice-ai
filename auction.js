@@ -100,8 +100,8 @@ export async function deliverColdLead(sessionId, caseType, scoreData, leadData) 
       }
       const deadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
       const [lead] = await sql`
-        INSERT INTO leads (firm_id, session_id, case_type, tier, price_paid, stripe_charge_id, accept_deadline)
-        VALUES (${firm.id}, ${sessionId}, ${caseType}, 'cold', ${TIER_CONFIG.cold.reserve}, ${chargeId}, ${deadline})
+        INSERT INTO leads (firm_id, session_id, case_type, tier, price_paid, stripe_charge_id, accept_deadline, lead_data)
+        VALUES (${firm.id}, ${sessionId}, ${caseType}, 'cold', ${TIER_CONFIG.cold.reserve}, ${chargeId}, ${deadline}, ${JSON.stringify(leadData)})
         RETURNING id
       `;
       const token = await createMagicLink(firm.id, { leadId: lead.id, expiresInHours: 72 });
@@ -140,6 +140,19 @@ async function sendAdminLeadAlert(type, caseType, scoreData, leadData) {
   `;
   if (!t) { console.log(`[EMAIL MOCK] Admin alert → ${adminEmail}`); return; }
   await t.sendMail({ from: process.env.SMTP_USER, to: adminEmail, subject: `⚠️ Malpractice Lead Dropped — No Active Firms (${scoreData.tier} / ${caseType})`, html }).catch(console.error);
+}
+
+// A visitor asked to be contacted, but their conversation never produced a qualifying lead score, so
+// nothing went to firms. The operator is told, without the visitor's details (they are saved with the
+// conversation), so someone can decide whether to follow up.
+export async function notifyOperatorOfContactRequest(caseType, mode) {
+  const adminEmail = process.env.NOTIFICATION_EMAIL;
+  if (!adminEmail) return;
+  const t = getTransporter();
+  const who = mode === 'estate' ? 'family / estate' : 'injured patient';
+  const html = `<div style="font-family:sans-serif;max-width:640px;margin:auto"><h2 style="color:#9e3a5a">Consultation request: not a qualified lead</h2><p>A visitor asked to be contacted and agreed to be contacted, but the conversation did not score as a qualified lead, so it was not sent to any firm.</p><p>Case type: ${caseType || 'unknown'} · ${who}</p><p>The contact details are saved with the conversation.</p></div>`;
+  if (!t) { console.log(`[EMAIL MOCK] Contact request notice → ${adminEmail}`); return; }
+  await t.sendMail({ from: process.env.SMTP_USER, to: adminEmail, subject: 'Consultation request: not a qualified lead', html }).catch(console.error);
 }
 
 export async function placeBid(auctionId, firmId, amount) {

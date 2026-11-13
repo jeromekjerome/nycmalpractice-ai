@@ -36,6 +36,8 @@ const { default: app } = await import('../server.js');
 const { clearSearchCache, extractCaseType, searchMalpracticeCases } = await import('../courtlistener.js');
 const { scoreLead } = await import('../auction.js');
 const { CONVERSATION_RETENTION_DAYS } = await import('../retention.js');
+const { getBlogPosts, getBlogPost } = await import('../blog.js');
+const { default: blogApp } = await import('../blog-server.js');
 
 async function getJsonIfPossible(response) {
   const contentType = response.headers.get('content-type') || '';
@@ -703,4 +705,94 @@ test('the privacy policy describes the analytics and outside services the pages 
   assert.doesNotMatch(policy, /We use a single session cookie/);
   assert.doesNotMatch(policy, /No personal data is sent to CourtListener/);
   assert.match(policy, /our server sends CourtListener a few search keywords based on your conversation/);
+});
+
+// ─── Conversation steps ───────────────────────────────────────────────────────
+
+test('each visitor message gets the next step of the conversation script', async () => {
+  // The history holds the AI's replies too, so the step is the number of the visitor's message.
+  const steps = [
+    [0, 'TURN 1:'],
+    [1, 'TURN 2:'],
+    [2, 'TURN 3:'],
+    [3, 'TURN 4:'],
+    [4, 'TURN 5: Ask for their name'],
+  ];
+  for (const [earlier, expected] of steps) {
+    clearSearchCache();
+    const world = fakeWorld();
+    const history = Array.from({ length: earlier }, (_, i) => [
+      { role: 'user', content: `Visitor message ${i + 1}.` },
+      { role: 'assistant', content: `Reply ${i + 1}.` },
+    ]).flat();
+    const server = await startServer(app);
+    try {
+      await withOutboundHttp(world.handler, async () => {
+        const { response } = await postJson(server.baseUrl, '/api/ask', {
+          question: `Visitor message ${earlier + 1}.`,
+          mode: 'personal',
+          sessionId: `sess-step-${earlier + 1}`,
+          history,
+        });
+        assert.equal(response.status, 200);
+      });
+      const system = world.calls.openai.find(call => call.kind === 'answer').request.messages[0].content;
+      assert.ok(system.includes(expected), `visitor message ${earlier + 1} did not get ${expected}`);
+      // Lead scoring starts with the second message; the case analysis comes with the assessment step.
+      assert.equal(world.calls.openai.some(call => call.kind === 'scoreLead'), earlier + 1 >= 2, `lead scoring on visitor message ${earlier + 1}`);
+      assert.equal(world.calls.openai.some(call => call.kind === 'caseAnalysis'), earlier + 1 >= 3, `case analysis on visitor message ${earlier + 1}`);
+    } finally {
+      await server.close();
+    }
+  }
+});
+
+// ─── Blog ─────────────────────────────────────────────────────────────────────
+
+test('the blog serves only New York medical malpractice articles, under the site name', async () => {
+  const posts = getBlogPosts();
+  assert.deepEqual(posts.map(post => post.slug).sort(), [
+    'how-long-medical-malpractice-case-nyc',
+    'what-is-medical-malpractice-new-york-state',
+  ]);
+  for (const { slug } of posts) {
+    const post = getBlogPost(slug);
+    const text = `${post.title} ${post.description} ${post.html}`;
+    assert.doesNotMatch(text, /Louisiana|Baton Rouge|New Orleans|car accident|construction accident|slip and fall/i, `${slug} is off topic`);
+    assert.doesNotMatch(text, /LegalisLaw|legalislaw-hub\.com|\[APP_URL\]/, `${slug} carries another site's byline, a dead link or a placeholder`);
+    assert.equal(post.author, 'NYCMalpractice.ai Editorial');
+  }
+
+  const server = await startServer(blogApp);
+  try {
+    const index = await (await fetch(`${server.baseUrl}/blog`)).text();
+    assert.match(index, /<title>Legal Blog &#8212; NYCMalpractice\.ai<\/title>/);
+    assert.ok(index.includes(`<link rel="canonical" href="${process.env.APP_URL}/blog">`), 'the blog index names another site as its canonical address');
+    assert.doesNotMatch(index, /legalislaw/i);
+    for (const { slug } of posts) {
+      const page = await (await fetch(`${server.baseUrl}/blog/${slug}`)).text();
+      assert.ok(page.includes(`${process.env.APP_URL}/blog/${slug}`), `${slug} names another site as its canonical address`);
+      assert.doesNotMatch(page, /legalislaw/i);
+    }
+  } finally {
+    await server.close();
+  }
+});
+
+test('the blog articles state the New York malpractice rules correctly', () => {
+  const plain = slug => getBlogPost(slug).html.replace(/<[^>]+>/g, ' ').replace(/&#39;|&#x27;|&rsquo;/g, "'").replace(/\s+/g, ' ');
+
+  const basics = plain('what-is-medical-malpractice-new-york-state');
+  // There is no general discovery rule and no general five-year limit in New York malpractice law.
+  assert.doesNotMatch(basics, /discovered \(or should have discovered\) the injury, whichever is later/);
+  assert.doesNotMatch(basics, /absolute deadline is 5 years/);
+  for (const phrase of ['2 years and 6 months', 'continuous treatment', "Lavern's Law", 'no later than 7 years', '1 year from when you discovered it', 'notice of claim within 90 days', 'within 2 years of the death', 'never beyond 10 years after the malpractice']) {
+    assert.ok(basics.includes(phrase), `the article no longer says: ${phrase}`);
+  }
+
+  const timeline = plain('how-long-medical-malpractice-case-nyc');
+  // The certificate of merit is the attorney's, after consulting a physician (CPLR 3012-a).
+  assert.doesNotMatch(timeline, /certificate of merit from a qualified medical expert/);
+  assert.match(timeline, /your attorney generally must file a certificate of merit/);
+  assert.match(timeline, /consulted at least one physician/);
 });

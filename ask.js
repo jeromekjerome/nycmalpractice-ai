@@ -50,7 +50,9 @@ function buildCaseContext(cases) {
 }
 
 export async function answerUserQuestion({ question, mode = 'personal', sessionId, history }) {
-  const turn = history.length + 1;
+  // The conversation step: the number of the visitor's own message. The history also holds the AI's
+  // replies, so counting every message ran steps 1, 3, 5 and skipped steps 2 and 4.
+  const turn = history.filter(h => h.role === 'user').length + 1;
 
   const fullText       = history.map(h => h.content).join(' ') + ' ' + question;
   const classification = (await extractCaseType(fullText, openai)) || {};

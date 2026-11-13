@@ -2,7 +2,7 @@
 title: How Long Does a Medical Malpractice Case Take in New York City?
 date: 2026-04-01
 description: Learn about medical malpractice litigation timelines in NYC. Discover how long lawsuits typically take and what factors influence the process.
-author: LegalisLaw Editorial
+author: NYCMalpractice.ai Editorial
 tags: medical malpractice, NYC, legal process, litigation timeline
 ---
 
@@ -14,11 +14,11 @@ Medical malpractice cases can be some of the most complex and time-consuming civ
 
 The journey of a medical malpractice case typically begins with your consultation with an attorney. During this phase, your lawyer will review your medical records, interview witnesses, and conduct an initial assessment of whether your case has merit. This initial phase can take anywhere from a few weeks to several months, depending on the complexity of the medical issues involved and the volume of records that must be reviewed.
 
-In New York, before filing a formal complaint, you may be required to obtain a certificate of merit from a qualified medical expert. This certificate confirms that there is a reasonable basis for your claim of malpractice. Gathering expert opinions and preparing the necessary documentation can add 3-6 months to the pre-litigation phase.
+In New York, your attorney generally must file a certificate of merit with the complaint, stating that the attorney has reviewed the facts and consulted at least one physician who believes there is a reasonable basis for the case (CPLR §3012-a). Gathering expert opinions and preparing the necessary documentation can add 3-6 months to the pre-litigation phase.
 
 ## Filing and Pre-Trial Discovery
 
-Once your case is filed in [court filing guide](https://legalislaw-hub.com/), the discovery phase begins. Discovery is the legal process where both sides exchange information and evidence relevant to the case. In medical malpractice cases, this phase is typically extensive and can last 18-24 months or longer.
+Once your case is filed in court, the discovery phase begins. Discovery is the legal process where both sides exchange information and evidence relevant to the case. In medical malpractice cases, this phase is typically extensive and can last 18-24 months or longer.
 
 During discovery, your attorney will:
 - Request and review all medical records
@@ -78,4 +78,4 @@ Understanding the realistic timeline for your case helps you manage expectations
 
 An experienced medical malpractice attorney can help you understand the specific timeline for your case and explore options to expedite resolution where possible.
 
-Start your free AI case analysis at [APP_URL]
+Start your free AI case analysis on our [home page](/).

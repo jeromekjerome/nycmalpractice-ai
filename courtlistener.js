@@ -187,6 +187,7 @@ async function runSearch(paramsObject, limit, scope, deadline, { cacheOnly = fal
  * Within each scope the tailored query is tried before the type-level one. The tailored query
  * requires the type's base terms and at least one of the fact-specific terms; requiring all of
  * them (the previous behaviour) matched nothing for ordinary conversations, in any court.
+ * When the tailored query is slow, the type-level one is sent alongside it (see searchScope).
  */
 export async function searchMalpracticeCases({ query = '', caseType = 'other', limit = 5 } = {}) {
   const baseTerms = Object.hasOwn(CASE_TYPE_TERMS, caseType) ? CASE_TYPE_TERMS[caseType] : CASE_TYPE_TERMS.other;
@@ -208,16 +209,68 @@ export async function searchMalpracticeCases({ query = '', caseType = 'other', l
   // 1) New York courts by default; 2) national precedential search if New York has nothing.
   // Once a request says to stop, no more are sent — but a later rung that is already cached costs
   // nothing and is still better than an empty packet.
-  let cacheOnly = false;
+  const state = { cacheOnly: false };
   for (const scope of ['ny', 'national']) {
-    for (const q of queries) {
-      const params = scope === 'ny' ? { q, ...commonParams, court: nyCourts } : { q, ...commonParams };
-      const result = await runSearch(params, limit, scope, deadline, { cacheOnly });
-      if (result.cases.length > 0) return result.cases;
-      if (result.stop) cacheOnly = true;
-    }
+    const paramsFor = q => (scope === 'ny' ? { q, ...commonParams, court: nyCourts } : { q, ...commonParams });
+    const cases = await searchScope(queries, paramsFor, limit, scope, deadline, state);
+    if (cases.length > 0) return cases;
   }
   return [];
+}
+
+// When the tailored query has not answered after this long, the type-level query is sent alongside
+// it and whichever finds cases first is used. A tailored query can take longer than the per-request
+// timeout (seen live in November 2026), and a slow answer used to leave the reply with no case law at
+// all. The extra request is only sent when the tailored query is slow.
+const DEFAULT_HEDGE_AFTER_MS = 2500;
+
+// The first of the runs to come back with cases, or an empty result once none of them has.
+function firstWithCases(runs) {
+  return new Promise(resolve => {
+    let pending = runs.length;
+    let stop = false;
+    for (const run of runs) {
+      run.then(result => {
+        stop = stop || result.stop;
+        if (result.cases.length > 0) resolve({ cases: result.cases, stop });
+        else if (--pending === 0) resolve({ cases: [], stop });
+      });
+    }
+  });
+}
+
+// One scope (New York courts, or national): the tailored query, then the type-level one.
+async function searchScope(queries, paramsFor, limit, scope, deadline, state) {
+  const run = q => runSearch(paramsFor(q), limit, scope, deadline, { cacheOnly: state.cacheOnly });
+  const [tailored, typeLevel] = queries;
+  const tailoredRun = run(tailored);
+  if (!typeLevel) {
+    const result = await tailoredRun;
+    if (result.stop) state.cacheOnly = true;
+    return result.cases;
+  }
+
+  const hedgeAfter = Number(process.env.COURTLISTENER_HEDGE_AFTER_MS) || DEFAULT_HEDGE_AFTER_MS;
+  let timer;
+  const early = await Promise.race([
+    tailoredRun,
+    new Promise(resolve => { timer = setTimeout(resolve, hedgeAfter, null); }),
+  ]);
+  clearTimeout(timer);
+
+  if (early) {
+    // The tailored query answered in time: use it, or try the type-level one as before.
+    if (early.stop) state.cacheOnly = true;
+    if (early.cases.length > 0) return early.cases;
+    const result = await run(typeLevel);
+    if (result.stop) state.cacheOnly = true;
+    return result.cases;
+  }
+
+  // The tailored query is slow: send the type-level one alongside and take whichever finds cases first.
+  const result = await firstWithCases([tailoredRun, run(typeLevel)]);
+  if (result.stop) state.cacheOnly = true;
+  return result.cases;
 }
 
 const CLASSIFIER_FALLBACK = { type: 'other', terms: 'medical malpractice standard of care' };

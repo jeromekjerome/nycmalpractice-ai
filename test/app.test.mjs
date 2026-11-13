@@ -796,3 +796,44 @@ test('the blog articles state the New York malpractice rules correctly', () => {
   assert.match(timeline, /your attorney generally must file a certificate of merit/);
   assert.match(timeline, /consulted at least one physician/);
 });
+
+// ─── Slow case-law searches ───────────────────────────────────────────────────
+
+test('a slow tailored search does not leave the reply without case law', async () => {
+  clearSearchCache();
+  const previous = process.env.COURTLISTENER_HEDGE_AFTER_MS;
+  process.env.COURTLISTENER_HEDGE_AFTER_MS = '50';
+  const requests = [];
+  let slowFinished;
+  const slowDone = new Promise(resolve => { slowFinished = resolve; });
+  try {
+    const cases = await withOutboundHttp(async url => {
+      const q = new URL(url).searchParams.get('q');
+      requests.push(q);
+      if (q.includes('(')) {
+        // The tailored query answers late.
+        await new Promise(resolve => setTimeout(resolve, 400));
+        slowFinished();
+        return jsonResponse({ results: [{ ...CL_RESULT, caseName: 'Slow v. Tailored' }] });
+      }
+      return jsonResponse({ results: [CL_RESULT] });
+    }, () => searchMalpracticeCases({ query: 'retained sponge', caseType: 'surgical_error' }));
+    assert.equal(cases[0].caseName, 'Patient v. General Hospital', 'the reply waited for the slow tailored search');
+    assert.deepEqual(requests, ['medical malpractice surgery (retained OR sponge)', 'medical malpractice surgery']);
+    await slowDone;
+  } finally {
+    if (previous === undefined) delete process.env.COURTLISTENER_HEDGE_AFTER_MS;
+    else process.env.COURTLISTENER_HEDGE_AFTER_MS = previous;
+  }
+});
+
+test('a tailored search that answers in time is used without a second request', async () => {
+  clearSearchCache();
+  const requests = [];
+  const cases = await withOutboundHttp(async url => {
+    requests.push(new URL(url).searchParams.get('q'));
+    return jsonResponse({ results: [CL_RESULT] });
+  }, () => searchMalpracticeCases({ query: 'retained sponge', caseType: 'surgical_error' }));
+  assert.equal(cases.length, 1);
+  assert.deepEqual(requests, ['medical malpractice surgery (retained OR sponge)']);
+});

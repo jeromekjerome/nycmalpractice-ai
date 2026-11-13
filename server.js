@@ -378,7 +378,7 @@ function verifyCron(req, res) {
 
 // Combined nightly job — this is the path vercel.json actually schedules. Until it existed the
 // scheduled call got a 404 and nothing ran: expired auctions stayed open and overdue leads pending.
-// Runs close-auctions → overdue-leads → reset-declines in sequence.
+// Runs close-auctions → overdue-leads → reset-declines → the 90-day conversation purge, in sequence.
 app.get('/api/cron', async (req, res) => {
   if (!verifyCron(req, res)) return;
   try {
@@ -395,7 +395,11 @@ app.get('/api/cron', async (req, res) => {
     }
 
     await resetDeclineCounts();
-    res.json({ ok: true, closed: expired.length, declined: overdue.length });
+
+    // Conversations past the privacy policy's 90 days are deleted (see retention.js).
+    const { purgeExpiredConversations } = await import('./retention.js');
+    const purged = await purgeExpiredConversations();
+    res.json({ ok: true, closed: expired.length, declined: overdue.length, purged });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

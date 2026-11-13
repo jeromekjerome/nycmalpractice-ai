@@ -8,7 +8,8 @@ import { dirname, join } from 'path';
 import { neon } from '@neondatabase/serverless';
 import { answerUserQuestion } from './ask.js';
 import { createAuction, deliverColdLead, getAuctionStatus, placeBid, acceptLead, declineLead, notifyOperatorOfContactRequest, TIER_CONFIG } from './auction.js';
-import { registerFirm, sendVerificationCode, verifyPhoneCode, validateToken, updateFirmSubscription, getFirm, updateFirmProfile, createMagicLink } from './firms.js';
+import { registerFirm, sendVerificationCode, verifyPhoneCode, validateToken, updateFirmSubscription, getFirm, updateFirmProfile, createMagicLink, VerificationLimitError } from './firms.js';
+import { rateLimit } from './rate-limit.js';
 import nodemailer from 'nodemailer';
 import { createSubscriptionCheckout, createPortalSession, constructWebhookEvent } from './stripe.js';
 import OpenAI from 'openai';
@@ -75,7 +76,26 @@ async function finishBeforeReply(label, work, deadline) {
 }
 
 // ─── AI Chat ──────────────────────────────────────────────────────────────────
-app.post('/api/ask', async (req, res) => {
+// Per-client limits on the endpoints that cost money or send messages (see rate-limit.js).
+const MINUTE = 60_000;
+const HOUR = 60 * MINUTE;
+const limitChat     = rateLimit('ask', [[20, 10 * MINUTE], [150, 24 * HOUR]], 'You have sent a lot of messages in a short time. Please wait a few minutes and try again.');
+const limitContact  = rateLimit('contact', [[5, HOUR]]);
+const limitSignup   = rateLimit('firm-signup', [[5, HOUR]]);
+const limitTexts    = rateLimit('firm-texts', [[5, HOUR]]);
+const limitVerify   = rateLimit('firm-verify', [[20, HOUR]]);
+const limitEmails   = rateLimit('firm-emails', [[5, HOUR]]);
+
+// The registration steps after the first prove they belong to that registration with the token it
+// returned. A firm number alone is not enough: it is small, sequential and easy to guess.
+async function ownsRegistration(token, firmId) {
+  if (typeof token !== 'string' || !token) return false;
+  const tokenData = await validateToken(token);
+  return !!tokenData && String(tokenData.firm_id) === String(firmId);
+}
+const REGISTRATION_EXPIRED = 'This registration session has expired. Use Firm Login to get a sign-in link by email.';
+
+app.post('/api/ask', limitChat, async (req, res) => {
   const { question, mode = 'personal', sessionId, history = [] } = req.body;
   if (!question?.trim() || !sessionId) return res.status(400).json({ error: 'question and sessionId required' });
 
@@ -117,7 +137,7 @@ app.get('/api/conversations/:sessionId', async (req, res) => {
 // A lead goes to law firms only from here: once the visitor has given a name and phone number in the
 // contact form and agreed to the consent text. The lead carries those details, so the firm that takes
 // it can reach the visitor.
-app.post('/api/contact', async (req, res) => {
+app.post('/api/contact', limitContact, async (req, res) => {
   const { sessionId, name, phone, bestTime, consent } = req.body || {};
   const cleanName = typeof name === 'string' ? name.trim().replace(/\s+/g, ' ') : '';
   const digits    = typeof phone === 'string' ? phone.replace(/\D/g, '') : '';
@@ -166,41 +186,62 @@ app.post('/api/contact', async (req, res) => {
 });
 
 // ─── Firm Registration ────────────────────────────────────────────────────────
-app.post('/api/firms/register', async (req, res) => {
+app.post('/api/firms/register', limitSignup, async (req, res) => {
   const { name, email, phone } = req.body;
   if (!name || !email || !phone) return res.status(400).json({ error: 'name, email, phone required' });
   try {
     const { firm, isNew } = await registerFirm({ name, email, phone });
-    if (isNew) await sendVerificationCode(firm.id);
-    res.json({ firmId: firm.id, isNew, phoneVerified: firm.phone_verified });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    if (!isNew) {
+      // An existing firm signs in through the link emailed to it, never through this form: otherwise
+      // anyone who knew a firm's email could change its profile or billing.
+      return res.status(409).json({ error: 'This email is already registered. Use Firm Login to get a sign-in link by email.' });
+    }
+    let notice = null;
+    try { await sendVerificationCode(firm.id); }
+    catch (err) { if (!(err instanceof VerificationLimitError)) throw err; notice = err.message; }
+    const registrationToken = await createMagicLink(firm.id, { expiresInHours: 6 });
+    res.json({ firmId: firm.id, isNew, phoneVerified: firm.phone_verified, registrationToken, ...(notice ? { notice } : {}) });
+  } catch (err) {
+    console.error('Error in /api/firms/register:', err);
+    res.status(500).json({ error: 'Registration failed. Please try again.' });
+  }
 });
 
-app.post('/api/firms/verify-phone', async (req, res) => {
-  const { firmId, code } = req.body;
+app.post('/api/firms/verify-phone', limitVerify, async (req, res) => {
+  const { firmId, code, token } = req.body;
   if (!firmId || !code) return res.status(400).json({ error: 'firmId and code required' });
+  if (!(await ownsRegistration(token, firmId))) return res.status(401).json({ error: REGISTRATION_EXPIRED });
   res.json({ ok: await verifyPhoneCode(firmId, code) });
 });
 
 app.put('/api/firms/:id/profile', async (req, res) => {
-  const { specializations, serviceArea, contactName } = req.body;
+  const { specializations, serviceArea, contactName, token } = req.body;
+  if (!(await ownsRegistration(token, req.params.id))) return res.status(401).json({ error: REGISTRATION_EXPIRED });
   try {
     await updateFirmProfile(req.params.id, { specializations: specializations || [], serviceArea, contactName });
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/firms/resend-code', async (req, res) => {
-  const { firmId } = req.body;
+app.post('/api/firms/resend-code', limitTexts, async (req, res) => {
+  const { firmId, token } = req.body;
   if (!firmId) return res.status(400).json({ error: 'firmId required' });
-  await sendVerificationCode(firmId);
-  res.json({ ok: true });
+  if (!(await ownsRegistration(token, firmId))) return res.status(401).json({ error: REGISTRATION_EXPIRED });
+  try {
+    await sendVerificationCode(firmId);
+    res.json({ ok: true });
+  } catch (err) {
+    if (err instanceof VerificationLimitError) return res.status(429).json({ error: err.message });
+    console.error('Error in /api/firms/resend-code:', err);
+    res.status(500).json({ error: 'The code could not be sent. Please try again.' });
+  }
 });
 
 // ─── Stripe ───────────────────────────────────────────────────────────────────
 app.post('/api/billing/checkout', async (req, res) => {
-  const { firmId } = req.body;
+  const { firmId, token } = req.body;
   if (!firmId) return res.status(400).json({ error: 'firmId required' });
+  if (!(await ownsRegistration(token, firmId))) return res.status(401).json({ error: REGISTRATION_EXPIRED });
   const firm = await getFirm(firmId);
   if (!firm) return res.status(404).json({ error: 'Firm not found' });
   if (!firm.phone_verified) return res.status(403).json({ error: 'Phone not verified' });
@@ -302,7 +343,7 @@ app.post('/api/leads/:id/decline', async (req, res) => {
 });
 
 // ─── Firm Portal ──────────────────────────────────────────────────────────────
-app.post('/api/firms/portal-link', async (req, res) => {
+app.post('/api/firms/portal-link', limitEmails, async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ error: 'email required' });
   try {
@@ -332,8 +373,10 @@ app.put('/api/portal/profile', async (req, res) => {
 });
 
 // ─── Admin ────────────────────────────────────────────────────────────────────
+// Without ADMIN_SECRET the admin routes are closed to everyone; they used to be open to everyone.
 function requireAdmin(req, res) {
-  if (process.env.ADMIN_SECRET && req.headers['x-admin-secret'] !== process.env.ADMIN_SECRET) {
+  if (!process.env.ADMIN_SECRET) { res.status(503).json({ error: 'Admin access is not configured' }); return false; }
+  if (req.headers['x-admin-secret'] !== process.env.ADMIN_SECRET) {
     res.status(401).json({ error: 'Unauthorized' }); return false;
   }
   return true;
@@ -417,8 +460,10 @@ async function sendPortalLinkEmail(firm, url) {
 }
 
 // ─── Cron Endpoints ───────────────────────────────────────────────────────────
+// Without CRON_SECRET the job routes are closed to everyone; they used to run for any caller.
 function verifyCron(req, res) {
-  if (process.env.CRON_SECRET && req.headers.authorization !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (!process.env.CRON_SECRET) { res.status(503).json({ error: 'Scheduled jobs are not configured' }); return false; }
+  if (req.headers.authorization !== `Bearer ${process.env.CRON_SECRET}`) {
     res.status(401).json({ error: 'Unauthorized' }); return false;
   }
   return true;

@@ -2,3 +2,10 @@ node_modules/
 .env
 .DS_Store
 .vercel
+.env.*
+!.env.example
+*.log
+playwright-report/
+test-results/
+# Agent notes that contain live credentials: never commit or upload
+PROJECT_INSTRUCTIONS.md

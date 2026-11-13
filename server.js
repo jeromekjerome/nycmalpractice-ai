@@ -13,6 +13,7 @@ import nodemailer from 'nodemailer';
 import { createSubscriptionCheckout, createPortalSession, constructWebhookEvent } from './stripe.js';
 import OpenAI from 'openai';
 import { buildModelList, probeAllModelChains } from './openaiModelFailover.js';
+import { APP_URL } from './site.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -44,6 +45,35 @@ app.use('/api/webhooks/stripe', express.raw({ type: 'application/json' }));
 app.use(express.json());
 app.use(express.static(join(__dirname, 'public')));
 
+// ─── Work a reply must not leave behind ───────────────────────────────────────
+// A serverless function is suspended as soon as its response is sent, so work still running at
+// that point is lost: on Vercel the conversation was never saved, and a lead hand-off started the
+// same way would stop part-way. This work is therefore finished before the reply goes out.
+// One time budget per reply covers all of it, so a slow mail server or payment call cannot hold
+// the reply: work that outlasts the budget is logged, because on a serverless host it may not
+// complete.
+const DEFAULT_FOLLOW_UP_WORK_CAP_MS = 20_000;
+
+function followUpDeadline() {
+  return Date.now() + (Number(process.env.ASK_FOLLOW_UP_WORK_CAP_MS) || DEFAULT_FOLLOW_UP_WORK_CAP_MS);
+}
+
+async function finishBeforeReply(label, work, deadline) {
+  // The failure handler is attached at once, so a rejection after the deadline is never unhandled.
+  const settled = Promise.resolve(work).then(
+    () => 'done',
+    (err) => { console.error(`[ask] ${label} failed:`, err?.message || err); return 'failed'; },
+  );
+  let timer;
+  const timedOut = new Promise((resolve) => { timer = setTimeout(resolve, Math.max(0, deadline - Date.now()), 'timed out'); });
+  const outcome = await Promise.race([settled, timedOut]);
+  clearTimeout(timer);
+  if (outcome === 'timed out') {
+    console.error(`[ask] ${label} was still running when the reply was due; replying without waiting for it`);
+  }
+  return outcome;
+}
+
 // ─── AI Chat ──────────────────────────────────────────────────────────────────
 app.post('/api/ask', async (req, res) => {
   const { question, mode = 'personal', sessionId, history = [] } = req.body;
@@ -57,7 +87,8 @@ app.post('/api/ask', async (req, res) => {
     } catch (dbErr) { console.warn('DB log failed:', dbErr.message); }
 
     const updatedHistory = [...history, { role: 'user', content: question }, { role: 'assistant', content: result.answer }];
-    upsertConversation(sessionId, mode, result.caseType, updatedHistory).catch(console.error);
+    const replyDue = followUpDeadline();
+    await finishBeforeReply('saving the conversation', upsertConversation(sessionId, mode, result.caseType, updatedHistory), replyDue);
 
     if (result.leadScore) {
       const score    = result.leadScore;
@@ -67,9 +98,9 @@ app.post('/api/ask', async (req, res) => {
       if (alreadyProcessed.length === 0) {
         await sql`UPDATE user_interactions SET lead_email_sent = TRUE WHERE session_id = ${sessionId}`;
         if (score.tier === 'cold') {
-          deliverColdLead(sessionId, result.caseType, score, leadData).catch(console.error);
+          await finishBeforeReply('cold lead delivery', deliverColdLead(sessionId, result.caseType, score, leadData), replyDue);
         } else {
-          createAuction(sessionId, result.caseType, score, leadData).catch(console.error);
+          await finishBeforeReply('auction creation', createAuction(sessionId, result.caseType, score, leadData), replyDue);
         }
       }
     }
@@ -231,7 +262,7 @@ app.post('/api/firms/portal-link', async (req, res) => {
     const [firm] = await sql`SELECT id, name, email FROM firms WHERE email = ${email} LIMIT 1`;
     if (!firm) return res.status(404).json({ error: 'No firm found with that email address' });
     const token = await createMagicLink(firm.id, { expiresInHours: 720 });
-    const url   = `${process.env.APP_URL || 'https://nycmalpractice.ai'}/portal.html?token=${token}`;
+    const url   = `${APP_URL}/portal.html?token=${token}`;
     await sendPortalLinkEmail(firm, url);
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -282,7 +313,7 @@ app.post('/api/admin/firms/:id/send-link', async (req, res) => {
   const firm = await getFirm(req.params.id);
   if (!firm) return res.status(404).json({ error: 'Firm not found' });
   const token = await createMagicLink(firm.id, { expiresInHours: 720 });
-  const url   = `${process.env.APP_URL || 'https://nycmalpractice.ai'}/portal.html?token=${token}`;
+  const url   = `${APP_URL}/portal.html?token=${token}`;
   await sendPortalLinkEmail(firm, url);
   res.json({ ok: true, url });
 });
@@ -344,6 +375,31 @@ function verifyCron(req, res) {
   }
   return true;
 }
+
+// Combined nightly job — this is the path vercel.json actually schedules. Until it existed the
+// scheduled call got a 404 and nothing ran: expired auctions stayed open and overdue leads pending.
+// Runs close-auctions → overdue-leads → reset-declines in sequence.
+app.get('/api/cron', async (req, res) => {
+  if (!verifyCron(req, res)) return;
+  try {
+    const { closeAuction } = await import('./auction.js');
+    const { recordDecline, resetDeclineCounts } = await import('./firms.js');
+
+    const expired = await sql`SELECT id FROM auctions WHERE status = 'open' AND closes_at < NOW()`;
+    for (const row of expired) await closeAuction(row.id);
+
+    const overdue = await sql`SELECT id, firm_id, auction_id FROM leads WHERE status = 'pending' AND accept_deadline < NOW()`;
+    for (const lead of overdue) {
+      await sql`UPDATE leads SET status = 'declined' WHERE id = ${lead.id}`;
+      await recordDecline(lead.firm_id, !!lead.auction_id);
+    }
+
+    await resetDeclineCounts();
+    res.json({ ok: true, closed: expired.length, declined: overdue.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 app.get('/api/cron/close-auctions', async (req, res) => {
   if (!verifyCron(req, res)) return;

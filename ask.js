@@ -27,24 +27,45 @@ const CASE_TYPE_NAMES = {
   other:               'Medical Malpractice',
 };
 
+const NO_CASES_CONTEXT = 'No specific cases retrieved. Apply general NYS medical malpractice principles under CPLR §214-a.';
+const NATIONAL_FALLBACK_NOTE =
+  'NOTE: No New York decisions matched this search. The cases below come from a national search and may be ' +
+  'from other jurisdictions — treat them as persuasive authority only and do not present them as New York law.';
+
+function buildCaseContext(cases) {
+  if (!cases || cases.length === 0) return NO_CASES_CONTEXT;
+
+  const blocks = cases.map(c => {
+    const citations = [...new Set([...(c.citations || []), c.citation].filter(Boolean))];
+    return (
+      `Case: ${c.caseName}\n` +
+      (citations.length ? `Citation: ${citations.join('; ')}\n` : '') +
+      (c.court    ? `Court: ${c.court}\n`        : '') +
+      (c.dateFiled? `Filed: ${c.dateFiled}\n`    : '') +
+      (c.snippet  ? `Excerpt: ${c.snippet}`      : '')
+    );
+  }).join('\n\n');
+
+  return cases.some(c => c.scope === 'national') ? `${NATIONAL_FALLBACK_NOTE}\n\n${blocks}` : blocks;
+}
+
 export async function answerUserQuestion({ question, mode = 'personal', sessionId, history }) {
   const turn = history.length + 1;
 
   const fullText       = history.map(h => h.content).join(' ') + ' ' + question;
-  const classification = await extractCaseType(fullText, openai);
-  const caseType       = classification.type || 'other';
+  const classification = (await extractCaseType(fullText, openai)) || {};
+  const caseType       = Object.hasOwn(CASE_TYPE_NAMES, classification.type) ? classification.type : 'other';
 
-  const cases = await searchMalpracticeCases({ query: classification.terms || question, caseType, limit: 5 });
+  // The classifier's terms only. The visitor's own message is never the query: it can hold a name
+  // or a phone number, and the query goes to a third party. Without terms, the search uses the
+  // case type's terms alone.
+  const cases = await searchMalpracticeCases({
+    query: typeof classification.terms === 'string' ? classification.terms : '',
+    caseType,
+    limit: 5,
+  });
 
-  const caseContext = cases.length > 0
-    ? cases.map(c =>
-        `Case: ${c.caseName}\n` +
-        (c.citation  ? `Citation: ${c.citation}\n`  : '') +
-        (c.court     ? `Court: ${c.court}\n`         : '') +
-        (c.dateFiled ? `Filed: ${c.dateFiled}\n`     : '') +
-        (c.snippet   ? `Excerpt: ${c.snippet}`       : '')
-      ).join('\n\n')
-    : 'No specific cases retrieved. Apply general NYS medical malpractice principles under CPLR §214-a.';
+  const caseContext = buildCaseContext(cases);
 
   const systemPrompt = mode === 'estate'
     ? buildEstatePrompt(turn, caseContext, caseType)
@@ -82,10 +103,13 @@ ${caseContext}
 CORE PRINCIPLES:
 - Be empathetic — this person has suffered a serious injury at the hands of someone they trusted
 - Standard of care: what a reasonably competent provider in the same specialty would have done
-- NY SOL: 2.5 years from the act or omission (CPLR §214-a) — continuous treatment doctrine may toll
+- NY deadline: 2 years and 6 months from the act or omission, or from the last treatment where treatment for the same condition continued (CPLR §214-a, continuous treatment)
+- Failure to diagnose cancer or a malignant tumor (Lavern's Law, 2018): the 2 years and 6 months run from when the patient knew or reasonably should have known of the error and that it caused injury, but suit must be filed no later than 7 years after the error
+- Foreign object left in the body: the claim may still be brought within 1 year of discovering the object (or of facts that would reasonably have led to its discovery), even after the 2 years and 6 months have run; implants, fixation devices and chemical compounds do not count as foreign objects
+- Infancy: for a patient who was a minor, the deadline is extended, but in malpractice cases never beyond 10 years after the malpractice (CPLR §208)
+- Public hospitals: a claim against NYC Health + Hospitals (for example Bellevue, Kings County or Elmhurst) or another city- or county-run hospital needs a notice of claim within 90 days and a lawsuit within 1 year and 90 days; state-run hospitals have their own short deadlines in the Court of Claims. These are far shorter than the usual deadline, so raise them as soon as a public hospital is involved
 - Certificate of Merit required (CPLR §3012-a): attorney must certify expert review before filing
-- CPLR Article 16 limits non-economic liability for defendants less than 50% at fault
-- Foreign object exception: no SOL if object left in body
+- CPLR Article 16 limits the non-economic damages owed by a defendant who is 50% or less at fault
 - Always end with: "This is general information, not legal advice."
 - Most malpractice firms work on contingency — no upfront cost to the patient`;
 
@@ -99,7 +123,7 @@ TURN 2: Ask ONE targeted question about the most critical factor — either the 
 
   if (turn === 3) return base + `
 
-TURN 3: Provide a preliminary assessment covering: (1) whether the timeline appears within the 2.5-year SOL, (2) whether any tolling doctrines may apply (continuous treatment, foreign object, infancy), (3) the key causation question — what the standard of care required and how it was allegedly breached. Reference relevant cases.`;
+TURN 3: Provide a preliminary assessment covering: (1) whether the timeline appears within the 2.5-year SOL, (2) whether a later start or a shorter deadline may apply (continuous treatment, a foreign object, a missed cancer diagnosis under Lavern's Law, infancy, or a public hospital's 90-day notice of claim), (3) the key causation question — what the standard of care required and how it was allegedly breached. Reference relevant cases.`;
 
   if (turn === 4) return base + `
 
@@ -122,6 +146,9 @@ ${caseContext}
 CORE PRINCIPLES:
 - This is a wrongful death claim — profound loss requiring both compassion and legal precision
 - Wrongful death SOL in NY: 2 years from date of death (EPTL §5-4.1) — different from personal injury SOL
+- Public hospitals: if NYC Health + Hospitals or another city- or county-run hospital was involved, a notice of claim is due within 90 days of the estate representative's appointment — raise this immediately
+- The survival claim for the person's own conscious pain and suffering has its own deadline, tied to the malpractice deadline; an attorney must check both
+- New York allows only pecuniary (economic) wrongful death damages, not damages for grief; the Grieving Families Act, which would change that and lengthen the deadline, has been vetoed four times (most recently in December 2025) and is not law
 - The action is brought by the estate administrator / personal representative, not the family directly
 - Damages: pecuniary loss to distributees (lost earnings, services, support), conscious pain & suffering (survival)
 - Appointment of estate administrator may be needed first (Surrogate's Court)

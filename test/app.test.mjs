@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync, readdirSync } from 'node:fs';
 
 import { startServer } from './helpers.mjs';
 import { test } from './runner.mjs';
@@ -19,8 +20,21 @@ process.env.SMTP_PORT ||= '465';
 process.env.SMTP_USER ||= 'ops@example.test';
 process.env.SMTP_PASS ||= 'password';
 process.env.NOTIFICATION_EMAIL ||= 'ops@example.test';
+// Set before server.js loads dotenv, so a real token in a local .env is never used by the tests.
+process.env.COURTLISTENER_TOKEN ||= 'cl-test-token';
+
+// ─── Offline harness ─────────────────────────────────────────────────────────
+// Every outbound HTTP call the app makes (OpenAI SDK, CourtListener, Neon's HTTP driver) goes
+// through global fetch. Routing it through a swappable function lets the tests below run the
+// real request path end to end without touching the network. It must be installed before
+// server.js is imported, because the OpenAI client captures fetch when it is constructed.
+const realFetch = globalThis.fetch;
+let activeFetch = realFetch;
+globalThis.fetch = (...args) => activeFetch(...args);
 
 const { default: app } = await import('../server.js');
+const { clearSearchCache, extractCaseType, searchMalpracticeCases } = await import('../courtlistener.js');
+const { scoreLead } = await import('../auction.js');
 
 async function getJsonIfPossible(response) {
   const contentType = response.headers.get('content-type') || '';
@@ -178,4 +192,487 @@ test('reset session succeeds without a session id', async () => {
   } finally {
     await server.close();
   }
+});
+
+// ─── Offline world for end-to-end runs of /api/ask ────────────────────────────
+
+const DISCLAIMER = 'This is general information, not legal advice.';
+
+function jsonResponse(body, status = 200) {
+  return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+}
+
+function chatCompletion(content) {
+  return jsonResponse({
+    id: 'chatcmpl-test',
+    object: 'chat.completion',
+    created: 0,
+    model: 'test-model',
+    choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }],
+    usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+  });
+}
+
+/** Run fn with every outbound request answered by handler(url, init). The local test server passes through. */
+async function withOutboundHttp(handler, fn) {
+  const previous = activeFetch;
+  activeFetch = async (input, init = {}) => {
+    const url = typeof input === 'string' ? input : (input?.url ?? String(input));
+    if (url.startsWith('http://127.0.0.1')) return realFetch(input, init);
+    return handler(url, init);
+  };
+  try {
+    return await fn();
+  } finally {
+    activeFetch = previous;
+  }
+}
+
+async function waitFor(predicate, timeoutMs = 3000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const value = predicate();
+    if (value) return value;
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  return predicate();
+}
+
+// Lead notices go to the operator while no firm subscribes; with SMTP_USER unset they are only logged,
+// so no test opens a connection to a mail server.
+async function withoutMail(fn) {
+  const smtpUser = process.env.SMTP_USER;
+  delete process.env.SMTP_USER;
+  try {
+    return await fn();
+  } finally {
+    process.env.SMTP_USER = smtpUser;
+  }
+}
+
+const EMPTY_ROWS = { fields: [], rows: [], command: 'SELECT', rowCount: 0, rowAsArray: true };
+
+// A fictional decision in CourtListener's v4 search format.
+const CL_RESULT = {
+  caseName: 'Patient v. General Hospital',
+  citation: ['200 A.D.3d 100', '2022 NY Slip Op 01234'],
+  court: 'Appellate Division of the Supreme Court of the State of New York',
+  court_id: 'nyappdiv',
+  dateFiled: '2022-03-01',
+  absolute_url: '/opinion/1/patient-v-general-hospital/',
+  // v4 nests the snippet under opinions[] and wraps matches in <mark>.
+  opinions: [{ snippet: 'The failure to <mark>diagnose</mark>   was a departure\n from accepted practice.' }],
+};
+
+/**
+ * A scripted outside world: OpenAI (routed by which prompt is calling), CourtListener search, and
+ * Neon's HTTP SQL endpoint. Records every call.
+ */
+function fakeWorld({
+  answer = `I am so sorry this happened. ${DISCLAIMER}`,
+  classification = { type: 'misdiagnosis', terms: 'delayed cancer diagnosis' },
+  nyResults = [CL_RESULT],
+  nationalResults = [],
+  leadScore = { viable: false, score: 10, confidence: 0.2 },
+  caseAnalysis = { score: 6, verdict: 'moderate', complexityEstimate: null, solWarning: null, strengths: [], weaknesses: [] },
+} = {}) {
+  const calls = { openai: [], courtListener: [], sql: [] };
+
+  const handler = async (url, init) => {
+    const body = typeof init.body === 'string' ? init.body : '';
+
+    if (url.startsWith('https://api.openai.com/')) {
+      const request = JSON.parse(body);
+      const first = String(request.messages[0].content);
+      let kind;
+      let content;
+      if (first.startsWith('Classify this NYC malpractice inquiry')) { kind = 'classify'; content = JSON.stringify(classification); }
+      else if (first.startsWith('You are a NYC medical malpractice case evaluator')) { kind = 'scoreLead'; content = JSON.stringify(leadScore); }
+      else if (first.startsWith('You are a NYC medical malpractice case analyst')) { kind = 'caseAnalysis'; content = JSON.stringify(caseAnalysis); }
+      else { kind = 'answer'; content = answer; }
+      calls.openai.push({ kind, model: request.model, request });
+      return chatCompletion(content);
+    }
+
+    if (url.startsWith('https://www.courtlistener.com/api/rest/v4/search/')) {
+      const params = new URL(url).searchParams;
+      calls.courtListener.push({ court: params.get('court'), q: params.get('q') });
+      return jsonResponse({ results: params.has('court') ? nyResults : nationalResults });
+    }
+
+    if (url.endsWith('/sql')) {
+      const { query, params } = JSON.parse(body);
+      calls.sql.push({ query: query.replace(/\s+/g, ' ').trim(), params });
+      if (/INSERT INTO auctions/.test(query)) {
+        return jsonResponse({
+          fields: ['id', 'tier', 'quality_score', 'lead_preview', 'case_type', 'closes_at'].map(name => ({ name, dataTypeID: 25 })),
+          rows: [['101', 'hot', '84', 'preview', 'misdiagnosis', '2030-01-01T00:00:00Z']],
+          command: 'INSERT',
+          rowCount: 1,
+          rowAsArray: true,
+        });
+      }
+      return jsonResponse(EMPTY_ROWS);
+    }
+
+    throw new Error(`Unexpected outbound request in test: ${url}`);
+  };
+
+  return { calls, handler };
+}
+
+async function postJson(baseUrl, path, payload) {
+  const response = await fetch(`${baseUrl}${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return { response, body: await response.json() };
+}
+
+// A fake world whose hand-off statements take a moment, recording when each one starts and ends.
+function slowFollowUpWorld(world, delayMs) {
+  const started = [];
+  const finished = [];
+  const handler = async (url, init) => {
+    const query = url.endsWith('/sql') ? JSON.parse(init.body).query.replace(/\s+/g, ' ') : '';
+    const kind = /INSERT INTO auctions/.test(query) ? 'auction'
+      : /INSERT INTO conversations \(session_id, mode/.test(query) ? 'conversation'
+      : /FROM firms WHERE active/.test(query) ? 'firms'
+      : null;
+    if (!kind) return world.handler(url, init);
+    started.push(kind);
+    await new Promise(resolve => setTimeout(resolve, typeof delayMs === 'function' ? delayMs(kind) : delayMs));
+    const response = await world.handler(url, init);
+    finished.push(kind);
+    return response;
+  };
+  return { started, finished, handler };
+}
+
+const QUALIFYING_HISTORY = [
+  { role: 'user', content: 'My doctor missed a tumor on my scan in 2024.' },
+  { role: 'assistant', content: 'I am so sorry. When did you learn about it?' },
+];
+const leadScoreOf = score => ({
+  viable: true, score, confidence: 0.9, preview: 'Delayed cancer diagnosis after a misread scan.',
+  dimensions: { injury_severity: 8, causation_clarity: 7, sol_status: 9, expert_viability: 7, damages_magnitude: 8 },
+});
+
+// ─── The nightly job ──────────────────────────────────────────────────────────
+
+test('GET /api/cron rejects a wrong bearer token', async () => {
+  const server = await startServer(app);
+  try {
+    const response = await fetch(`${server.baseUrl}/api/cron`, { headers: { authorization: 'Bearer not-the-secret' } });
+    assert.equal(response.status, 401);
+    assert.deepEqual(await response.json(), { error: 'Unauthorized' });
+  } finally {
+    await server.close();
+  }
+});
+
+test('GET /api/cron with the cron secret closes auctions, declines overdue leads and resets declines', async () => {
+  const world = fakeWorld();
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(world.handler, async () => {
+      const response = await fetch(`${server.baseUrl}/api/cron`, { headers: { authorization: `Bearer ${process.env.CRON_SECRET}` } });
+      assert.equal(response.status, 200);
+      assert.deepEqual(await response.json(), { ok: true, closed: 0, declined: 0 });
+    });
+    const queries = world.calls.sql.map(call => call.query);
+    assert.ok(queries.some(query => /FROM auctions WHERE status = 'open' AND closes_at < NOW\(\)/.test(query)), 'expired auctions were not looked up');
+    assert.ok(queries.some(query => /FROM leads WHERE status = 'pending' AND accept_deadline < NOW\(\)/.test(query)), 'overdue leads were not looked up');
+    assert.ok(queries.some(query => /UPDATE firms SET auction_decline_count = 0/.test(query)), 'decline counts were not reset');
+  } finally {
+    await server.close();
+  }
+});
+
+// ─── Work that must finish before the reply ───────────────────────────────────
+
+test('POST /api/ask saves the conversation and hands off the lead before it replies', async () => {
+  // On a serverless host nothing runs after the response, so both must be complete by then.
+  await withoutMail(async () => {
+    for (const [score, tier, handOff] of [[84, 'hot', 'auction'], [60, 'cold', 'firms']]) {
+      clearSearchCache();
+      const world = fakeWorld({ leadScore: leadScoreOf(score) });
+      const slow = slowFollowUpWorld(world, 120);
+      const server = await startServer(app);
+      try {
+        await withOutboundHttp(slow.handler, async () => {
+          const { response, body } = await postJson(server.baseUrl, '/api/ask', {
+            question: 'I found out in March that the spot on my scan was cancer.',
+            mode: 'personal',
+            sessionId: `sess-follow-up-${tier}`,
+            history: QUALIFYING_HISTORY,
+          });
+          assert.equal(response.status, 200);
+          assert.equal(body.leadTier, tier);
+          // Checked at the moment the reply arrives, with no waiting.
+          assert.ok(slow.finished.includes('conversation'), `${tier}: the conversation was not saved before the reply`);
+          assert.ok(slow.finished.includes(handOff), `${tier}: the lead hand-off had not finished before the reply`);
+        });
+      } finally {
+        await server.close();
+      }
+    }
+  });
+});
+
+test('POST /api/ask still replies when the lead hand-off outlasts the cap or fails', async () => {
+  const previousCap = process.env.ASK_FOLLOW_UP_WORK_CAP_MS;
+  process.env.ASK_FOLLOW_UP_WORK_CAP_MS = '100';
+  const server = await startServer(app);
+  try {
+    await withoutMail(async () => {
+      // 1) A hand-off that takes far longer than the cap: the reply does not wait for it.
+      clearSearchCache();
+      const world = fakeWorld({ leadScore: leadScoreOf(84) });
+      const slow = slowFollowUpWorld(world, kind => (kind === 'auction' ? 1500 : 0));
+      await withOutboundHttp(slow.handler, async () => {
+        const { response, body } = await postJson(server.baseUrl, '/api/ask', {
+          question: 'I found out in March that the spot on my scan was cancer.',
+          mode: 'personal',
+          sessionId: 'sess-follow-up-capped',
+          history: QUALIFYING_HISTORY,
+        });
+        assert.equal(response.status, 200);
+        assert.equal(body.leadTier, 'hot');
+        assert.ok(slow.started.includes('auction'), 'the hand-off was started');
+        assert.ok(!slow.finished.includes('auction'), 'the reply waited for a hand-off that outlasted the cap');
+        assert.ok(slow.finished.includes('conversation'));
+        // Let the slow statement finish inside the fake world before it is torn down.
+        assert.ok(await waitFor(() => slow.finished.includes('auction'), 5000));
+      });
+
+      // 2) A hand-off and a conversation save that fail: the visitor still gets the answer.
+      clearSearchCache();
+      const failingWorld = fakeWorld({ leadScore: leadScoreOf(84), answer: `The scan should have been reported. ${DISCLAIMER}` });
+      const failing = async (url, init) => {
+        if (url.endsWith('/sql') && /INSERT INTO (auctions|conversations \(session_id, mode)/.test(JSON.parse(init.body).query)) {
+          return jsonResponse({ message: 'database unavailable' }, 500);
+        }
+        return failingWorld.handler(url, init);
+      };
+      await withOutboundHttp(failing, async () => {
+        const { response, body } = await postJson(server.baseUrl, '/api/ask', {
+          question: 'I found out in March that the spot on my scan was cancer.',
+          mode: 'personal',
+          sessionId: 'sess-follow-up-failing',
+          history: QUALIFYING_HISTORY,
+        });
+        assert.equal(response.status, 200);
+        assert.ok(body.answer.includes('The scan should have been reported.'));
+      });
+    });
+  } finally {
+    await server.close();
+    if (previousCap === undefined) delete process.env.ASK_FOLLOW_UP_WORK_CAP_MS;
+    else process.env.ASK_FOLLOW_UP_WORK_CAP_MS = previousCap;
+  }
+});
+
+// ─── Case law search ──────────────────────────────────────────────────────────
+
+test('POST /api/ask searches New York courts first and falls back to a national search', async () => {
+  clearSearchCache();
+  const world = fakeWorld({ nyResults: [], nationalResults: [CL_RESULT] });
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(world.handler, async () => {
+      const { response, body } = await postJson(server.baseUrl, '/api/ask', {
+        question: 'My radiologist missed a tumor.',
+        mode: 'personal',
+        sessionId: 'sess-search-ladder',
+        history: [],
+      });
+      assert.equal(response.status, 200);
+      assert.deepEqual(world.calls.courtListener.map(call => [call.court, call.q]), [
+        ['ny nysupct nyappdiv', 'medical malpractice failure to diagnose (delayed OR cancer OR diagnosis)'],
+        ['ny nysupct nyappdiv', 'medical malpractice failure to diagnose'],
+        [null, 'medical malpractice failure to diagnose (delayed OR cancer OR diagnosis)'],
+      ]);
+      assert.equal(body.cases.length, 1);
+      assert.equal(body.cases[0].scope, 'national');
+      assert.equal(body.cases[0].snippet, 'The failure to diagnose was a departure from accepted practice.');
+      assert.equal(body.cases[0].absoluteUrl, 'https://www.courtlistener.com/opinion/1/patient-v-general-hospital/');
+      // The model is told the cases are not New York law, and is given every parallel citation.
+      const system = world.calls.openai.find(call => call.kind === 'answer').request.messages[0].content;
+      assert.ok(system.includes('persuasive authority only'));
+      assert.ok(system.includes('Citation: 200 A.D.3d 100; 2022 NY Slip Op 01234'));
+    });
+  } finally {
+    await server.close();
+  }
+});
+
+test('POST /api/ask does not send the words a visitor typed to CourtListener when the classifier gives no search terms', async () => {
+  // The visitor's message can hold a name and a phone number, and the search query goes to a third
+  // party, so without usable terms from the classifier the search uses the case type's terms alone.
+  clearSearchCache();
+  const world = fakeWorld({ classification: { type: 'misdiagnosis', terms: ['missed', 'tumor'] } });
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(world.handler, async () => {
+      const { response } = await postJson(server.baseUrl, '/api/ask', {
+        question: 'My name is Jane Roe, call me at 555-123-4567 about my missed tumor.',
+        mode: 'personal',
+        sessionId: 'sess-no-visitor-words',
+        history: [],
+      });
+      assert.equal(response.status, 200);
+      assert.ok(world.calls.courtListener.length > 0, 'a case search was made');
+      for (const { q } of world.calls.courtListener) {
+        assert.equal(q, 'medical malpractice failure to diagnose');
+      }
+    });
+  } finally {
+    await server.close();
+  }
+});
+
+test('searchMalpracticeCases stops sending requests once CourtListener throttles the token', async () => {
+  clearSearchCache();
+  const requests = [];
+  await withOutboundHttp(async url => {
+    requests.push(url);
+    return jsonResponse({ detail: 'Request was throttled.' }, 429);
+  }, async () => {
+    assert.deepEqual(await searchMalpracticeCases({ query: 'retained sponge after surgery', caseType: 'surgical_error' }), []);
+  });
+  assert.equal(requests.length, 1, 'a throttled token was asked again');
+});
+
+test('extractCaseType uses the aux model chain with failover', async () => {
+  const modelsTried = [];
+  const openai = {
+    chat: {
+      completions: {
+        create: async request => {
+          modelsTried.push(request.model);
+          if (modelsTried.length === 1) throw Object.assign(new Error('The model does not exist'), { status: 404, code: 'model_not_found' });
+          return { choices: [{ message: { content: '{"type":"birth_injury","terms":"shoulder dystocia delivery"}' } }] };
+        },
+      },
+    },
+  };
+  assert.deepEqual(await extractCaseType('My baby was injured during delivery.', openai), { type: 'birth_injury', terms: 'shoulder dystocia delivery' });
+  assert.equal(modelsTried.length, 2);
+  assert.equal(modelsTried[0], process.env.OPENAI_MODEL_AUX || 'gpt-4o-mini');
+  assert.notEqual(modelsTried[1], modelsTried[0]);
+
+  // Every model failing, or an answer that is not an object, still yields a usable default.
+  const fallback = { type: 'other', terms: 'medical malpractice standard of care' };
+  const dead = { chat: { completions: { create: async () => { throw Object.assign(new Error('down'), { status: 503 }); } } } };
+  assert.deepEqual(await extractCaseType('anything', dead), fallback);
+  const listAnswer = { chat: { completions: { create: async () => ({ choices: [{ message: { content: '["dental"]' } }] }) } } };
+  assert.deepEqual(await extractCaseType('anything', listAnswer), fallback);
+});
+
+test('scoreLead uses the aux model chain with failover', async () => {
+  const modelsTried = [];
+  await withOutboundHttp(async (url, init) => {
+    const request = JSON.parse(init.body);
+    modelsTried.push(request.model);
+    if (modelsTried.length === 1) return jsonResponse({ error: { message: 'The model does not exist', code: 'model_not_found' } }, 404);
+    return chatCompletion(JSON.stringify(leadScoreOf(84)));
+  }, async () => {
+    const score = await scoreLead('I found out in March.', QUALIFYING_HISTORY, 'misdiagnosis', 'personal');
+    assert.equal(score.tier, 'hot');
+    assert.equal(score.reserve, 200);
+  });
+  assert.equal(modelsTried.length, 2);
+  assert.equal(modelsTried[0], process.env.OPENAI_MODEL_AUX || 'gpt-4o-mini');
+});
+
+// ─── New York deadlines ───────────────────────────────────────────────────────
+
+test('the malpractice prompts state the New York deadlines correctly', async () => {
+  const expectations = {
+    personal: {
+      present: ["Lavern's Law", 'within 1 year of discovering the object', 'notice of claim within 90 days', 'never beyond 10 years after the malpractice', '50% or less at fault'],
+      absent: ['no SOL if object left in body'],
+    },
+    estate: {
+      present: ['2 years from date of death', "within 90 days of the estate representative's appointment", 'has been vetoed four times'],
+      absent: [],
+    },
+  };
+  for (const [mode, { present, absent }] of Object.entries(expectations)) {
+    clearSearchCache();
+    const world = fakeWorld();
+    const server = await startServer(app);
+    try {
+      await withOutboundHttp(world.handler, async () => {
+        const { response } = await postJson(server.baseUrl, '/api/ask', {
+          question: 'The hospital missed my mother\'s cancer.',
+          mode,
+          sessionId: `sess-deadlines-${mode}`,
+          history: [],
+        });
+        assert.equal(response.status, 200);
+      });
+      const system = world.calls.openai.find(call => call.kind === 'answer').request.messages[0].content;
+      for (const phrase of present) assert.ok(system.includes(phrase), `the ${mode} prompt lacks: ${phrase}`);
+      for (const phrase of absent) assert.ok(!system.includes(phrase), `the ${mode} prompt still says: ${phrase}`);
+    } finally {
+      await server.close();
+    }
+  }
+});
+
+test('the deadlines shown to visitors are stated correctly', () => {
+  const page = name => readFileSync(new URL(`../public/${name}`, import.meta.url), 'utf8');
+  for (const name of ['index.html', 'script.js', 'disclaimer.html']) {
+    const text = page(name);
+    assert.doesNotMatch(text, /no limit|No SOL when a foreign object/i, `${name} still says a foreign-object claim has no deadline`);
+    assert.match(text, /foreign object[^<]{0,40}1 year|within 1 year of its discovery/i, `${name} does not give the foreign-object deadline`);
+    assert.match(text, /Lavern/, `${name} does not mention Lavern's Law`);
+    assert.match(text, /notice of claim within 90 days/, `${name} does not mention the public-hospital notice of claim`);
+  }
+  assert.match(page('disclaimer.html'), /never beyond 10 years after the malpractice/);
+});
+
+// ─── Privacy policy ───────────────────────────────────────────────────────────
+
+test('the privacy policy describes the analytics and outside services the pages use', () => {
+  const page = name => readFileSync(new URL(`../public/${name}`, import.meta.url), 'utf8');
+  const policy = page('privacy.html').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+
+  // Only these two pages load Mixpanel, with the settings the policy was written against.
+  const files = readdirSync(new URL('../public/', import.meta.url)).filter(name => /\.(html|js)$/.test(name));
+  const pagesWithAnalytics = files.filter(name => page(name).includes('mixpanel.init(')).sort();
+  assert.deepEqual(pagesWithAnalytics, ['index.html', 'register.html'], 'the policy names the pages that load Mixpanel; update it if this list changes');
+  for (const name of pagesWithAnalytics) {
+    assert.match(page(name), /mixpanel\.init\('[^']+', \{ track_pageview: true, persistence: 'localStorage' \}\)/, `${name} changed its Mixpanel settings`);
+  }
+  // Nothing ties the analytics to a person: no identify, people, alias or super-property calls.
+  for (const name of files) {
+    assert.doesNotMatch(page(name), /mixpanel\.(identify|people|alias|register(_once)?)\b/, `${name} sends Mixpanel more than the policy describes`);
+  }
+  // Every event property a page sends is one the policy describes.
+  const sent = ['script.js', 'register.html']
+    .flatMap(name => [...page(name).matchAll(/track\('([a-z_]+)',\s*\{([^}]*)\}/g)])
+    .flatMap(([, , props]) => [...props.matchAll(/([a-z_]+):/g)].map(([, key]) => key));
+  assert.deepEqual([...new Set(sent)].sort(), ['app', 'mode', 'score', 'turn_number', 'verdict'], 'a page reports something to Mixpanel that the policy does not describe');
+  for (const phrase of ['We use Mixpanel to measure how the site is used', 'the mode you are in', 'the number of the message', 'claim-strength rating and score']) {
+    assert.ok(policy.includes(phrase), `the policy no longer says: ${phrase}`);
+  }
+  assert.match(policy, /We do not send Mixpanel the text of your conversation, your name, or your phone number/);
+
+  // Every outside host a page loads a script, stylesheet or font from is named in the policy.
+  const namedAs = { 'fonts.googleapis.com': 'Google Fonts', 'fonts.gstatic.com': 'Google Fonts' };
+  const loadedHosts = new Set(files.filter(name => name.endsWith('.html')).flatMap(name =>
+    [...page(name).matchAll(/<(?:script|link)\b[^>]*\b(?:src|href)="https?:\/\/([^/"]+)/g)].map(([, host]) => host)));
+  assert.ok(loadedHosts.size > 0);
+  for (const host of loadedHosts) {
+    assert.ok(namedAs[host] && policy.includes(namedAs[host]), `pages load ${host}, which the privacy policy does not name`);
+  }
+
+  // The statements the code contradicted are gone.
+  assert.doesNotMatch(policy, /We use a single session cookie/);
+  assert.doesNotMatch(policy, /No personal data is sent to CourtListener/);
+  assert.match(policy, /our server sends CourtListener a few search keywords based on your conversation/);
 });

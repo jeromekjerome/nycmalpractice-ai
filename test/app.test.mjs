@@ -35,6 +35,7 @@ globalThis.fetch = (...args) => activeFetch(...args);
 const { default: app } = await import('../server.js');
 const { clearSearchCache, extractCaseType, searchMalpracticeCases } = await import('../courtlistener.js');
 const { scoreLead } = await import('../auction.js');
+const { CONVERSATION_RETENTION_DAYS } = await import('../retention.js');
 
 async function getJsonIfPossible(response) {
   const contentType = response.headers.get('content-type') || '';
@@ -379,7 +380,7 @@ test('GET /api/cron with the cron secret closes auctions, declines overdue leads
     await withOutboundHttp(world.handler, async () => {
       const response = await fetch(`${server.baseUrl}/api/cron`, { headers: { authorization: `Bearer ${process.env.CRON_SECRET}` } });
       assert.equal(response.status, 200);
-      assert.deepEqual(await response.json(), { ok: true, closed: 0, declined: 0 });
+      assert.deepEqual(await response.json(), { ok: true, closed: 0, declined: 0, purged: { conversations: 0, messages: 0 } });
     });
     const queries = world.calls.sql.map(call => call.query);
     assert.ok(queries.some(query => /FROM auctions WHERE status = 'open' AND closes_at < NOW\(\)/.test(query)), 'expired auctions were not looked up');
@@ -388,6 +389,33 @@ test('GET /api/cron with the cron secret closes auctions, declines overdue leads
   } finally {
     await server.close();
   }
+});
+
+test('the nightly job deletes conversations after the 90 days the privacy policy promises', async () => {
+  const world = fakeWorld();
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(world.handler, async () => {
+      const response = await fetch(`${server.baseUrl}/api/cron`, { headers: { authorization: `Bearer ${process.env.CRON_SECRET}` } });
+      assert.equal(response.status, 200);
+    });
+    const purge = world.calls.sql.find(call => /^DELETE FROM conversations WHERE updated_at < NOW\(\) - make_interval\(days => \$1\)/.test(call.query));
+    assert.ok(purge, 'expired conversations were not deleted');
+    assert.equal(String(purge.params[0]), '90');
+    const scrub = world.calls.sql.find(call => /^UPDATE user_interactions SET question = NULL WHERE question IS NOT NULL AND created_at < NOW\(\) - make_interval\(days => \$1\)/.test(call.query));
+    assert.ok(scrub, 'the text of expired messages was not removed');
+    assert.equal(String(scrub.params[0]), '90');
+    // Lead records sold to firms are kept for 3 years, so the nightly job never deletes them.
+    assert.ok(!world.calls.sql.some(call => /DELETE FROM (auctions|leads)/.test(call.query)));
+  } finally {
+    await server.close();
+  }
+
+  // The number in the code is the number in the policy.
+  assert.equal(CONVERSATION_RETENTION_DAYS, 90);
+  const policy = readFileSync(new URL('../public/privacy.html', import.meta.url), 'utf8').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+  assert.ok(policy.includes(`retained for ${CONVERSATION_RETENTION_DAYS} days after your last message`));
+  assert.ok(policy.includes('the conversation and the text of your messages are automatically deleted'));
 });
 
 // ─── Work that must finish before the reply ───────────────────────────────────

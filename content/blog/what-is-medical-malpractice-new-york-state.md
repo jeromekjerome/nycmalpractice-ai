@@ -2,7 +2,7 @@
 title: What is Medical Malpractice in New York State? Understanding Healthcare Negligence
 date: 2026-04-01
 description: Learn what constitutes medical malpractice in New York. Understand the legal standard and your rights as a patient.
-author: LegalisLaw Editorial
+author: NYCMalpractice.ai Editorial
 tags: medical malpractice, New York, patient rights, healthcare negligence
 ---
 
@@ -33,7 +33,7 @@ You suffered actual harm or injury as a result of the breach. This can include p
 Medical malpractice can take many forms:
 
 ### Misdiagnosis or Delayed Diagnosis
-A physician fails to diagnose a serious condition in a timely manner, resulting in disease progression and worsening of the patient's condition. For example, [missing a cancer diagnosis](https://legalislaw-hub.com/) when signs were present in imaging or test results.
+A physician fails to diagnose a serious condition in a timely manner, resulting in disease progression and worsening of the patient's condition. For example, missing a cancer diagnosis when signs were present in imaging or test results.
 
 ### Surgical Errors
 A surgeon operates on the wrong body part, leaves a surgical instrument inside the patient, or damages healthy tissue during surgery.
@@ -65,7 +65,14 @@ Because medical malpractice cases involve complex medical and scientific issues,
 
 ## Time Limits for Filing
 
-New York imposes strict time limits—called statutes of limitations—for filing medical malpractice claims. Generally, you have **2.5 years** from the date of the negligent act or the date you discovered (or should have discovered) the injury, whichever is later. However, the absolute deadline is **5 years** from the date of the negligent act.
+New York imposes strict time limits—called statutes of limitations—for filing medical malpractice claims. Generally, you have **2 years and 6 months** from the date of the negligent act or omission, or from the end of continuous treatment for the same condition (CPLR §214-a). In most cases the clock runs whether or not you knew about the mistake. Discovery matters in only two situations:
+
+- **A foreign object left in your body:** you have 1 year from when you discovered it, or reasonably should have, even if the 2 years and 6 months have already run.
+- **A missed cancer diagnosis (Lavern's Law):** the 2 years and 6 months run from when you knew, or reasonably should have known, of the error and the harm it caused, but the lawsuit must be filed no later than 7 years after the error.
+
+Some deadlines are much shorter. A claim against NYC Health + Hospitals, such as Bellevue, Kings County or Elmhurst, or against another city- or county-run hospital, needs a notice of claim within **90 days** and a lawsuit within 1 year and 90 days. A wrongful death claim must be filed within **2 years** of the death. For a child, the deadline is extended, but in malpractice cases never beyond 10 years after the malpractice (CPLR §208).
+
+Because these rules have exceptions, have an attorney confirm your deadline as soon as possible.
 
 ## Damages You Can Recover
 
@@ -79,4 +86,4 @@ If you successfully prove medical malpractice, you may be entitled to recover:
 
 Medical malpractice cases are complex and require experienced legal representation. An attorney can help you understand whether your situation constitutes malpractice, gather necessary evidence and expert testimony, and pursue fair compensation for your injuries.
 
-Start your free AI case analysis at [APP_URL]
+Start your free AI case analysis on our [home page](/).

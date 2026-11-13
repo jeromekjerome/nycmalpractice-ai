@@ -34,7 +34,7 @@ export function getBlogPosts() {
     const slug = file.replace(/\.md$/, '');
     const raw = readFileSync(join(BLOG_DIR, file), 'utf8');
     const { meta } = parseFrontmatter(raw);
-    return { slug, title: meta.title || slug, date: meta.date || '', description: meta.description || '', author: meta.author || 'LegalisLaw Editorial', tags: meta.tags ? meta.tags.split(',').map(t => t.trim()) : [] };
+    return { slug, title: meta.title || slug, date: meta.date || '', description: meta.description || '', author: meta.author || 'NYCMalpractice.ai Editorial', tags: meta.tags ? meta.tags.split(',').map(t => t.trim()) : [] };
   }).filter(p => p.date);
   return posts.sort((a, b) => new Date(b.date) - new Date(a.date));
 }
@@ -43,7 +43,7 @@ export function getBlogPost(slug) {
   if (!existsSync(filePath)) return null;
   const raw = readFileSync(filePath, 'utf8');
   const { meta, body } = parseFrontmatter(raw);
-  return { slug, title: meta.title || slug, date: meta.date || '', description: meta.description || '', author: meta.author || 'LegalisLaw Editorial', tags: meta.tags ? meta.tags.split(',').map(t => t.trim()) : [], html: marked.parse(body), canonical: meta.canonical || '' };
+  return { slug, title: meta.title || slug, date: meta.date || '', description: meta.description || '', author: meta.author || 'NYCMalpractice.ai Editorial', tags: meta.tags ? meta.tags.split(',').map(t => t.trim()) : [], html: marked.parse(body), canonical: meta.canonical || '' };
 }
 const CSS = `
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }

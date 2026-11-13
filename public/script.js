@@ -47,8 +47,8 @@ modeToggle.addEventListener('change', async () => {
     ? 'Wrongful Death SOL'
     : 'NY Statute of Limitations';
   document.getElementById('solText').innerHTML = currentMode === 'estate'
-    ? '<strong style="color:var(--text)">Wrongful death:</strong> 2 years from date of death (EPTL §5-4.1)<br><br>The action is brought by the estate administrator, not the family directly. Estate appointment may be required first. <em>Act promptly.</em>'
-    : '<strong style="color:var(--text)">Personal injury:</strong> 2.5 years from the act or omission<br><br><strong style="color:var(--text)">Wrongful death:</strong> 2 years from date of death<br><br>Exceptions: foreign object (no limit), continuous treatment doctrine, infancy toll. <em>Act promptly.</em>';
+    ? '<strong style="color:var(--text)">Wrongful death:</strong> 2 years from date of death (EPTL §5-4.1)<br><br><strong style="color:var(--text)">Public hospitals:</strong> notice of claim within 90 days after an administrator is appointed<br><br>The action is brought by the estate administrator, not the family directly. Estate appointment may be required first. <em>Act promptly.</em>'
+    : '<strong style="color:var(--text)">Personal injury:</strong> 2.5 years from the act or omission, or from the last treatment for the same condition<br><br><strong style="color:var(--text)">Public hospitals:</strong> notice of claim within 90 days; lawsuit within 1 year and 90 days<br><br><strong style="color:var(--text)">Wrongful death:</strong> 2 years from date of death<br><br>Later deadlines: foreign object (1 year from discovery), missed cancer diagnosis (Lavern’s Law, up to 7 years), infancy (no more than 10 years). <em>Act promptly.</em>';
 });
 
 function updateModeUI() {

@@ -20,7 +20,7 @@
 
     <div class="glass-panel content-card">
       <h1>Privacy Policy</h1>
-      <div class="content-date">Effective: March 2026</div>
+      <div class="content-date">Effective: November 2026</div>
 
       <div class="highlight-box">
         <strong>Medical malpractice conversations are highly sensitive.</strong> We take privacy seriously. We will never sell your conversation data or share it with anyone other than the law firm you are connected with — and only with your implicit consent by using this service.
@@ -55,14 +55,21 @@
       <p>Client session conversations are retained for 90 days to allow you to return to your conversation. After 90 days, conversations are automatically deleted. Law firm lead records are retained for 3 years for billing and compliance purposes.</p>
 
       <h2>Cookies</h2>
-      <p>We use a single session cookie (<code>malpractice_session</code>) to identify your conversation across visits. This cookie contains only a random identifier — no personal information. It expires after 90 days.</p>
+      <p>We set one cookie of our own (<code>malpractice_session</code>) to identify your conversation across visits. It contains only a random identifier — no personal information — and expires after 90 days. We do not use advertising cookies. Our analytics provider keeps its own identifier in your browser, as described under Analytics below.</p>
+
+      <h2>Analytics</h2>
+      <p>We use Mixpanel to measure how the site is used. When you open the home page or the law firm registration page, and when you take certain actions there, your browser sends Mixpanel a record of it. Those actions are starting a session, switching between the "I Was Harmed" and "A Loved One Died" modes, sending a message, seeing a case analysis, and, for law firms, starting and completing registration and starting checkout. The record says which action it was and can include the mode you are in, the number of the message within the conversation, and the claim-strength rating and score shown in a case analysis. Mixpanel also collects standard technical details automatically, such as your browser and operating system, screen size, the address of the page you are on and of the page you came from, and an approximate location (city, region and country) that it works out from your IP address; Mixpanel states that it does not store the IP address itself. Mixpanel keeps a randomly generated identifier in your browser so that visits from the same browser can be recognized. It is kept in local storage, where it remains until you clear this site's data, or, if local storage is unavailable, in a cookie that lasts up to a year. We do not send Mixpanel the text of your conversation, your name, or your phone number.</p>
 
       <h2>Third-Party Services</h2>
       <ul>
         <li><strong>OpenAI:</strong> Your conversation messages are sent to OpenAI to generate AI responses. OpenAI's privacy policy applies: openai.com/privacy</li>
-        <li><strong>CourtListener:</strong> Case law searches use the CourtListener API (Free Law Project). No personal data is sent to CourtListener.</li>
+        <li><strong>CourtListener:</strong> Case law searches use the CourtListener API (Free Law Project). To find relevant cases, our server sends CourtListener a few search keywords based on your conversation, which can include words you typed. It does not send your IP address or the conversation itself.</li>
         <li><strong>Stripe:</strong> Payment processing for law firm subscriptions. Stripe's privacy policy applies: stripe.com/privacy</li>
         <li><strong>Neon:</strong> Database hosting. Data is stored in Neon's PostgreSQL cloud database with encryption at rest.</li>
+        <li><strong>Vercel:</strong> Hosts the site and, like any web host, receives the IP address and browser details of each visit. Vercel's privacy policy applies: vercel.com/legal/privacy-policy</li>
+        <li><strong>Mixpanel:</strong> Measures how the site is used, as described under Analytics above. Mixpanel's privacy policy applies: mixpanel.com/legal/privacy-policy</li>
+        <li><strong>Google Fonts:</strong> Supplies the typefaces our pages use. Your browser downloads them directly from Google, so Google receives your IP address and browser details when a page loads. Google's privacy policy applies: policies.google.com/privacy</li>
+        <li><strong>Twilio:</strong> Sends SMS verification codes to law firms during registration. Twilio's privacy policy applies: twilio.com/en-us/legal/privacy</li>
       </ul>
 
       <h2>Your Rights</h2>

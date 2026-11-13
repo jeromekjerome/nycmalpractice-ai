@@ -5,9 +5,15 @@ import OpenAI from 'openai';
 import nodemailer from 'nodemailer';
 import { getActiveFirms, createMagicLink, getFirm, recordDecline } from './firms.js';
 import { chargeCustomer, createRefund } from './stripe.js';
+import { buildModelList, chatCompletionsWithFallback } from './openaiModelFailover.js';
+import { APP_URL } from './site.js';
 
 const sql    = neon(process.env.DATABASE_URL);
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const AUX_MODELS = buildModelList(
+  process.env.OPENAI_MODEL_AUX || 'gpt-4o-mini',
+  process.env.OPENAI_MODEL_AUX_FALLBACKS || 'gpt-5.4-mini,gpt-4.1'
+);
 
 export const TIER_CONFIG = {
   cold:    { label: 'Cold',    minScore: 55, maxScore: 69, reserve: 25,  auctionHours: 0, color: '#6b7a94' },
@@ -27,8 +33,8 @@ export async function scoreLead(question, history, caseType, mode) {
   try {
     const histText = history.map(h => `${h.role}: ${h.content}`).join('\n');
 
-    const res = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+    const res = await chatCompletionsWithFallback(openai, {
+      models: AUX_MODELS,
       messages: [{
         role: 'user',
         content: `You are a NYC medical malpractice case evaluator for a law firm lead marketplace.
@@ -59,7 +65,7 @@ Respond ONLY with valid JSON:
 
 A viable lead requires score >= 55 AND confidence >= 0.65.
 sol_status: score 10 if well within SOL, lower if approaching deadline, 1-2 if likely expired.
-Malpractice SOL in NY: 2.5 years from act/omission (personal); 2 years from death (wrongful death).`,
+Malpractice SOL in NY: 2.5 years from act/omission or the end of continuous treatment (personal); 2 years from death (wrongful death). A missed cancer diagnosis runs from discovery (Lavern's Law, 7-year outer limit); a foreign object allows 1 year from discovery. Public hospitals: 90-day notice of claim and 1 year and 90 days to sue.`,
       }],
       response_format: { type: 'json_object' },
       max_tokens: 300,
@@ -224,7 +230,7 @@ function getTransporter() {
 }
 
 async function sendLeadDeliveryEmail(firm, leadId, token, leadData, scoreData, tier) {
-  const url        = `${process.env.APP_URL}/lead.html?id=${leadId}&token=${token}`;
+  const url        = `${APP_URL}/lead.html?id=${leadId}&token=${token}`;
   const tierConfig = TIER_CONFIG[tier] || TIER_CONFIG.cold;
   const data       = typeof leadData === 'string' ? JSON.parse(leadData) : leadData;
   const t          = getTransporter();
@@ -241,7 +247,7 @@ async function notifyAllFirms(auction) {
   for (const firm of firms) {
     try {
       const token    = await createMagicLink(firm.id, { auctionId: auction.id, expiresInHours: config.auctionHours + 1 });
-      const url      = `${process.env.APP_URL}/auction.html?id=${auction.id}&token=${token}`;
+      const url      = `${APP_URL}/auction.html?id=${auction.id}&token=${token}`;
       const closesAt = new Date(auction.closes_at).toLocaleString('en-US', { timeZone: 'America/New_York' });
       const html = `<div style="font-family:sans-serif;max-width:640px;margin:auto"><h2 style="color:#9e3a5a">🔔 New Malpractice Lead Auction — ${config.label}</h2><p><strong>Preview:</strong><br>${auction.lead_preview}</p><p>Reserve: $${config.reserve} · Closes: ${closesAt} ET</p><p><a href="${url}" style="background:#9e3a5a;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600">Bid →</a></p></div>`;
       if (t) { await t.sendMail({ from: process.env.SMTP_USER, to: firm.email, subject: `🔔 Malpractice Lead Auction: ${config.label} — Closes in ${config.auctionHours}h`, html }); }

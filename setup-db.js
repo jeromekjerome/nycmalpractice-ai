@@ -41,6 +41,7 @@ async function setup() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     )
   `;
+  await sql`ALTER TABLE phone_codes ADD COLUMN IF NOT EXISTS attempts INT DEFAULT 0`;  // wrong guesses for this code
 
   await sql`
     CREATE TABLE IF NOT EXISTS firm_tokens (

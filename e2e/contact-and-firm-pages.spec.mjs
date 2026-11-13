@@ -150,3 +150,32 @@ test('the auction page shows the case summary without contact details and places
   await expect(page.locator('#bidMessage')).toContainText('Bid of $250.00 placed');
   expect(bid).toEqual({ token: 't1', amount: 250 });
 });
+
+test('firm sign-up sends its registration token with every later step, and keeps the contact name', async ({ page }) => {
+  const sent = {};
+  await page.route('**/api/firms/register', route => route.fulfill(json({ firmId: 7, isNew: true, phoneVerified: false, registrationToken: 'reg-token' })));
+  await page.route('**/api/firms/verify-phone', async route => { sent.verify = route.request().postDataJSON(); await route.fulfill(json({ ok: true })); });
+  await page.route('**/api/firms/7/profile', async route => { sent.profile = route.request().postDataJSON(); await route.fulfill(json({ ok: true })); });
+  await page.route('**/api/billing/checkout', async route => { sent.checkout = route.request().postDataJSON(); await route.fulfill(json({ url: '/register.html?subscribed=1' })); });
+
+  await page.goto('/register.html');
+  await page.locator('#firmName').fill('Roe & Partners');
+  await page.locator('#contactName').fill('Pat Lee');
+  await page.locator('#firmEmail').fill('intake@roe.example');
+  await page.locator('#firmPhone').fill('5551234567');
+  await page.locator('button[onclick="registerFirm()"]').click();
+
+  const digits = page.locator('.otp-digit');
+  for (let i = 0; i < 6; i += 1) await digits.nth(i).fill(String(i + 1));
+  await page.locator('button[onclick="verifyPhone()"]').click();
+  expect(sent.verify).toEqual({ firmId: 7, code: '123456', token: 'reg-token' });
+
+  await page.locator('.spec-item input[value="dental"]').check();
+  await page.locator('#serviceArea').fill('Brooklyn');
+  await page.locator('button[onclick="saveProfile()"]').click();
+  await expect.poll(() => sent.profile).toBeTruthy();
+  expect(sent.profile).toEqual({ specializations: ['dental'], serviceArea: 'Brooklyn', contactName: 'Pat Lee', token: 'reg-token' });
+
+  await page.locator('button[onclick="goCheckout()"]').click();
+  await expect.poll(() => sent.checkout).toEqual({ firmId: 7, token: 'reg-token' });
+});

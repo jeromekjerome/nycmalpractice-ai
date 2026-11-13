@@ -169,6 +169,8 @@
 
   <script>
     let firmId = null;
+    // Returned by the first step; the later steps send it to show they belong to this registration.
+    let registrationToken = sessionStorage.getItem('malpractice_registration_token');
     let currentStep = 1;
 
     const urlParams = new URLSearchParams(window.location.search);
@@ -198,8 +200,10 @@
         const data = await res.json();
         if (data.error) { showErr(errEl, data.error); return; }
         firmId = data.firmId;
+        registrationToken = data.registrationToken;
         sessionStorage.setItem('malpractice_firm_id', firmId);
-        if (contact) await fetch(`/api/firms/${firmId}/profile`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contactName: contact }) });
+        sessionStorage.setItem('malpractice_registration_token', registrationToken);
+        if (data.notice) showErr(document.getElementById('step2Error'), data.notice);
         if (data.phoneVerified) { goStep(3); } else { goStep(2); }
       } catch (e) { showErr(errEl, 'Server error. Please try again.'); }
     }
@@ -214,25 +218,29 @@
       const digits = [...document.querySelectorAll('.otp-digit')].map(i => i.value).join('');
       const errEl  = document.getElementById('step2Error');
       if (digits.length !== 6) { showErr(errEl, 'Please enter the 6-digit code.'); return; }
-      const res  = await fetch('/api/firms/verify-phone', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ firmId, code: digits }) });
+      const res  = await fetch('/api/firms/verify-phone', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ firmId, code: digits, token: registrationToken }) });
       const data = await res.json();
-      if (data.ok) { goStep(3); } else { showErr(errEl, 'Incorrect code. Please try again.'); }
+      if (data.ok) { goStep(3); } else { showErr(errEl, data.error || 'Incorrect code. Please try again.'); }
     }
 
     async function resendCode() {
-      await fetch('/api/firms/resend-code', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ firmId }) });
-      alert('A new code has been sent.');
+      const res  = await fetch('/api/firms/resend-code', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ firmId, token: registrationToken }) });
+      const data = await res.json().catch(() => ({}));
+      const errEl = document.getElementById('step2Error');
+      if (res.ok) { errEl.style.display = 'none'; alert('A new code has been sent.'); } else { showErr(errEl, data.error || 'The code could not be sent. Please try again.'); }
     }
 
     async function saveProfile() {
       const specs = [...document.querySelectorAll('.spec-item input:checked')].map(i => i.value);
       const area  = document.getElementById('serviceArea').value.trim();
-      await fetch(`/api/firms/${firmId}/profile`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ specializations: specs, serviceArea: area }) });
+      // The contact name from the first step is saved here with the rest of the profile.
+      const contactName = document.getElementById('contactName').value.trim() || null;
+      await fetch(`/api/firms/${firmId}/profile`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ specializations: specs, serviceArea: area, contactName, token: registrationToken }) });
       goStep(4);
     }
 
     async function goCheckout() {
-      const res  = await fetch('/api/billing/checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ firmId }) });
+      const res  = await fetch('/api/billing/checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ firmId, token: registrationToken }) });
       const data = await res.json();
       if (data.url) { track('partner_checkout_initiated', { app: 'malpractice-ai' }); window.location.href = data.url; }
     }

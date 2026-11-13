@@ -30,13 +30,39 @@ export async function registerFirm({ name, email, phone }) {
   return { firm, isNew: true };
 }
 
-export async function sendVerificationCode(firmId) {
-  const code      = String(Math.floor(100000 + Math.random() * 900000));
-  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+// Thrown when a verification text may not be sent yet; the message is safe to show.
+export class VerificationLimitError extends Error {}
 
+const CODE_TTL_MS = 10 * 60 * 1000;
+const MAX_CODES_PER_HOUR = 5;          // per firm, and per phone number across firms
+const MIN_SECONDS_BETWEEN_CODES = 60;
+const MAX_ATTEMPTS_PER_CODE = 5;
+
+export async function sendVerificationCode(firmId) {
+  const [firm] = await sql`SELECT phone FROM firms WHERE id = ${firmId}`;
+  if (!firm) return false;
+
+  // Each text costs money, and an open endpoint could be used to text any number, so the limits are
+  // kept in the database where they hold across server instances.
+  const [recent] = await sql`
+    SELECT count(*) FILTER (WHERE pc.firm_id = ${firmId})::int AS for_firm,
+           count(*)::int AS for_phone,
+           count(*) FILTER (WHERE pc.firm_id = ${firmId} AND pc.created_at > NOW() - make_interval(secs => ${MIN_SECONDS_BETWEEN_CODES}))::int AS just_sent
+    FROM phone_codes pc JOIN firms f ON f.id = pc.firm_id
+    WHERE f.phone = ${firm.phone} AND pc.created_at > NOW() - INTERVAL '1 hour'`;
+  if ((recent?.for_firm || 0) >= MAX_CODES_PER_HOUR || (recent?.for_phone || 0) >= MAX_CODES_PER_HOUR) {
+    throw new VerificationLimitError('Too many codes have been requested for this phone number. Please try again in an hour.');
+  }
+  if ((recent?.just_sent || 0) > 0) {
+    throw new VerificationLimitError('Please wait a minute before requesting another code.');
+  }
+
+  // Only the newest code works.
+  await sql`UPDATE phone_codes SET expires_at = NOW() WHERE firm_id = ${firmId} AND verified = FALSE AND expires_at > NOW()`;
+  const code      = String(crypto.randomInt(100000, 1000000));
+  const expiresAt = new Date(Date.now() + CODE_TTL_MS);
   await sql`INSERT INTO phone_codes (firm_id, code, expires_at) VALUES (${firmId}, ${code}, ${expiresAt})`;
 
-  const [firm] = await sql`SELECT phone FROM firms WHERE id = ${firmId}`;
   const client  = twilioClient();
 
   if (client && firm?.phone) {
@@ -52,13 +78,22 @@ export async function sendVerificationCode(firmId) {
 }
 
 export async function verifyPhoneCode(firmId, code) {
-  const rows = await sql`
-    SELECT id FROM phone_codes
-    WHERE firm_id = ${firmId} AND code = ${code} AND verified = FALSE AND expires_at > NOW()
+  // Only the newest unexpired code counts, and it stops working after a few wrong guesses.
+  const [current] = await sql`
+    SELECT id, code FROM phone_codes
+    WHERE firm_id = ${firmId} AND verified = FALSE AND expires_at > NOW()
     ORDER BY created_at DESC LIMIT 1
   `;
-  if (rows.length === 0) return false;
-  await sql`UPDATE phone_codes SET verified = TRUE WHERE id = ${rows[0].id}`;
+  if (!current) return false;
+  if (String(code) !== String(current.code)) {
+    await sql`
+      UPDATE phone_codes
+      SET attempts = COALESCE(attempts, 0) + 1,
+          expires_at = CASE WHEN COALESCE(attempts, 0) + 1 >= ${MAX_ATTEMPTS_PER_CODE} THEN NOW() ELSE expires_at END
+      WHERE id = ${current.id}`;
+    return false;
+  }
+  await sql`UPDATE phone_codes SET verified = TRUE WHERE id = ${current.id}`;
   await sql`UPDATE firms SET phone_verified = TRUE WHERE id = ${firmId}`;
   return true;
 }
@@ -94,7 +129,8 @@ export async function getActiveFirms(caseType = null) {
       SELECT * FROM firms
       WHERE active = TRUE AND phone_verified = TRUE AND subscription_active = TRUE
         AND (suspended_until IS NULL OR suspended_until < NOW())
-        AND (specializations IS NULL OR array_length(specializations, 1) IS NULL OR ${caseType} = ANY(specializations))
+        -- "All Malpractice" on the registration form is stored as 'other' and means every case type.
+        AND (specializations IS NULL OR array_length(specializations, 1) IS NULL OR 'other' = ANY(specializations) OR ${caseType} = ANY(specializations))
     `;
   }
   return sql`

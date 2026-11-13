@@ -1057,3 +1057,175 @@ test('a tailored search that answers in time is used without a second request', 
   assert.equal(cases.length, 1);
   assert.deepEqual(requests, ['medical malpractice surgery (retained OR sponge)']);
 });
+
+// ─── Firm accounts and abuse limits ───────────────────────────────────────────
+
+const { resetRateLimits } = await import('../rate-limit.js');
+
+/** A database that knows one firm (7), one valid registration token for it, and recent codes. */
+function firmWorld({ recentCodes = { forFirm: 0, forPhone: 0, justSent: 0 }, currentCode = null } = {}) {
+  const calls = [];
+  const handler = async (url, init) => {
+    if (!url.endsWith('/sql')) throw new Error(`Unexpected outbound request in test: ${url}`);
+    const { query, params } = JSON.parse(init.body);
+    const q = query.replace(/\s+/g, ' ').trim();
+    calls.push({ query: q, params });
+    if (/FROM firm_tokens/.test(q)) {
+      return params.includes('good-token') ? rowsResponse([['firm_id', INT], ['name', TEXT]], [['7', 'Test Firm']]) : rowsResponse([], []);
+    }
+    if (/^SELECT id FROM firms WHERE email/.test(q)) return rowsResponse([['id', INT]], [['7']]);
+    if (/^SELECT phone FROM firms WHERE id/.test(q)) return rowsResponse([['phone', TEXT]], [['+15551234567']]);
+    if (/FROM phone_codes pc JOIN firms f/.test(q)) {
+      return rowsResponse([['for_firm', INT], ['for_phone', INT], ['just_sent', INT]],
+        [[String(recentCodes.forFirm), String(recentCodes.forPhone), String(recentCodes.justSent)]]);
+    }
+    if (/^SELECT id, code FROM phone_codes/.test(q)) {
+      return currentCode ? rowsResponse([['id', INT], ['code', TEXT]], [['31', currentCode]]) : rowsResponse([], []);
+    }
+    return jsonResponse(EMPTY_ROWS);
+  };
+  return { calls, handler };
+}
+
+async function withoutTexts(fn) {
+  // With no Twilio account configured the code is only logged, so no test sends a real text.
+  const sid = process.env.TWILIO_ACCOUNT_SID;
+  delete process.env.TWILIO_ACCOUNT_SID;
+  try {
+    return await fn();
+  } finally {
+    process.env.TWILIO_ACCOUNT_SID = sid;
+  }
+}
+
+test('the registration steps need their registration token, and a registered email gets no way in', async () => {
+  const world = firmWorld();
+  const server = await startServer(app);
+  const send = (path, payload, method = 'POST') => fetch(`${server.baseUrl}${path}`, {
+    method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload),
+  }).then(async response => ({ status: response.status, body: await response.json() }));
+  try {
+    await withOutboundHttp(world.handler, async () => {
+      // Someone who knows a registered firm's email gets neither its number's steps nor a token.
+      const again = await send('/api/firms/register', { name: 'Other', email: 'firm@example.test', phone: '5550000000' });
+      assert.equal(again.status, 409);
+      assert.equal(again.body.registrationToken, undefined);
+      assert.match(again.body.error, /already registered/);
+
+      for (const [path, payload, method] of [
+        ['/api/firms/verify-phone', { firmId: 7, code: '123456' }],
+        ['/api/firms/resend-code', { firmId: 7 }],
+        ['/api/firms/7/profile', { specializations: ['dental'] }, 'PUT'],
+        ['/api/billing/checkout', { firmId: 7 }],
+      ]) {
+        for (const token of [undefined, 'wrong-token']) {
+          const { status } = await send(path, { ...payload, token }, method);
+          assert.equal(status, 401, `${path} without a valid token`);
+        }
+      }
+      // A valid token for firm 7 does not open firm 8.
+      assert.equal((await send('/api/firms/8/profile', { specializations: ['dental'], token: 'good-token' }, 'PUT')).status, 401);
+
+      // With the token, the step goes ahead.
+      const saved = await send('/api/firms/7/profile', { specializations: ['dental'], serviceArea: 'Brooklyn', contactName: 'Pat Lee', token: 'good-token' }, 'PUT');
+      assert.equal(saved.status, 200);
+      const update = world.calls.find(call => /^UPDATE firms SET specializations/.test(call.query));
+      assert.ok(update.params.includes('Pat Lee'), 'the contact name was not saved with the profile');
+    });
+  } finally {
+    await server.close();
+  }
+});
+
+test('verification texts are limited per firm and per phone number, and only the newest code works', async () => {
+  await withoutTexts(async () => {
+    const { sendVerificationCode, verifyPhoneCode, VerificationLimitError } = await import('../firms.js');
+
+    for (const recentCodes of [{ forFirm: 5, forPhone: 5, justSent: 0 }, { forFirm: 1, forPhone: 6, justSent: 0 }, { forFirm: 1, forPhone: 1, justSent: 1 }]) {
+      const world = firmWorld({ recentCodes });
+      await withOutboundHttp(world.handler, async () => {
+        await assert.rejects(sendVerificationCode(7), VerificationLimitError, JSON.stringify(recentCodes));
+      });
+      assert.ok(!world.calls.some(call => /^INSERT INTO phone_codes/.test(call.query)), 'a code was sent over the limit');
+    }
+
+    const world = firmWorld();
+    await withOutboundHttp(world.handler, () => sendVerificationCode(7));
+    const invalidate = world.calls.findIndex(call => /^UPDATE phone_codes SET expires_at = NOW\(\) WHERE firm_id/.test(call.query));
+    const insert = world.calls.findIndex(call => /^INSERT INTO phone_codes/.test(call.query));
+    assert.ok(invalidate >= 0 && insert > invalidate, 'older codes were not retired before the new one');
+    assert.match(String(world.calls[insert].params[1]), /^\d{6}$/);
+
+    // A wrong guess counts against the code; the right one verifies the phone.
+    const guessing = firmWorld({ currentCode: '424242' });
+    await withOutboundHttp(guessing.handler, async () => {
+      assert.equal(await verifyPhoneCode(7, '111111'), false);
+      assert.equal(await verifyPhoneCode(7, '424242'), true);
+    });
+    assert.ok(guessing.calls.some(call => /SET attempts = COALESCE\(attempts, 0\) \+ 1/.test(call.query)), 'a wrong guess was not counted');
+    assert.ok(guessing.calls.some(call => /^UPDATE firms SET phone_verified = TRUE/.test(call.query)));
+  });
+
+  // Over the limit, the resend endpoint answers 429 with the reason.
+  const limited = firmWorld({ recentCodes: { forFirm: 5, forPhone: 5, justSent: 0 } });
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(limited.handler, async () => {
+      const { response, body } = await postJson(server.baseUrl, '/api/firms/resend-code', { firmId: 7, token: 'good-token' });
+      assert.equal(response.status, 429);
+      assert.match(body.error, /Too many codes/);
+    });
+  } finally {
+    await server.close();
+  }
+});
+
+test('one client cannot send unlimited chat messages', async () => {
+  const previous = process.env.RATE_LIMITS_IN_TESTS;
+  process.env.RATE_LIMITS_IN_TESTS = '1';
+  resetRateLimits();
+  const server = await startServer(app);
+  try {
+    // Empty messages are refused before any AI call, so the limit is reached without spending anything.
+    for (let i = 0; i < 20; i += 1) {
+      const response = await fetch(`${server.baseUrl}/api/ask`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+      assert.equal(response.status, 400);
+    }
+    const blocked = await fetch(`${server.baseUrl}/api/ask`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    assert.equal(blocked.status, 429);
+    assert.match((await blocked.json()).error, /wait a few minutes/);
+  } finally {
+    await server.close();
+    resetRateLimits();
+    if (previous === undefined) delete process.env.RATE_LIMITS_IN_TESTS;
+    else process.env.RATE_LIMITS_IN_TESTS = previous;
+  }
+});
+
+test('the admin and job routes are closed when their secret is not configured', async () => {
+  const admin = process.env.ADMIN_SECRET;
+  const cron = process.env.CRON_SECRET;
+  delete process.env.ADMIN_SECRET;
+  delete process.env.CRON_SECRET;
+  const server = await startServer(app);
+  try {
+    assert.equal((await fetch(`${server.baseUrl}/api/admin/firms`)).status, 503);
+    assert.equal((await fetch(`${server.baseUrl}/api/admin/firms`, { headers: { 'x-admin-secret': '' } })).status, 503);
+    assert.equal((await fetch(`${server.baseUrl}/api/cron`)).status, 503);
+    assert.equal((await fetch(`${server.baseUrl}/api/cron/close-auctions`, { headers: { authorization: 'Bearer ' } })).status, 503);
+  } finally {
+    await server.close();
+    process.env.ADMIN_SECRET = admin;
+    process.env.CRON_SECRET = cron;
+  }
+});
+
+test('a firm that chose All Malpractice is offered every case type', async () => {
+  const { getActiveFirms } = await import('../firms.js');
+  const calls = [];
+  await withOutboundHttp(async (url, init) => {
+    calls.push(JSON.parse(init.body).query.replace(/\s+/g, ' '));
+    return jsonResponse(EMPTY_ROWS);
+  }, () => getActiveFirms('dental'));
+  assert.match(calls[0], /'other' = ANY\(specializations\) OR \$1 = ANY\(specializations\)/);
+});

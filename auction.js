@@ -97,15 +97,17 @@ Malpractice SOL in NY: 2.5 years from act/omission or the end of continuous trea
 //                              decline and charge someone else.
 // A charge declined on the stored card is tried once on each other card Stripe holds for the firm: a firm that
 // replaced its card under Manage Billing used to have every lead charged to the old one.
+// Each attempt's idempotency key names the card it charges. Stripe refuses a key reused with other details, so a
+// key without the card, reused after the firm changed its card, made the charge look like one of unknown outcome.
+// A second run of the same delivery repeats the same attempts with the same keys, so it cannot charge twice.
 async function chargeFirm(firm, amountDollars, description, metadata, idempotencyKey) {
   if (!firm?.stripe_customer_id) {
     console.warn(`Firm ${firm?.id} has no Stripe customer; not charged for: ${description}`);
     return { status: 'declined', reason: 'There is no billing account on file for your firm.' };
   }
+  const attempt = card => chargeCard(firm, card, amountDollars, description, metadata, `${idempotencyKey}-${card}`);
   const stored = firm.stripe_payment_method_id || null;
-  const first = stored
-    ? await chargeCard(firm, stored, amountDollars, description, metadata, idempotencyKey)
-    : { status: 'declined', reason: 'There is no card on file for your firm.' };
+  const first = stored ? await attempt(stored) : { status: 'declined', reason: 'There is no card on file for your firm.' };
   if (first.status === 'charged') { await clearCardDeclined(firm.id).catch(() => {}); return first; }
   if (first.status !== 'declined') return first;
 
@@ -113,8 +115,7 @@ async function chargeFirm(firm, amountDollars, description, metadata, idempotenc
     .catch(err => { console.error(`The cards on file for firm ${firm.id} could not be read:`, err.message); return []; }))
     .filter(card => card !== stored);
   for (const card of others) {
-    // Its own key: Stripe refuses a key reused with different details, and a second run repeats each attempt.
-    const retry = await chargeCard(firm, card, amountDollars, description, metadata, `${idempotencyKey}-${card}`);
+    const retry = await attempt(card);
     if (retry.status === 'charged') {
       await setFirmCard(firm.id, card).catch(err => console.error(`Saving card ${card} for firm ${firm.id} failed:`, err.message));
       return retry;
@@ -135,8 +136,14 @@ async function chargeCard(firm, card, amountDollars, description, metadata, idem
     if (charge?.status === 'requires_action') return { status: 'declined', reason: 'Your bank asked to approve the charge in person, which an automatic lead charge cannot do.' };
     if (['requires_payment_method', 'canceled'].includes(charge?.status)) return { status: 'declined', reason: 'Your card was declined.' };
     console.error(`Charge to firm ${firm.id} ended in status ${charge?.status}: ${description}`);
-    return { status: 'unknown' };
+    return { status: 'unknown', key: idempotencyKey };
   } catch (err) {
+    // The same charge already running elsewhere, or a key reused with other details: Stripe has not said whether it
+    // went through, so it is never read as a decline (which would move on and charge another card).
+    if (err?.type === 'StripeIdempotencyError' || err?.code === 'idempotency_key_in_use') {
+      console.error(`Charge to firm ${firm.id} was refused by its idempotency key (${err.code || err.type}): ${description}`);
+      return { status: 'unknown', key: idempotencyKey };
+    }
     if (err?.type === 'StripeCardError') {
       console.warn(`Charge to firm ${firm.id} declined (${err.code || err.type}): ${description}`);
       // Stripe writes card-error messages for the cardholder ("Your card has expired.").
@@ -147,7 +154,35 @@ async function chargeCard(firm, card, amountDollars, description, metadata, idem
       return { status: 'declined', reason: 'The card on file can no longer be charged.' };
     }
     console.error(`Charge to firm ${firm.id} has an unknown outcome (${err?.type || err?.message}): ${description}`);
-    return { status: 'unknown' };
+    return { status: 'unknown', key: idempotencyKey };
+  }
+}
+
+// Records a lead for a firm only while its request is within the three firms the client agreed to, and only once
+// per firm. The check is part of the insert, so two losses of one lead handled at the same moment cannot both send
+// it on past the third firm. Returns the new lead's id, or null when the rule kept it from being recorded.
+async function recordLeadWithinConsent({ firmId, sessionId, caseType, tier, price, chargeId, leadData }) {
+  const deadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+  const [lead] = await sql`
+    INSERT INTO leads (firm_id, session_id, case_type, tier, price_paid, stripe_charge_id, accept_deadline, lead_data)
+    SELECT ${firmId}::int, ${sessionId}::text, ${caseType}::text, ${tier}::text, ${price}::numeric, ${chargeId}::text, ${deadline}::timestamptz, ${JSON.stringify(leadData)}::jsonb
+    WHERE (SELECT count(DISTINCT firm_id) FROM leads WHERE session_id = ${sessionId}) < ${MAX_FIRMS_PER_LEAD}
+      AND NOT EXISTS (SELECT 1 FROM leads WHERE session_id = ${sessionId} AND firm_id = ${firmId}::int)
+    RETURNING id`;
+  return lead?.id ?? null;
+}
+
+// A charge for a lead the consent rule kept from being recorded is refunded, unless it is Stripe's replay of the
+// charge for the lead this firm already holds (a repeated delivery). Never throws.
+async function refundUnrecordedCharge({ firmId, sessionId, chargeId, amount, what }) {
+  try {
+    const [held] = await sql`SELECT stripe_charge_id FROM leads WHERE session_id = ${sessionId} AND firm_id = ${firmId} LIMIT 1`;
+    if (held && held.stripe_charge_id === chargeId) return;
+    const refunded = await createRefund({ paymentIntentId: chargeId, amountDollars: amount, idempotencyKey: `refund-${chargeId}` }).then(() => true, () => false);
+    await notifyOperator(`${what}: firm ${firmId} was charged after the lead reached its firms`,
+      `<p>Firm ${escapeHtml(firmId)} was charged (payment ${escapeHtml(chargeId)}) for the request of session ${escapeHtml(sessionId)}, but by then the lead had gone to the three firms the client agreed to, or to this firm already. ${refunded ? 'The charge was refunded.' : 'The refund failed: refund it in Stripe.'}</p>`);
+  } catch (err) {
+    console.error(`Refunding charge ${chargeId} failed:`, err.message);
   }
 }
 
@@ -206,7 +241,7 @@ export async function deliverColdLead(sessionId, caseType, scoreData, leadData, 
     const charge = await chargeFirm(firm, TIER_CONFIG.cold.reserve, `Cold malpractice lead — ${caseType}`, { sessionId, firmId: String(firm.id) }, key);
     if (charge.status === 'unknown') {
       await notifyOperator(`Cold lead: charge to firm ${firm.id} has an unknown outcome`,
-        `<p>Stripe did not confirm or refuse the $${TIER_CONFIG.cold.reserve} charge to firm ${escapeHtml(firm.id)} for a cold lead (session ${escapeHtml(sessionId)}, idempotency key ${escapeHtml(key)}). The firm was not sent the lead. Check Stripe, then deliver the lead or refund the charge by hand.</p>`);
+        `<p>Stripe did not confirm or refuse the $${TIER_CONFIG.cold.reserve} charge to firm ${escapeHtml(firm.id)} for a cold lead (session ${escapeHtml(sessionId)}, idempotency key ${escapeHtml(charge.key || key)}). The firm was not sent the lead. Check Stripe, then deliver the lead or refund the charge by hand.</p>`);
       uncertain += 1;
       continue;
     }
@@ -217,22 +252,21 @@ export async function deliverColdLead(sessionId, caseType, scoreData, leadData, 
 
     let leadId;
     try {
-      const deadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
-      const [lead] = await sql`
-        INSERT INTO leads (firm_id, session_id, case_type, tier, price_paid, stripe_charge_id, accept_deadline, lead_data)
-        VALUES (${firm.id}, ${sessionId}, ${caseType}, 'cold', ${TIER_CONFIG.cold.reserve}, ${charge.id}, ${deadline}, ${JSON.stringify(leadData)})
-        RETURNING id
-      `;
-      leadId = lead.id;
+      leadId = await recordLeadWithinConsent({ firmId: firm.id, sessionId, caseType, tier: 'cold', price: TIER_CONFIG.cold.reserve, chargeId: charge.id, leadData });
     } catch (err) {
       // Charged, but the lead could not be recorded: the charge is refunded and the operator told.
       console.error(`Cold lead for firm ${firm.id} charged but not recorded:`, err.message);
-      const refunded = await createRefund({ paymentIntentId: charge.id, amountDollars: TIER_CONFIG.cold.reserve, idempotencyKey: `refund-${key}` })
+      const refunded = await createRefund({ paymentIntentId: charge.id, amountDollars: TIER_CONFIG.cold.reserve, idempotencyKey: `refund-${charge.id}` })
         .then(() => true, () => false);
       await notifyOperator(`Cold lead for firm ${firm.id} charged but not delivered`,
         `<p>Firm ${escapeHtml(firm.id)} was charged (payment ${escapeHtml(charge.id)}) for a cold lead (session ${escapeHtml(sessionId)}), but the lead could not be recorded: ${escapeHtml(err.message)}.</p>` +
         `<p>${refunded ? 'The charge was refunded.' : 'The refund also failed: refund it in Stripe.'}</p>`);
       continue;
+    }
+    if (!leadId) {
+      // The lead reached its three firms (or this firm) while this one was being charged.
+      await refundUnrecordedCharge({ firmId: firm.id, sessionId, chargeId: charge.id, amount: TIER_CONFIG.cold.reserve, what: 'Cold lead' });
+      break;
     }
     delivered += 1;   // the lead exists and is in the firm's portal, even if the email below fails
     try {
@@ -372,7 +406,7 @@ export async function closeAuction(auctionId) {
       { auctionId: String(auctionId), firmId: String(firm.id) }, key);
     if (charge.status === 'unknown') {
       await notifyOperator(`Auction #${auctionId}: charge to firm ${firm.id} has an unknown outcome`,
-        `<p>Stripe did not confirm or refuse the $${amount.toFixed(2)} charge to firm ${escapeHtml(firm.id)} for auction #${escapeHtml(auctionId)} (idempotency key ${escapeHtml(key)}). No other bidder was charged and no lead was sent; the auction is left closing. Check Stripe, then deliver the lead or close the auction by hand.</p>`);
+        `<p>Stripe did not confirm or refuse the $${amount.toFixed(2)} charge to firm ${escapeHtml(firm.id)} for auction #${escapeHtml(auctionId)} (idempotency key ${escapeHtml(charge.key || key)}). No other bidder was charged and no lead was sent; the auction is left closing. Check Stripe, then deliver the lead or close the auction by hand.</p>`);
       return { pending: true };
     }
     if (charge.status !== 'charged') {
@@ -414,15 +448,27 @@ export async function closeAuction(auctionId) {
     return { winnerFirmId: firm.id, amount };
   }
 
-  // Nobody won: the lead is not dropped but offered at the cold price to up to three matching firms, other than
-  // any whose card was just declined. The operator is told only if none of them takes it.
+  // Nobody won: the lead is not dropped but offered at the cold price to matching firms, other than any whose card
+  // was just declined, within the three firms the client agreed to (counting any firm the operator already gave it
+  // to). The operator is told if none takes it, or if offering it fails.
   await sql`UPDATE auctions SET status = 'cancelled' WHERE id = ${auctionId}`;
   const why = bids.length ? 'no bidder could be charged' : 'the auction closed with no bids';
-  const reoffered = await deliverColdLead(auction.session_id, auction.case_type,
-    { score: auction.quality_score, preview: auction.lead_preview, tier: auction.tier }, auction.lead_data,
-    { excludeFirmIds: [...declinedFirms], context: `auction #${auctionId}: ${why}, and when offered as a cold lead, ` });
-  console.log(`Auction ${auctionId}: ${why}; offered as a cold lead to ${reoffered} firm(s)`);
-  return { reoffered };
+  const scoreData = { score: auction.quality_score, preview: auction.lead_preview, tier: auction.tier };
+  try {
+    const holders = (await sql`SELECT DISTINCT firm_id FROM leads WHERE session_id = ${auction.session_id}`).map(row => String(row.firm_id));
+    const room = MAX_FIRMS_PER_LEAD - holders.length;
+    const reoffered = room > 0
+      ? await deliverColdLead(auction.session_id, auction.case_type, scoreData, auction.lead_data,
+        { excludeFirmIds: [...declinedFirms, ...holders], maxFirms: room, context: `auction #${auctionId}: ${why}, and when offered as a cold lead, ` })
+      : 0;
+    console.log(`Auction ${auctionId}: ${why}; offered as a cold lead to ${reoffered} firm(s)`);
+    return { reoffered };
+  } catch (err) {
+    console.error(`Auction ${auctionId}: offering it as a cold lead failed:`, err.message);
+    await sendAdminLeadAlert({ kind: 'auction', type: auction.case_type, scoreData, sessionId: auction.session_id,
+      reason: `auction #${auctionId}: ${why}, and offering it as a cold lead failed (${err.message})` });
+    return { reoffered: 0 };
+  }
 }
 
 // Closes every auction past its time. Run by the nightly job and, since that job runs only once a day on this
@@ -463,18 +509,26 @@ export async function acceptLead(leadId, firmId, attestation = null) {
 }
 
 // Terms: a lead not accepted or declined within 3 days is declined automatically, counts as a decline
-// and is not refunded. One UPDATE claims every overdue lead, so a firm's answer arriving at the same
-// moment is kept rather than overwritten. Each lapsed lead is then offered to firms that have not had it.
-export async function declineOverdueLeads() {
-  const overdue = await sql`
-    UPDATE leads SET status = 'declined', declined_at = NOW(), decline_reason = 'expired'
-    WHERE status = 'pending' AND accept_deadline < NOW()
-    RETURNING id, firm_id, auction_id, session_id, case_type, tier, lead_data`;
-  for (const lead of overdue) {
-    await recordDecline(lead.firm_id, !!lead.auction_id);
+// and is not refunded. Each overdue lead is claimed with a conditional UPDATE, so a firm's answer arriving at the
+// same moment is kept rather than overwritten, and is then offered to firms that have not had it before the next is
+// claimed. One at a time, within a time budget: claiming them all first left the rest declined but never offered
+// on if the job ran out of time, and the ones left now are claimed on the next run.
+export async function declineOverdueLeads({ budgetMs = Number(process.env.OVERDUE_LEADS_BUDGET_MS) || 30_000 } = {}) {
+  const stopAt = Date.now() + budgetMs;
+  let handled = 0;
+  while (Date.now() < stopAt) {
+    const [lead] = await sql`
+      UPDATE leads SET status = 'declined', declined_at = NOW(), decline_reason = 'expired'
+      WHERE id = (SELECT id FROM leads WHERE status = 'pending' AND accept_deadline < NOW() ORDER BY accept_deadline LIMIT 1 FOR UPDATE SKIP LOCKED)
+        AND status = 'pending'
+      RETURNING id, firm_id, auction_id, session_id, case_type, tier, lead_data`;
+    if (!lead) break;
+    handled += 1;
+    // The nightly recount puts the counts right if this fails.
+    await recordDecline(lead.firm_id, !!lead.auction_id).catch(err => console.error(`Counting the lapse of lead ${lead.id} failed:`, err.message));
     await afterLeadLost(lead, 'expired');
   }
-  return overdue.length;
+  return handled;
 }
 
 // Why a firm declines a lead (lead.html offers these; the reason is required and kept on the lead).
@@ -585,32 +639,35 @@ async function afterLeadLost(lead, reason) {
 export async function deliverLeadByHand({ sessionId, firmId, price, type, leadData, scoreData }) {
   const firm = await getFirm(firmId);
   if (!firm || firm.active === false || !firm.approved_at) return { ok: false, status: 400, error: 'Choose an active, approved firm.' };
+  // While the request's auction is open or closing it may still be won or offered as a cold lead.
+  const [running] = await sql`SELECT id, status FROM auctions WHERE session_id = ${sessionId} AND status IN ('open', 'closing') LIMIT 1`;
+  if (running) return { ok: false, status: 409, error: `Auction #${running.id} for this request is still ${running.status}. Cancel it first to deliver the request by hand.` };
   const had = await sql`SELECT DISTINCT firm_id FROM leads WHERE session_id = ${sessionId}`;
   if (had.some(row => String(row.firm_id) === String(firm.id))) return { ok: false, status: 409, error: 'That firm has already had this lead.' };
   if (had.length >= MAX_FIRMS_PER_LEAD) return { ok: false, status: 409, error: `This lead has already gone to the ${MAX_FIRMS_PER_LEAD} firms the client agreed to.` };
 
   let chargeId = null;
-  const key = `manual-${sessionId}-${firm.id}`;
+  // The price is in the key, so delivering again at another price is a new charge rather than one Stripe refuses.
+  const key = `manual-${sessionId}-${firm.id}-${Math.round(price * 100)}`;
   if (price > 0) {
     const charge = await chargeFirm(firm, price, `Malpractice lead delivered by the operator — ${type || 'other'}`, { sessionId, firmId: String(firm.id) }, key);
-    if (charge.status === 'unknown') return { ok: false, status: 502, error: `Stripe did not confirm the charge (idempotency key ${key}). Check Stripe before trying again.` };
+    if (charge.status === 'unknown') return { ok: false, status: 502, error: `Stripe did not confirm the charge (idempotency key ${charge.key || key}). Check Stripe before trying again.` };
     if (charge.status !== 'charged') return { ok: false, status: 402, error: `The firm could not be charged: ${charge.reason}` };
     chargeId = charge.id;
   }
   const tier = scoreData?.tier || 'cold';
   let leadId;
   try {
-    const deadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
-    const [lead] = await sql`
-      INSERT INTO leads (firm_id, session_id, case_type, tier, price_paid, stripe_charge_id, accept_deadline, lead_data)
-      VALUES (${firm.id}, ${sessionId}, ${type}, ${tier}, ${price}, ${chargeId}, ${deadline}, ${JSON.stringify(leadData)})
-      RETURNING id`;
-    leadId = lead.id;
+    leadId = await recordLeadWithinConsent({ firmId: firm.id, sessionId, caseType: type, tier, price, chargeId, leadData });
   } catch (err) {
     const refunded = chargeId
-      ? await createRefund({ paymentIntentId: chargeId, amountDollars: price, idempotencyKey: `refund-${key}` }).then(() => true, () => false)
+      ? await createRefund({ paymentIntentId: chargeId, amountDollars: price, idempotencyKey: `refund-${chargeId}` }).then(() => true, () => false)
       : true;
     return { ok: false, status: 500, error: `The lead could not be recorded${chargeId ? (refunded ? '; the charge was refunded' : '; the refund also failed, so refund it in Stripe') : ''}.` };
+  }
+  if (!leadId) {
+    if (chargeId) await refundUnrecordedCharge({ firmId: firm.id, sessionId, chargeId, amount: price, what: 'Hand delivery' });
+    return { ok: false, status: 409, error: `This lead has just gone to the ${MAX_FIRMS_PER_LEAD} firms the client agreed to, or to this firm.` };
   }
   await sql`UPDATE conversations SET lead_sent_at = COALESCE(lead_sent_at, NOW()) WHERE session_id = ${sessionId}`.catch(() => {});
   try {

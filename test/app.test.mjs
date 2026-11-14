@@ -402,7 +402,7 @@ test('GET /api/cron with the cron secret closes auctions, declines overdue leads
     });
     const queries = world.calls.sql.map(call => call.query);
     assert.ok(queries.some(query => /FROM auctions WHERE status = 'open' AND closes_at <= NOW\(\)/.test(query)), 'expired auctions were not looked up');
-    assert.ok(queries.some(query => /^UPDATE leads SET status = 'declined', declined_at = NOW\(\), decline_reason = 'expired' WHERE status = 'pending' AND accept_deadline < NOW\(\) RETURNING/.test(query)), 'overdue leads were not declined');
+    assert.ok(queries.some(query => /^UPDATE leads SET status = 'declined', declined_at = NOW\(\), decline_reason = 'expired' WHERE id = \(SELECT id FROM leads WHERE status = 'pending' AND accept_deadline < NOW\(\) ORDER BY accept_deadline LIMIT 1 FOR UPDATE SKIP LOCKED\) AND status = 'pending' RETURNING/.test(query)), 'overdue leads were not declined');
     assert.ok(queries.some(query => /^UPDATE firms SET auction_decline_count = \(SELECT count\(\*\) FROM leads l WHERE l\.firm_id = firms\.id AND l\.status = 'declined' AND l\.auction_id IS NOT NULL AND l\.declined_at > NOW\(\) - INTERVAL '30 days'\)/.test(query)), 'decline counts were not brought up to date');
   } finally {
     await server.close();
@@ -1107,12 +1107,13 @@ function firmWorld({ recentCodes = { forFirm: 0, forPhone: 0, justSent: 0 }, cur
     }
     if (/FROM firms WHERE lower\(email\) = \$1/.test(q)) return rowsResponse([['id', INT]], [['7']]);
     if (/^SELECT phone FROM firms WHERE id/.test(q)) return rowsResponse([['phone', TEXT]], [['+15551234567']]);
+    if (/^SELECT pc\.id, pc\.code, pc\.phone FROM phone_codes pc JOIN firms f ON f\.id = pc\.firm_id WHERE pc\.firm_id = \$1 AND pc\.verified = FALSE AND pc\.expires_at > NOW\(\) AND pc\.phone = f\.phone/.test(q)) {
+      return currentCode ? rowsResponse([['id', INT], ['code', TEXT], ['phone', TEXT]], [['31', currentCode, '+15551234567']]) : rowsResponse([], []);
+    }
+    if (/^UPDATE firms SET phone_verified = TRUE WHERE id = \$1 AND phone = \$2 RETURNING id/.test(q)) return rowsResponse([['id', INT]], [['7']], 'UPDATE');
     if (/FROM phone_codes pc JOIN firms f/.test(q)) {
       return rowsResponse([['for_firm', INT], ['for_phone', INT], ['just_sent', INT]],
         [[String(recentCodes.forFirm), String(recentCodes.forPhone), String(recentCodes.justSent)]]);
-    }
-    if (/^SELECT id, code FROM phone_codes/.test(q)) {
-      return currentCode ? rowsResponse([['id', INT], ['code', TEXT]], [['31', currentCode]]) : rowsResponse([], []);
     }
     return jsonResponse(EMPTY_ROWS);
   };
@@ -1324,11 +1325,12 @@ test('declines count over a rolling 30 days, and a suspension is never lifted by
 
 test('a lead nobody answers within 3 days is declined automatically, dated and counted, without a refund', async () => {
   const calls = [];
+  let overdueClaimed = 0;   // one overdue lead: claimed once, then none are left
   const handler = async (url, init) => {
     const { query, params } = JSON.parse(init.body);
     const q = query.replace(/\s+/g, ' ').trim();
     calls.push({ query: q, params });
-    if (/^UPDATE leads SET status = 'declined', declined_at = NOW\(\), decline_reason = 'expired' WHERE status = 'pending' AND accept_deadline < NOW\(\) RETURNING id, firm_id, auction_id/.test(q)) {
+    if (/^UPDATE leads SET status = 'declined', declined_at = NOW\(\), decline_reason = 'expired' WHERE id = \(SELECT id FROM leads WHERE status = 'pending' AND accept_deadline < NOW\(\) ORDER BY accept_deadline LIMIT 1 FOR UPDATE SKIP LOCKED\) AND status = 'pending' RETURNING id, firm_id, auction_id/.test(q) && !overdueClaimed++) {
       return rowsResponse([['id', INT], ['firm_id', INT], ['auction_id', INT], ['session_id', TEXT], ['case_type', TEXT], ['tier', TEXT], ['lead_data', JSONB]],
         [['501', '7', null, 'sess-overdue', 'other', 'cold', JSON.stringify({ preview: 'A preview.', score: 60 })]]);
     }
@@ -2450,7 +2452,7 @@ test('the highest bidder whose card can be charged wins and pays its own bid, an
   // Claimed first, so two runs at once close it once.
   assert.match(world.sql[0].query, /^UPDATE auctions SET status = 'closing' WHERE id = \$1 AND status = 'open' AND closes_at <= NOW\(\) RETURNING \*/);
   // The declined top bidder does not get the lead; the next bidder is charged its own bid; each with its key.
-  assert.deepEqual(world.stripe.map(call => [call.customer, call.amount, call.key]), [['cus_11', '30000', 'auction-9-11'], ['cus_12', '25000', 'auction-9-12']]);
+  assert.deepEqual(world.stripe.map(call => [call.customer, call.amount, call.key]), [['cus_11', '30000', 'auction-9-11-pm_11'], ['cus_12', '25000', 'auction-9-12-pm_12']]);
   const lead = world.sql.find(call => /^INSERT INTO leads/.test(call.query));
   assert.deepEqual(lead.params.slice(0, 2).map(String), ['9', '12']);
   assert.ok(lead.params.map(String).includes('250') && lead.params.includes('pi_cus_12'), 'the lead does not record the charge');
@@ -2609,7 +2611,7 @@ test('the operator sees every contact request, auction and lead, and can deliver
       assert.deepEqual(charged, []);
       const insert = sql.find(call => /^INSERT INTO leads/.test(call.query));
       assert.deepEqual(insert.params.slice(0, 2).map(String), ['12', 'sess-hand']);
-      assert.equal(JSON.parse(insert.params.at(-1)).contact.name, 'Jane Roe');
+      assert.equal(JSON.parse(insert.params.find(param => typeof param === 'string' && param.startsWith('{'))).contact.name, 'Jane Roe');
 
       // Charged when priced; refused for a firm not approved, one that has had it, and past three firms.
       assert.equal((await call('POST', '/api/admin/requests/sess-hand/deliver', { firmId: 13, price: 40 })).status, 200);
@@ -2699,7 +2701,7 @@ test('a cold lead goes only to firms whose card is charged, and the operator is 
   const leads = mixed.sql.filter(call => /^INSERT INTO leads/.test(call.query));
   assert.equal(leads.length, 1);
   assert.equal(String(leads[0].params[0]), '3');
-  assert.deepEqual([...mixed.stripe].sort(), [['cus_2', 'cold-sess-cold-2'], ['cus_3', 'cold-sess-cold-3']]);
+  assert.deepEqual([...mixed.stripe].sort(), [['cus_2', 'cold-sess-cold-2-pm_2'], ['cus_3', 'cold-sess-cold-3-pm_3']]);
 
   const none = await run([{ id: 1 }], []);
   assert.equal(none.delivered, 0);
@@ -2948,7 +2950,7 @@ test('a cold lead charged but not recorded is refunded, and a winner whose email
   assert.equal(cold.result, 0);
   const refund = stripe.find(call => call.url.includes('/v1/refunds'));
   assert.ok(refund, 'the charge was not refunded');
-  assert.equal(refund.key, 'refund-cold-sess-cold-3');
+  assert.equal(refund.key, 'refund-pi_cus_3');
   assert.ok(cold.logs.some(line => /charged but not delivered/.test(line)), 'the operator was not told');
 
   // The winner is charged and recorded, but its link cannot be made: the win stands and the operator is told.
@@ -3498,7 +3500,7 @@ test('a subscription that stops being paid stops the leads, and starts them agai
 
 // ─── What the independent reviews found ────────────────────────────────────────
 
-const REVIEW_APP = {"mode":"personal","caseType":"misdiagnosis","caseLabel":"failure to diagnose","typeColumn":"case_type","scorerPrompt":"You are a NYC medical malpractice case evaluator"};
+const REVIEW_APP = {"mode":"personal","caseType":"misdiagnosis","caseLabel":"failure to diagnose","typeColumn":"case_type","appId":"nycmalpractice","scorerPrompt":"You are a NYC medical malpractice case evaluator"};
 
 test('a slow side analysis does not hold back an answer that is ready', async () => {
   const world = fakeWorld({ answer: 'Thank you. When did it happen?' });
@@ -3638,6 +3640,7 @@ function billingWorld(firm = {}) {
       if (/\/v1\/customers$/.test(url)) return jsonResponse({ id: 'cus_new', object: 'customer' });
       if (/\/v1\/checkout\/sessions$/.test(url)) return jsonResponse({ id: 'cs_1', object: 'checkout.session', url: 'https://checkout.stripe.test/cs_1' });
       if (/\/v1\/billing_portal\/sessions$/.test(url)) return jsonResponse({ id: 'bps_1', object: 'billing_portal.session', url: 'https://billing.stripe.test/bps_1' });
+      if (/\/v1\/subscriptions\?/.test(url)) return jsonResponse({ object: 'list', data: row.live ? [{ id: 'sub_live', object: 'subscription', status: row.live }] : [], has_more: false });
       throw new Error('Unexpected Stripe request in test: ' + url);
     }
     const { query, params } = JSON.parse(init.body);
@@ -3680,9 +3683,20 @@ test('a firm without a Stripe customer gets one at checkout, from sign-up or its
     await withOutboundHttp(world.handler, async () => {
       assert.equal((await postJson(server.baseUrl, '/api/billing/checkout', { firmId: 7, token: 'portal-token' })).response.status, 200);
     });
-    assert.equal(world.stripe.length, 1, 'a second customer was made');
-    assert.equal(world.stripe[0].body.get('customer'), 'cus_7');
-    assert.equal(world.stripe[0].body.get('cancel_url'), 'https://example.test/register.html?step=4&cancelled=1');
+    assert.ok(!world.stripe.some(call => /\/v1\/customers$/.test(call.url)), 'a second customer was made');
+    const resumed = world.stripe.find(call => /\/v1\/checkout\/sessions$/.test(call.url));
+    assert.equal(resumed.body.get('customer'), 'cus_7');
+    assert.equal(resumed.body.get('cancel_url'), 'https://example.test/register.html?step=4&cancelled=1');
+    assert.equal(resumed.body.get('metadata[app]'), REVIEW_APP.appId);
+
+    // Stripe already holds a subscription its event has not switched on yet (back from paying): no second one.
+    world = billingWorld({ stripe_customer_id: 'cus_7', live: 'active' });
+    await withOutboundHttp(world.handler, async () => {
+      const { response, body } = await postJson(server.baseUrl, '/api/billing/checkout', { firmId: 7, token: 'portal-token' });
+      assert.equal(response.status, 409);
+      assert.match(body.error, /already in place/);
+    });
+    assert.ok(!world.stripe.some(call => /\/v1\/checkout\/sessions$/.test(call.url)), 'a second subscription was started');
 
     // A firm already paying, or with a payment due, is not sent to a second subscription.
     for (const [firm, error] of [[{ subscription_active: 't', subscription_status: 'active' }, /already active/], [{ subscription_status: 'past_due' }, /payment due/]]) {
@@ -3743,7 +3757,7 @@ test('the customer that paid and the card a firm changes to are saved, so lead c
   } finally {
     await server.close();
   }
-  const activation = sql.find(call => /^UPDATE firms SET subscription_active = \$1, subscription_status = \$2, stripe_subscription_id = \$3, stripe_customer_id = COALESCE\(\$4, stripe_customer_id\)/.test(call.query));
+  const activation = sql.find(call => /^UPDATE firms SET subscription_active = \$1, subscription_status = \$2, stripe_subscription_id = \$3, stripe_customer_id = COALESCE\(stripe_customer_id, \$4\)/.test(call.query));
   assert.ok(activation, 'the customer that paid was not saved');
   assert.deepEqual(activation.params.slice(2, 4).map(String), ['sub_9', 'cus_paid']);
   const status = sql.find(call => /WHERE stripe_subscription_id = /.test(call.query) && /stripe_payment_method_id = COALESCE/.test(call.query));
@@ -3786,7 +3800,7 @@ test('a lead charge declined on the stored card uses the card on file, and a fir
   // The firm replaced its card under Manage Billing: the old one is declined, the new one is charged and kept.
   const replaced = await run({ portalCard: 'pm_new', declined: ['pm_old'] });
   assert.equal(replaced.delivered, 1);
-  assert.deepEqual(replaced.charges, [{ card: 'pm_old', key: 'cold-sess-card-1' }, { card: 'pm_new', key: 'cold-sess-card-1-pm_new' }]);
+  assert.deepEqual(replaced.charges, [{ card: 'pm_old', key: 'cold-sess-card-1-pm_old' }, { card: 'pm_new', key: 'cold-sess-card-1-pm_new' }]);
   const kept = replaced.sql.find(call => /^UPDATE firms SET stripe_payment_method_id = \$1, card_declined_at = NULL WHERE id = \$2/.test(call.query));
   assert.deepEqual(kept.params.map(String), ['pm_new', '1']);
   assert.ok(!replaced.logs.some(line => /Card declined notice/.test(line)), 'a firm charged on its new card was told it was declined');
@@ -4048,4 +4062,168 @@ test('the nightly job runs every step when one fails, records the run, and tells
   } finally {
     await server.close();
   }
+});
+
+// ─── What the independent review of this round found ─────────────────────────
+
+const ACTIVE_FIRM_FIELDS = [['id', INT], ['name', TEXT], ['email', TEXT], ['stripe_customer_id', TEXT], ['stripe_payment_method_id', TEXT]];
+const activeFirm = id => [String(id), 'Firm ' + id, 'f' + id + '@example.test', 'cus_' + id, 'pm_' + id];
+
+test('a charge Stripe is still making elsewhere is never read as a decline, so no second card is charged', async () => {
+  const { deliverColdLead } = await import('../auction.js');
+  const charged = [];
+  const handler = async (url, init) => {
+    if (url.includes('/v1/payment_intents')) {
+      charged.push(new URLSearchParams(String(init.body)).get('payment_method'));
+      return jsonResponse({ error: { type: 'invalid_request_error', code: 'idempotency_key_in_use', message: 'There is currently another in-progress request using this Idempotent Key.' } }, 409);
+    }
+    if (url.includes('/v1/customers/')) return jsonResponse({ id: 'cus_1', object: 'customer', invoice_settings: { default_payment_method: 'pm_other' } });
+    const q = JSON.parse(init.body).query.replace(/\s+/g, ' ').trim();
+    if (/FROM firms WHERE active/.test(q)) return rowsResponse(ACTIVE_FIRM_FIELDS, [activeFirm(1)]);
+    return jsonResponse(EMPTY_ROWS);
+  };
+  const { result, logs } = await capturingLogs(() => withoutMail(() => withOutboundHttp(handler,
+    () => deliverColdLead('sess-busy', REVIEW_APP.caseType, { score: 60, tier: 'cold' }, { preview: 'A preview.' }))));
+  assert.equal(result, 0);
+  assert.ok(charged.length > 0 && charged.every(card => card === 'pm_1'), 'another card was charged while the first charge was still running');
+  assert.ok(logs.some(line => /refused by its idempotency key \(idempotency_key_in_use\)/.test(line)));
+  assert.ok(logs.some(line => /charge to firm 1 has an unknown outcome/.test(line)), 'the operator was not told');
+});
+
+test('a code texted to the first number does not verify a number changed to afterwards', async () => {
+  const { sendVerificationCode, verifyPhoneCode } = await import('../firms.js');
+  const sql = [];
+  let phoneOnFile = '+15551234567';
+  const handler = async (url, init) => {
+    const { query, params } = JSON.parse(init.body);
+    const q = query.replace(/\s+/g, ' ').trim();
+    sql.push({ query: q, params });
+    if (/^SELECT phone FROM firms WHERE id/.test(q)) return rowsResponse([['phone', TEXT]], [[phoneOnFile]]);
+    if (/FROM phone_codes pc JOIN firms f ON f\.id = pc\.firm_id WHERE f\.phone/.test(q)) return rowsResponse([['for_firm', INT], ['for_phone', INT], ['just_sent', INT]], [['0', '0', '0']]);
+    if (/^SELECT pc\.id, pc\.code, pc\.phone FROM phone_codes pc/.test(q)) return rowsResponse([['id', INT], ['code', TEXT], ['phone', TEXT]], [['31', '424242', '+15551234567']]);
+    if (/^UPDATE firms SET phone_verified = TRUE WHERE id = \$1 AND phone = \$2/.test(q)) return params[1] === phoneOnFile ? rowsResponse([['id', INT]], [['7']], 'UPDATE') : rowsResponse([], []);
+    return jsonResponse(EMPTY_ROWS);
+  };
+  await capturingLogs(() => withoutTexts(() => withOutboundHttp(handler, async () => {
+    await sendVerificationCode(7);
+    // The number changes after the code went out: the code verifies nothing.
+    phoneOnFile = '+12125550199';
+    assert.equal(await verifyPhoneCode(7, '424242'), false);
+  })));
+  const insert = sql.find(call => /^INSERT INTO phone_codes/.test(call.query));
+  assert.equal(insert.params.at(-1), '+15551234567', 'the code was not tied to the number it went to');
+  assert.match(sql.find(call => /^SELECT pc\.id/.test(call.query)).query, /pc\.phone = f\.phone/);
+});
+
+test("another app's checkout on a shared Stripe account changes no firm here", async () => {
+  const { default: Stripe } = await import('stripe');
+  const other = REVIEW_APP.appId === 'nycinjury' ? 'nycmalpractice' : 'nycinjury';
+  const sql = [];
+  const handler = async (url, init) => {
+    if (url.includes('/v1/subscriptions/')) {
+      return jsonResponse({ id: 'sub_other', object: 'subscription', status: 'active', default_payment_method: { id: 'pm_other', object: 'payment_method' }, metadata: { firmId: '7', app: other } });
+    }
+    const { query, params } = JSON.parse(init.body);
+    sql.push({ query: query.replace(/\s+/g, ' ').trim(), params });
+    return jsonResponse(EMPTY_ROWS);
+  };
+  const server = await startServer(app);
+  try {
+    await capturingLogs(() => withOutboundHttp(handler, async () => {
+      // Named on the session, or only on its subscription (as older sessions are).
+      for (const metadata of [{ firmId: '7', app: other }, { firmId: '7' }]) {
+        const payload = JSON.stringify({ id: 'evt_other', object: 'event', type: 'checkout.session.completed', data: { object: { id: 'cs_other', object: 'checkout.session', subscription: 'sub_other', customer: 'cus_other', metadata } } });
+        const signature = new Stripe('sk_test_123').webhooks.generateTestHeaderString({ payload, secret: process.env.STRIPE_WEBHOOK_SECRET });
+        const response = await fetch(server.baseUrl + '/api/webhooks/stripe', { method: 'POST', headers: { 'content-type': 'application/json', 'stripe-signature': signature }, body: payload });
+        assert.equal(response.status, 200);
+      }
+    }));
+  } finally {
+    await server.close();
+  }
+  assert.ok(!sql.some(call => /^UPDATE firms/.test(call.query)), "another app's checkout changed a firm here");
+});
+
+test('an auction nobody wins counts the firms that already have its request, and a re-offer that fails reaches the operator', async () => {
+  const { closeAuction } = await import('../auction.js');
+  // The operator had already given this request to firm 13 by hand: the re-offer leaves it out and has two places.
+  const world = auctionWorld({ bids: [] });
+  const offeredTo = [];
+  const handler = async (url, init) => {
+    if (url.endsWith('/sql')) {
+      const q = JSON.parse(init.body).query.replace(/\s+/g, ' ').trim();
+      if (/^SELECT DISTINCT firm_id FROM leads WHERE session_id/.test(q)) return rowsResponse([['firm_id', INT]], [['13']]);
+      if (/FROM firms WHERE active/.test(q)) return rowsResponse(ACTIVE_FIRM_FIELDS, [13, 14, 15, 16].map(activeFirm));
+    }
+    if (url.includes('/v1/payment_intents')) offeredTo.push(new URLSearchParams(String(init.body)).get('customer'));
+    return world.handler(url, init);
+  };
+  const { result } = await capturingLogs(() => withoutMail(() => withOutboundHttp(handler, () => closeAuction(9))));
+  assert.deepEqual(result, { reoffered: 2 });
+  assert.equal(offeredTo.length, 2);
+  assert.ok(!offeredTo.includes('cus_13'), 'the firm that already had the request was charged for it again');
+
+  // The firms cannot be read: the operator hears of it, and the close does not throw.
+  const broken = auctionWorld({ bids: [] });
+  const failing = async (url, init) => {
+    if (url.endsWith('/sql') && /FROM firms WHERE active/.test(JSON.parse(init.body).query.replace(/\s+/g, ' '))) return jsonResponse({ message: 'database unavailable' }, 500);
+    return broken.handler(url, init);
+  };
+  const failed = await capturingLogs(() => withoutMail(() => withOutboundHttp(failing, () => closeAuction(9))));
+  assert.deepEqual(failed.result, { reoffered: 0 });
+  assert.ok(failed.logs.some(line => /offering it as a cold lead failed/.test(line)), 'the operator was not told');
+});
+
+test('a request is not delivered by hand while its auction runs, and a charge for a lead that reached its firms meanwhile is refunded', async () => {
+  const { deliverLeadByHand, deliverColdLead } = await import('../auction.js');
+  const world = ({ running = null, insertRefused = false } = {}) => {
+    const sql = [];
+    const stripe = [];
+    const handler = async (url, init) => {
+      if (url.startsWith('https://api.stripe.com/')) {
+        stripe.push({ url, key: new Headers(init.headers).get('idempotency-key') });
+        if (url.includes('/v1/refunds')) return jsonResponse({ id: 're_1', object: 'refund', status: 'succeeded' });
+        return jsonResponse({ id: 'pi_' + new URLSearchParams(String(init.body)).get('customer'), object: 'payment_intent', status: 'succeeded' });
+      }
+      const { query, params } = JSON.parse(init.body);
+      const q = query.replace(/\s+/g, ' ').trim();
+      sql.push({ query: q, params });
+      if (/^SELECT \* FROM firms WHERE id/.test(q)) {
+        return rowsResponse([['id', INT], ['name', TEXT], ['email', TEXT], ['active', BOOL], ['approved_at', TIMESTAMPTZ], ['stripe_customer_id', TEXT], ['stripe_payment_method_id', TEXT]],
+          [['12', 'Firm 12', 'f12@example.test', 't', '2026-11-01 00:00:00+00', 'cus_12', 'pm_12']]);
+      }
+      if (/FROM firms WHERE active/.test(q)) return rowsResponse(ACTIVE_FIRM_FIELDS, [activeFirm(1), activeFirm(2)]);
+      if (/FROM auctions WHERE session_id = \$1 AND status IN/.test(q)) return running ? rowsResponse([['id', INT], ['status', TEXT]], [['5', running]]) : rowsResponse([], []);
+      if (/^INSERT INTO leads/.test(q)) return insertRefused ? rowsResponse([['id', INT]], [], 'INSERT') : rowsResponse([['id', INT]], [['900']], 'INSERT');
+      return jsonResponse(EMPTY_ROWS);
+    };
+    return { sql, stripe, handler };
+  };
+  const byHand = async options => {
+    const w = world(options);
+    const { result, logs } = await capturingLogs(() => withoutMail(() => withOutboundHttp(w.handler, () => deliverLeadByHand({
+      sessionId: 'sess-hand-2', firmId: 12, price: 40, type: REVIEW_APP.caseType, leadData: { preview: 'A preview.' }, scoreData: { score: 70, tier: 'warm' },
+    }))));
+    return { result, logs, ...w };
+  };
+
+  const waiting = await byHand({ running: 'open' });
+  assert.equal(waiting.result.status, 409);
+  assert.match(waiting.result.error, /Auction #5 for this request is still open/);
+  assert.equal(waiting.stripe.length, 0, 'a firm was charged while the auction ran');
+
+  // The charge's key names the price and the card, so another price is another charge rather than a refused one.
+  const full = await byHand({ insertRefused: true });
+  assert.equal(full.stripe[0].key, 'manual-sess-hand-2-12-4000-pm_12');
+  assert.equal(full.result.status, 409);
+  assert.ok(full.stripe.some(call => call.url.includes('/v1/refunds') && call.key === 'refund-pi_cus_12'), 'the charge for a lead that could not be recorded was not refunded');
+  assert.ok(full.logs.some(line => /Hand delivery: firm 12 was charged after the lead reached its firms/.test(line)), 'the operator was not told');
+
+  // The same for a cold delivery, which then stops rather than charge the next firm.
+  const cold = world({ insertRefused: true });
+  const delivered = await capturingLogs(() => withoutMail(() => withOutboundHttp(cold.handler,
+    () => deliverColdLead('sess-full', REVIEW_APP.caseType, { score: 60, tier: 'cold' }, { preview: 'A preview.' }))));
+  assert.equal(delivered.result, 0);
+  assert.equal(cold.stripe.filter(call => call.url.includes('/v1/payment_intents')).length, 1, 'a second firm was charged after the lead was full');
+  assert.equal(cold.stripe.filter(call => call.url.includes('/v1/refunds')).length, 1);
 });

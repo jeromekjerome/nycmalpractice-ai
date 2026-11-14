@@ -4,6 +4,10 @@
 // site has its own domain, the Vercel address is the one that works.
 export const APP_URL = (process.env.APP_URL || 'https://nycmalpractice-ai.vercel.app').replace(/\/+$/, '');
 
+// Names this app on the Stripe objects it creates, so a Stripe account shared with the other apps of the suite
+// never lets one app's checkout change another app's firm (firm numbers repeat across apps).
+export const APP_ID = 'nycmalpractice';
+
 // The wording a visitor agrees to before their contact details and conversation go to law firms.
 // public/index.html shows exactly this text (a test checks that they match), and the text stored with
 // each consent is this constant, never anything the browser sends.

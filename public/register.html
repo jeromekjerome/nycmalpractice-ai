@@ -289,6 +289,8 @@
           document.getElementById('phoneChange').style.display = 'none';
           document.querySelector('#step2 .reg-sub').textContent = `We sent a 6-digit code to ${data.phone || phone}. Enter it below to continue.`;
         } else {
+          // The number on file, even when no code could be sent yet (the error says why).
+          if (data.phone) document.querySelector('#step2 .reg-sub').textContent = `Your number is now ${data.phone}. Send a new code when you can.`;
           showErr(errEl, data.error || 'The number could not be changed. Please try again.');
         }
       } catch { showErr(errEl, 'The number could not be changed. Please check your connection and try again.'); }

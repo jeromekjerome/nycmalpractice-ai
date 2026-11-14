@@ -8,7 +8,7 @@ import { dirname, join } from 'path';
 import { neon } from '@neondatabase/serverless';
 import { answerUserQuestion } from './ask.js';
 import { closeExpiredAuctions, createAuction, deliverColdLead, getAuctionStatus, placeBid, acceptLead, declineLead, notifyOperatorOfContactRequest, TIER_CONFIG } from './auction.js';
-import { registerFirm, sendVerificationCode, verifyPhoneCode, validateToken, updateFirmSubscription, getFirm, updateFirmProfile, createMagicLink, VerificationLimitError, recentDeclineCounts } from './firms.js';
+import { registerFirm, sendVerificationCode, verifyPhoneCode, validateToken, updateFirmSubscription, getFirm, updateFirmProfile, createMagicLink, VerificationLimitError, recentDeclineCounts, linkOpensAuction, linkOpensLead, linkOpensAccount } from './firms.js';
 import { rateLimit } from './rate-limit.js';
 import nodemailer from 'nodemailer';
 import { createSubscriptionCheckout, createPortalSession, constructWebhookEvent, getSubscriptionPaymentMethod } from './stripe.js';
@@ -93,8 +93,11 @@ const limitEmails   = rateLimit('firm-emails', [[5, HOUR]]);
 async function ownsRegistration(token, firmId) {
   if (typeof token !== 'string' || !token) return false;
   const tokenData = await validateToken(token);
-  return !!tokenData && String(tokenData.firm_id) === String(firmId);
+  return !!tokenData && linkOpensAccount(tokenData) && String(tokenData.firm_id) === String(firmId);
 }
+const WRONG_AUCTION = 'This link is for a different auction.';
+const WRONG_LEAD    = 'This link is for a different lead.';
+const ACCOUNT_ONLY  = 'Open your account from the sign-in link in your Firm Login email.';
 const REGISTRATION_EXPIRED = 'This registration session has expired. Use Firm Login to get a sign-in link by email.';
 
 // The longest message the chat accepts. Each message goes to several model calls.
@@ -335,6 +338,7 @@ app.post('/api/billing/checkout', async (req, res) => {
 app.get('/api/billing/portal', async (req, res) => {
   const tokenData = await validateToken(req.query.token);
   if (!tokenData) return res.status(401).json({ error: 'Invalid token' });
+  if (!linkOpensAccount(tokenData)) return res.status(403).json({ error: ACCOUNT_ONLY });
   try {
     const portal = await createPortalSession({ stripeCustomerId: tokenData.stripe_customer_id });
     res.redirect(portal.url);
@@ -366,6 +370,7 @@ app.post('/api/webhooks/stripe', async (req, res) => {
 app.get('/api/auctions/:id', async (req, res) => {
   const tokenData = await validateToken(req.query.token);
   if (!tokenData) return res.status(401).json({ error: 'Invalid or expired link' });
+  if (!linkOpensAuction(tokenData, req.params.id)) return res.status(403).json({ error: WRONG_AUCTION });
   await sweepExpiredAuctions();   // a finished auction shows as closed, and its winner is charged
   const status = await getAuctionStatus(req.params.id);
   if (!status) return res.status(404).json({ error: 'Auction not found' });
@@ -381,6 +386,7 @@ app.post('/api/auctions/:id/bid', async (req, res) => {
   const { token, amount } = req.body;
   const tokenData = await validateToken(token);
   if (!tokenData) return res.status(401).json({ error: 'Invalid or expired link' });
+  if (!linkOpensAuction(tokenData, req.params.id)) return res.status(403).json({ error: WRONG_AUCTION });
   if (!tokenData.subscription_active) return res.status(403).json({ error: 'Active subscription required' });
   if (tokenData.suspended_until && new Date(tokenData.suspended_until) > new Date()) return res.status(403).json({ error: `Account suspended until ${new Date(tokenData.suspended_until).toLocaleDateString()}` });
   res.json(await placeBid(req.params.id, tokenData.firm_id, parseFloat(amount)));
@@ -390,6 +396,7 @@ app.post('/api/auctions/:id/bid', async (req, res) => {
 app.get('/api/leads/:id', async (req, res) => {
   const tokenData = await validateToken(req.query.token);
   if (!tokenData) return res.status(401).json({ error: 'Invalid or expired link' });
+  if (!linkOpensLead(tokenData, req.params.id)) return res.status(403).json({ error: WRONG_LEAD });
   const [lead] = await sql`SELECT * FROM leads WHERE id = ${req.params.id} AND firm_id = ${tokenData.firm_id}`;
   if (!lead) return res.status(404).json({ error: 'Lead not found' });
   let fullData = null;
@@ -421,6 +428,7 @@ app.post('/api/leads/:id/accept', async (req, res) => {
   }
   const tokenData = await validateToken(token);
   if (!tokenData) return res.status(401).json({ error: 'Invalid token' });
+  if (!linkOpensLead(tokenData, req.params.id)) return res.status(403).json({ error: WRONG_LEAD });
   const result = await acceptLead(req.params.id, tokenData.firm_id);
   if (result.ok) {
     console.log(`[HITL] Lead ${req.params.id} accepted by firm ${tokenData.firm_id} with attorney attestation ${JSON.stringify(hitlVerification)} at ${new Date().toISOString()}`);
@@ -431,6 +439,7 @@ app.post('/api/leads/:id/accept', async (req, res) => {
 app.post('/api/leads/:id/decline', async (req, res) => {
   const tokenData = await validateToken(req.body.token);
   if (!tokenData) return res.status(401).json({ error: 'Invalid token' });
+  if (!linkOpensLead(tokenData, req.params.id)) return res.status(403).json({ error: WRONG_LEAD });
   res.json(await declineLead(req.params.id, tokenData.firm_id));
 });
 
@@ -451,6 +460,7 @@ app.post('/api/firms/portal-link', limitEmails, async (req, res) => {
 app.get('/api/portal', async (req, res) => {
   const tokenData = await validateToken(req.query.token);
   if (!tokenData) return res.status(401).json({ error: 'Invalid or expired link' });
+  if (!linkOpensAccount(tokenData)) return res.status(403).json({ error: ACCOUNT_ONLY });
   await sweepExpiredAuctions();
   const firm  = await getFirm(tokenData.firm_id);
   const leads = await sql`SELECT id, case_type, tier, price_paid, status, created_at FROM leads WHERE firm_id = ${tokenData.firm_id} ORDER BY created_at DESC LIMIT 20`;
@@ -461,6 +471,7 @@ app.put('/api/portal/profile', async (req, res) => {
   const { token, specializations, serviceArea, contactName } = req.body;
   const tokenData = await validateToken(token);
   if (!tokenData) return res.status(401).json({ error: 'Invalid or expired link' });
+  if (!linkOpensAccount(tokenData)) return res.status(403).json({ error: ACCOUNT_ONLY });
   await updateFirmProfile(tokenData.firm_id, { specializations: specializations || [], serviceArea, contactName });
   res.json({ ok: true });
 });

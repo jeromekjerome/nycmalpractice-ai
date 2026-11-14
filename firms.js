@@ -198,3 +198,19 @@ export async function resetDeclineCounts() {
       auction_decline_count = (SELECT count(*) FROM leads l WHERE l.firm_id = firms.id AND l.status = 'declined' AND l.auction_id IS NOT NULL AND l.declined_at > NOW() - INTERVAL '30 days'),
       cold_decline_count    = (SELECT count(*) FROM leads l WHERE l.firm_id = firms.id AND l.status = 'declined' AND l.auction_id IS NULL AND l.declined_at > NOW() - INTERVAL '30 days')`;
 }
+
+// What a firm link opens. A link emailed for one auction opens only that auction, and one emailed for one
+// lead only that lead; the portal link (and the registration token) open the firm's own account, billing
+// and its leads. Every link used to open everything, and any firm could open any auction by its number.
+export function linkOpensAuction(tokenData, auctionId) {
+  return tokenData?.auction_id != null && String(tokenData.auction_id) === String(auctionId);
+}
+
+export function linkOpensLead(tokenData, leadId) {
+  if (!tokenData || tokenData.auction_id != null) return false;
+  return tokenData.lead_id == null || String(tokenData.lead_id) === String(leadId);
+}
+
+export function linkOpensAccount(tokenData) {
+  return !!tokenData && tokenData.auction_id == null && tokenData.lead_id == null;
+}

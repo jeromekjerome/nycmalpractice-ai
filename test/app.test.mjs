@@ -2215,15 +2215,17 @@ test('the Stripe webhook switches on a paid subscription, and refuses a forged c
   const { default: Stripe } = await import('stripe');
   const payload = JSON.stringify({
     id: 'evt_1', object: 'event', type: 'checkout.session.completed',
-    data: { object: { id: 'cs_1', object: 'checkout.session', subscription: 'sub_1', metadata: { firmId: '7' } } },
+    data: { object: { id: 'cs_1', object: 'checkout.session', subscription: 'sub_1', metadata: {} } },
   });
   const signature = new Stripe('sk_test_123').webhooks.generateTestHeaderString({ payload, secret: process.env.STRIPE_WEBHOOK_SECRET });
   const sqlCalls = [];
   const stripeCalls = [];
+  let failActivation = false;
   const handler = async (url, init) => {
     if (url.startsWith('https://api.stripe.com/')) {
       stripeCalls.push(url);
-      return jsonResponse({ id: 'sub_1', object: 'subscription', default_payment_method: { id: 'pm_1', object: 'payment_method' } });
+      if (stripeCalls.length > 1 && failActivation) return jsonResponse({ error: { type: 'api_error', message: 'Something went wrong.' } }, 500);
+      return jsonResponse({ id: 'sub_1', object: 'subscription', default_payment_method: { id: 'pm_1', object: 'payment_method' }, metadata: { firmId: '7' } });
     }
     const { query, params } = JSON.parse(init.body);
     sqlCalls.push({ query: query.replace(/\s+/g, ' ').trim(), params });
@@ -2240,6 +2242,9 @@ test('the Stripe webhook switches on a paid subscription, and refuses a forged c
       assert.equal(sqlCalls.length, 0, 'a forged webhook call changed a firm');
       const real = await post(signature);
       assert.equal(real.status, 200);
+      // When switching the firm on fails, Stripe is told to retry.
+      failActivation = true;
+      assert.equal((await post(signature)).status, 500);
     });
   } finally {
     await server.close();
@@ -2303,7 +2308,8 @@ test('checkout sends a paying firm back to the sign-up page at this site address
   }, () => createSubscriptionCheckout({ stripeCustomerId: 'cus_1', firmId: 7 }));
   const params = new URLSearchParams(body);
   assert.equal(params.get('success_url'), `${APP_URL}/register.html?subscribed=1`);
-  assert.equal(params.get('cancel_url'), `${APP_URL}/register.html`);
+  assert.equal(params.get('cancel_url'), `${APP_URL}/register.html?step=4`);
+  assert.equal(params.get('client_reference_id'), '7');
 });
 
 // ─── Firm fields on the admin page ────────────────────────────────────────────
@@ -2348,13 +2354,21 @@ test('firm sign-up and profile fields are checked and stored as plain text, and 
     serviceArea: '<script>x</script> Brooklyn',
     contactName: 'Pat\u0000 Lee',
   }));
-  const [areas, serviceArea, contactName] = calls[0].params;
+  const [, areas, , serviceArea, , contactName] = calls[0].params;
   // The driver sends the list as a Postgres array literal.
   const stored = Array.isArray(areas) ? areas : String(areas).replace(/^{|}$/g, '').split(',').filter(Boolean).map(item => item.replace(/^"|"$/g, ''));
   assert.deepEqual(stored, ['dental']);
   assert.doesNotMatch(serviceArea, /[<>]/);
   assert.match(serviceArea, /Brooklyn/);
   assert.equal(contactName, 'Pat Lee');
+
+  // The portal saves only the practice areas: the service area and contact name are left as they are.
+  calls.length = 0;
+  await withOutboundHttp(async (url, init) => { calls.push(JSON.parse(init.body)); return jsonResponse(EMPTY_ROWS); },
+    () => updateFirmProfile(7, { specializations: ['dental'] }));
+  const flags = calls[0].params.filter((param, i) => i % 2 === 0 && i < 6).map(String);
+  assert.deepEqual(flags, ['true', 'false', 'false']);
+  assert.match(calls[0].query, /service_area\s+= CASE WHEN \$3 THEN \$4 ELSE service_area END/);
 });
 
 // ─── Auctions: on time, paid, and fair ────────────────────────────────────────
@@ -2681,5 +2695,118 @@ test('a firm link opens only what it was emailed for', async () => {
     });
   } finally {
     await server.close();
+  }
+});
+
+// ─── After a charge: unknown outcomes, failures, notices ──────────────────────
+
+test('a charge Stripe cannot confirm stops the close, so the next bidder is not charged as well', async () => {
+  const { closeAuction } = await import('../auction.js');
+  const world = auctionWorld({
+    bids: [[11, '300.00'], [12, '250.00']],
+    firms: { 11: { customer: 'cus_11', card: 'pm_11' }, 12: { customer: 'cus_12', card: 'pm_12' } },
+  });
+  const handler = async (url, init) => {
+    if (url.startsWith('https://api.stripe.com/')) {
+      world.stripe.push({ customer: new URLSearchParams(String(init.body)).get('customer') });
+      return jsonResponse({ error: { type: 'api_error', message: 'Something went wrong on our end.' } }, 500);
+    }
+    return world.handler(url, init);
+  };
+  const { result, logs } = await capturingLogs(() => withoutMail(() => withOutboundHttp(handler, () => closeAuction(9))));
+  assert.deepEqual(result, { pending: true });
+  assert.ok(world.stripe.every(call => call.customer === 'cus_11'), 'the next bidder was charged while the first charge was unknown');
+  assert.ok(!world.sql.some(call => /^UPDATE auctions SET status = '(closed|cancelled)'/.test(call.query)), 'the auction was finished on an unknown charge');
+  assert.ok(logs.some(line => /charge to firm 11 has an unknown outcome/.test(line)), 'the operator was not told');
+});
+
+test('a cold lead charged but not recorded is refunded, and a winner whose email fails is reported, not lost', async () => {
+  const { deliverColdLead, closeAuction } = await import('../auction.js');
+  // The lead row cannot be written after the charge: the charge is refunded and the operator told.
+  const stripe = [];
+  const handler = async (url, init) => {
+    if (url.startsWith('https://api.stripe.com/')) {
+      stripe.push({ url, key: new Headers(init.headers).get('idempotency-key') });
+      return url.includes('/v1/refunds')
+        ? jsonResponse({ id: 're_1', object: 'refund', status: 'succeeded' })
+        : jsonResponse({ id: 'pi_cus_3', object: 'payment_intent', status: 'succeeded' });
+    }
+    const { query } = JSON.parse(init.body);
+    const q = query.replace(/\s+/g, ' ').trim();
+    if (/FROM firms WHERE active/.test(q)) {
+      return rowsResponse([['id', INT], ['name', TEXT], ['email', TEXT], ['stripe_customer_id', TEXT], ['stripe_payment_method_id', TEXT]],
+        [['3', 'Firm 3', 'firm3@example.test', 'cus_3', 'pm_3']]);
+    }
+    if (/^INSERT INTO leads/.test(q)) return jsonResponse({ message: 'database unavailable' }, 500);
+    return jsonResponse(EMPTY_ROWS);
+  };
+  const cold = await capturingLogs(() => withoutMail(() => withOutboundHttp(handler,
+    () => deliverColdLead('sess-cold', 'misdiagnosis', { score: 60, tier: 'cold' }, { preview: 'A preview.' }))));
+  assert.equal(cold.result, 0);
+  const refund = stripe.find(call => call.url.includes('/v1/refunds'));
+  assert.ok(refund, 'the charge was not refunded');
+  assert.equal(refund.key, 'refund-cold-sess-cold-3');
+  assert.ok(cold.logs.some(line => /charged but not delivered/.test(line)), 'the operator was not told');
+
+  // The winner is charged and recorded, but its link cannot be made: the win stands and the operator is told.
+  const world = auctionWorld({ bids: [[12, '250.00']], firms: { 12: { customer: 'cus_12', card: 'pm_12' } } });
+  const failingLink = async (url, init) => {
+    if (url.endsWith('/sql') && /^INSERT INTO firm_tokens/.test(JSON.parse(init.body).query.replace(/\s+/g, ' ').trim())) {
+      return jsonResponse({ message: 'database unavailable' }, 500);
+    }
+    return world.handler(url, init);
+  };
+  const won = await capturingLogs(() => withoutMail(() => withOutboundHttp(failingLink, () => closeAuction(9))));
+  assert.deepEqual(won.result, { winnerFirmId: 12, amount: 250 });
+  assert.ok(won.logs.some(line => /Lead #601 was not emailed to firm 12/.test(line)), 'the failed delivery was not reported');
+});
+
+test('an auction whose firms cannot be notified is cancelled, so asking again does not leave a second one open', async () => {
+  const { createAuction } = await import('../auction.js');
+  const sql = [];
+  const handler = async (url, init) => {
+    const { query } = JSON.parse(init.body);
+    const q = query.replace(/\s+/g, ' ').trim();
+    sql.push(q);
+    if (/^INSERT INTO auctions/.test(q)) {
+      return rowsResponse([['id', INT], ['session_id', TEXT], ['case_type', TEXT], ['tier', TEXT], ['closes_at', TIMESTAMPTZ]],
+        [['77', 'sess-new', 'misdiagnosis', 'hot', '2030-01-01 00:00:00+00']], 'INSERT');
+    }
+    if (/FROM firms WHERE active/.test(q)) return jsonResponse({ message: 'database unavailable' }, 500);
+    return jsonResponse(EMPTY_ROWS);
+  };
+  await assert.rejects(withoutMail(() => withOutboundHttp(handler,
+    () => createAuction('sess-new', 'misdiagnosis', { score: 84, tier: 'hot', dimensions: {}, preview: 'A preview.' }, { preview: 'A preview.' }))));
+  assert.ok(sql.some(q => /^UPDATE auctions SET status = 'cancelled' WHERE id = \$1 AND status = 'open'/.test(q)), 'the unseen auction was left open');
+});
+
+test('an auction being closed alongside a chat message is finished before an error reply is sent', async () => {
+  const previous = process.env.AUCTION_SWEEP_IN_TESTS;
+  process.env.AUCTION_SWEEP_IN_TESTS = '1';
+  let claimed = false;
+  const world = fakeWorld();
+  const handler = async (url, init) => {
+    if (url.startsWith('https://api.openai.com/')) return jsonResponse({ error: { message: 'Bad request', type: 'invalid_request_error' } }, 400);   // fails at once, no retries
+    if (url.endsWith('/sql')) {
+      const q = JSON.parse(init.body).query.replace(/\s+/g, ' ').trim();
+      if (/^SELECT id FROM auctions WHERE status = 'open' AND closes_at <= NOW\(\)/.test(q)) {
+        await new Promise(resolve => setTimeout(resolve, 1500));   // a close slower than the failing reply
+        return rowsResponse([['id', INT]], [['9']]);
+      }
+      if (/^UPDATE auctions SET status = 'closing'/.test(q)) { claimed = true; return jsonResponse(EMPTY_ROWS); }
+    }
+    return world.handler(url, init);
+  };
+  const server = await startServer(app);
+  try {
+    await withoutMail(() => withOutboundHttp(handler, async () => {
+      const { response } = await postJson(server.baseUrl, '/api/ask', { question: 'Hello.', mode: 'personal', sessionId: 'sess-sweep-error', history: [] });
+      assert.equal(response.status, 500);
+      assert.ok(claimed, 'the reply was sent before the auction close had run');
+    }));
+  } finally {
+    await server.close();
+    if (previous === undefined) delete process.env.AUCTION_SWEEP_IN_TESTS;
+    else process.env.AUCTION_SWEEP_IN_TESTS = previous;
   }
 });

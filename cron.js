@@ -2,7 +2,7 @@
 
 import cron from 'node-cron';
 import { neon } from '@neondatabase/serverless';
-import { closeExpiredAuctions, declineOverdueLeads } from './auction.js';
+import { closeExpiredAuctions, declineOverdueLeads, reportStuckAuctions } from './auction.js';
 import { resetDeclineCounts } from './firms.js';
 import { purgeExpiredConversations } from './retention.js';
 
@@ -22,6 +22,8 @@ export function startCronJobs() {
   });
 
   cron.schedule('0 2 * * *', async () => {
+    try { await reportStuckAuctions(); }
+    catch (err) { console.error('Stuck auction check error:', err.message); }
     try { await resetDeclineCounts(); }
     catch (err) { console.error('Decline reset cron error:', err.message); }
     try { await purgeExpiredConversations(); }

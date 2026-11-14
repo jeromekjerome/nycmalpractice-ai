@@ -147,6 +147,7 @@ async function setup() {
   await sql`ALTER TABLE firms ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ`;           // set by the operator after checking it; no leads before
   await sql`ALTER TABLE firms ADD COLUMN IF NOT EXISTS subscription_status TEXT`;          // Stripe's status: active, past_due, canceled ...
   await sql`ALTER TABLE firms ADD COLUMN IF NOT EXISTS card_declined_at TIMESTAMPTZ`;      // when the firm was last told a lead charge was declined
+  await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS decline_reason TEXT`;              // why the firm declined (auction.js DECLINE_REASONS), or 'expired'
 
   // The last decisions found for each case type, used when CourtListener cannot be searched (case-memory.js).
   await sql`

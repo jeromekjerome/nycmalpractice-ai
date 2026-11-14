@@ -151,9 +151,14 @@ test('declining a lead shows the refund policy before it is sent', async ({ page
   await page.locator('#declineButton').click();
   await expect(page.locator('#declineConfirm')).toContainText('50% refund');
   expect(declined).toBeNull();
+  // A reason is required.
+  await page.locator('#confirmDecline').click();
+  await expect(page.locator('#actionMessage')).toContainText('Choose why you are declining this lead.');
+  expect(declined).toBeNull();
+  await page.locator('#declineReason').selectOption('outside_practice');
   await page.locator('#confirmDecline').click();
   await expect(page.locator('#actionMessage')).toContainText('Refund: $125.00');
-  expect(declined).toEqual({ token: 'abc' });
+  expect(declined).toEqual({ token: 'abc', reason: 'outside_practice' });
 });
 
 test('the auction page shows the case summary without contact details and places a bid', async ({ page }) => {

@@ -74,7 +74,11 @@ Malpractice SOL in NY: 2.5 years from act/omission or the end of continuous trea
     });
 
     const result = JSON.parse(res.choices[0].message.content);
-    if (!result.viable || result.confidence < 0.65 || result.score < 55) return null;
+    // A rejection is a verdict, kept apart from no verdict at all (null: an error or a timeout): it clears a
+    // qualifying score from an earlier message, which used to go to firms even after the claim fell apart.
+    if (!result.viable || result.confidence < 0.65 || result.score < 55) {
+      return { viable: false, score: Number(result.score) || 0, confidence: Number(result.confidence) || 0 };
+    }
     const tier = getTier(result.score);
     return { ...result, tier, reserve: TIER_CONFIG[tier].reserve };
   } catch (err) {
@@ -175,11 +179,18 @@ async function tellFirmChargeFailed(firm, { lost, reason }) {
   }
 }
 
-export async function deliverColdLead(sessionId, caseType, scoreData, leadData) {
-  const firms = await getActiveFirms(caseType);
+// Also used to offer a lead again: an auction nobody could be charged for, or a lead a firm declined or let
+// lapse. `excludeFirmIds` are the firms that have had it already, `maxFirms` what is left of the three firms
+// the client agreed to, and `context` begins the operator's notice when no firm takes it.
+export async function deliverColdLead(sessionId, caseType, scoreData, leadData, { excludeFirmIds = [], maxFirms = MAX_FIRMS_PER_LEAD, context = '', alertIfNone = true } = {}) {
+  const excluded = new Set(excludeFirmIds.map(String));
+  const firms = (await getActiveFirms(caseType)).filter(firm => !excluded.has(String(firm.id)));
   if (firms.length === 0) {
     // Nobody to sell it to: the operator is told, so a consented request is not silently lost.
-    await sendAdminLeadAlert({ kind: 'cold', type: caseType, scoreData, sessionId, reason: 'no subscribed firm handles this case type' });
+    if (alertIfNone) {
+      await sendAdminLeadAlert({ kind: 'cold', type: caseType, scoreData, sessionId,
+        reason: `${context}no ${excluded.size ? 'other ' : ''}subscribed firm handles this case type` });
+    }
     return 0;
   }
 
@@ -189,7 +200,7 @@ export async function deliverColdLead(sessionId, caseType, scoreData, leadData) 
   let delivered = 0;
   let uncertain = 0;
   for (const firm of shuffled(firms)) {
-    if (delivered + uncertain >= MAX_FIRMS_PER_LEAD) break;
+    if (delivered + uncertain >= maxFirms) break;
     // Charged first: a firm whose card is missing or declined does not get the lead, and the next one is tried.
     const key = `cold-${sessionId}-${firm.id}`;
     const charge = await chargeFirm(firm, TIER_CONFIG.cold.reserve, `Cold malpractice lead — ${caseType}`, { sessionId, firmId: String(firm.id) }, key);
@@ -232,8 +243,8 @@ export async function deliverColdLead(sessionId, caseType, scoreData, leadData) 
         `<p>Firm ${escapeHtml(firm.id)} was charged and lead #${escapeHtml(leadId)} is in its portal, but the email failed: ${escapeHtml(err.message)}. Send the firm a portal link from the admin page.</p>`);
     }
   }
-  if (delivered === 0) {
-    await sendAdminLeadAlert({ kind: 'cold', type: caseType, scoreData, sessionId, reason: 'no matching firm could be charged' });
+  if (delivered === 0 && uncertain === 0 && alertIfNone) {
+    await sendAdminLeadAlert({ kind: 'cold', type: caseType, scoreData, sessionId, reason: `${context}no matching firm could be charged` });
   }
   return delivered;
 }
@@ -403,12 +414,15 @@ export async function closeAuction(auctionId) {
     return { winnerFirmId: firm.id, amount };
   }
 
+  // Nobody won: the lead is not dropped but offered at the cold price to up to three matching firms, other than
+  // any whose card was just declined. The operator is told only if none of them takes it.
   await sql`UPDATE auctions SET status = 'cancelled' WHERE id = ${auctionId}`;
-  await sendAdminLeadAlert({
-    kind: 'auction', type: auction.case_type, scoreData: auction, sessionId: auction.session_id,
-    reason: bids.length ? 'no bidder could be charged' : 'the auction closed with no bids',
-  });
-  return null;
+  const why = bids.length ? 'no bidder could be charged' : 'the auction closed with no bids';
+  const reoffered = await deliverColdLead(auction.session_id, auction.case_type,
+    { score: auction.quality_score, preview: auction.lead_preview, tier: auction.tier }, auction.lead_data,
+    { excludeFirmIds: [...declinedFirms], context: `auction #${auctionId}: ${why}, and when offered as a cold lead, ` });
+  console.log(`Auction ${auctionId}: ${why}; offered as a cold lead to ${reoffered} firm(s)`);
+  return { reoffered };
 }
 
 // Closes every auction past its time. Run by the nightly job and, since that job runs only once a day on this
@@ -450,17 +464,35 @@ export async function acceptLead(leadId, firmId, attestation = null) {
 
 // Terms: a lead not accepted or declined within 3 days is declined automatically, counts as a decline
 // and is not refunded. One UPDATE claims every overdue lead, so a firm's answer arriving at the same
-// moment is kept rather than overwritten.
+// moment is kept rather than overwritten. Each lapsed lead is then offered to firms that have not had it.
 export async function declineOverdueLeads() {
   const overdue = await sql`
-    UPDATE leads SET status = 'declined', declined_at = NOW()
+    UPDATE leads SET status = 'declined', declined_at = NOW(), decline_reason = 'expired'
     WHERE status = 'pending' AND accept_deadline < NOW()
-    RETURNING id, firm_id, auction_id`;
-  for (const lead of overdue) await recordDecline(lead.firm_id, !!lead.auction_id);
+    RETURNING id, firm_id, auction_id, session_id, case_type, tier, lead_data`;
+  for (const lead of overdue) {
+    await recordDecline(lead.firm_id, !!lead.auction_id);
+    await afterLeadLost(lead, 'expired');
+  }
   return overdue.length;
 }
 
-export async function declineLead(leadId, firmId) {
+// Why a firm declines a lead (lead.html offers these; the reason is required and kept on the lead).
+export const DECLINE_REASONS = Object.freeze({
+  unreachable:      'Could not reach the client (wrong or disconnected number)',
+  did_not_ask:      'The client says they did not ask to be contacted',
+  represented:      'The client already has a lawyer',
+  deadline:         'The deadline to sue has already passed',
+  conflict:         'Conflict of interest',
+  outside_practice: 'Outside our practice area or location',
+  not_taking:       'We would not take this case',
+  other:            'Another reason',
+});
+// Reasons that say the lead itself is bad: it is not offered to other firms, and the operator reviews it.
+const LEAD_PROBLEMS = new Set(['unreachable', 'did_not_ask', 'represented', 'deadline']);
+
+export async function declineLead(leadId, firmId, reason) {
+  if (!Object.hasOwn(DECLINE_REASONS, reason)) return { ok: false, error: 'Choose why you are declining this lead.' };
   const [lead] = await sql`SELECT * FROM leads WHERE id = ${leadId} AND firm_id = ${firmId} LIMIT 1`;
   if (!lead) return { ok: false, error: 'Lead not found' };
   if (lead.status !== 'pending') return { ok: false, error: `Lead already ${lead.status}` };
@@ -470,7 +502,7 @@ export async function declineLead(leadId, firmId) {
   const coldCount    = recent.cold + 1;
   const auctionCount = recent.auction + 1;
   // Claim the lead before any refund, so two decline clicks, or a decline racing an accept, refund at most once.
-  const [claimed] = await sql`UPDATE leads SET status = 'declined', declined_at = NOW() WHERE id = ${leadId} AND status = 'pending' RETURNING id`;
+  const [claimed] = await sql`UPDATE leads SET status = 'declined', declined_at = NOW(), decline_reason = ${reason} WHERE id = ${leadId} AND status = 'pending' RETURNING id`;
   if (!claimed) return { ok: false, error: 'Lead already answered' };
   const pricePaid    = parseFloat(lead.price_paid);
   const refundAmount = isAuction
@@ -497,7 +529,97 @@ export async function declineLead(leadId, firmId) {
   }
   await sql`UPDATE leads SET refund_amount = ${refunded}, stripe_refund_id = ${stripeRefundId} WHERE id = ${leadId}`;
   await recordDecline(firmId, isAuction);
+  await afterLeadLost(lead, reason);
   return { ok: true, refundAmount: refunded, ...(refundPending ? { refundPending } : {}) };
+}
+
+// What a lead row was sold with: a cold lead keeps it on the row, an auction lead on its auction.
+async function soldLeadData(lead) {
+  const parse = value => (typeof value === 'string' ? JSON.parse(value) : value) || null;
+  if (lead.auction_id) {
+    const [auction] = await sql`SELECT lead_data, lead_preview, quality_score, tier FROM auctions WHERE id = ${lead.auction_id}`;
+    return { leadData: parse(auction?.lead_data), scoreData: { score: auction?.quality_score, preview: auction?.lead_preview, tier: auction?.tier || lead.tier } };
+  }
+  const leadData = parse(lead.lead_data);
+  return { leadData, scoreData: { score: leadData?.score, preview: leadData?.preview, tier: lead.tier || 'cold' } };
+}
+
+// A lead a firm declined, or let lapse, used to be dropped without a word. Unless another firm has accepted it,
+// it is now offered at the cold price to firms that have not had it, within the three the client agreed to;
+// the operator is told when it goes nowhere, and about every decline that says the lead itself is bad (a
+// credit for such a lead is the operator's call). Never throws: the decline itself has already been made.
+async function afterLeadLost(lead, reason) {
+  try {
+    const why = reason === 'expired' ? 'not answered within 3 days' : `declined (${DECLINE_REASONS[reason] || reason})`;
+    const holders = await sql`SELECT firm_id, status FROM leads WHERE session_id = ${lead.session_id}`;
+    if (holders.some(row => row.status === 'accepted')) return 0;
+    const { leadData, scoreData } = await soldLeadData(lead);
+    const kind = lead.auction_id ? 'auction' : 'cold';
+    if (LEAD_PROBLEMS.has(reason) || !leadData) {
+      await sendAdminLeadAlert({ kind, type: lead.case_type, scoreData, sessionId: lead.session_id,
+        reason: `lead #${lead.id} was ${why} by firm ${lead.firm_id}, so it was not offered to other firms` });
+      return 0;
+    }
+    const hadIt = [...new Set(holders.map(row => String(row.firm_id)))];
+    const stillPending = holders.some(row => row.status === 'pending');
+    const room = MAX_FIRMS_PER_LEAD - hadIt.length;
+    if (room <= 0) {
+      if (!stillPending) {
+        await sendAdminLeadAlert({ kind, type: lead.case_type, scoreData, sessionId: lead.session_id,
+          reason: `lead #${lead.id} was ${why}, and it has already gone to the ${MAX_FIRMS_PER_LEAD} firms the client agreed to` });
+      }
+      return 0;
+    }
+    return await deliverColdLead(lead.session_id, lead.case_type, scoreData, leadData,
+      { excludeFirmIds: hadIt, maxFirms: room, alertIfNone: !stillPending, context: `lead #${lead.id} was ${why}, and when offered again, ` });
+  } catch (err) {
+    console.error(`Offering lead ${lead?.id} again failed:`, err.message);
+    await notifyOperator(`Lead #${lead?.id} was ${reason === 'expired' ? 'not answered' : 'declined'} and could not be offered again`,
+      `<p>Lead #${escapeHtml(lead?.id)} (session ${escapeHtml(lead?.session_id)}) was not offered to other firms: ${escapeHtml(err.message)}. Deliver it by hand from the admin page.</p>`);
+    return 0;
+  }
+}
+
+// The operator's hand delivery of a consented request to a chosen firm (admin page): an approved firm that has
+// not had this lead, within the three firms the client agreed to, charged `price` dollars (0 for a free sample).
+export async function deliverLeadByHand({ sessionId, firmId, price, type, leadData, scoreData }) {
+  const firm = await getFirm(firmId);
+  if (!firm || firm.active === false || !firm.approved_at) return { ok: false, status: 400, error: 'Choose an active, approved firm.' };
+  const had = await sql`SELECT DISTINCT firm_id FROM leads WHERE session_id = ${sessionId}`;
+  if (had.some(row => String(row.firm_id) === String(firm.id))) return { ok: false, status: 409, error: 'That firm has already had this lead.' };
+  if (had.length >= MAX_FIRMS_PER_LEAD) return { ok: false, status: 409, error: `This lead has already gone to the ${MAX_FIRMS_PER_LEAD} firms the client agreed to.` };
+
+  let chargeId = null;
+  const key = `manual-${sessionId}-${firm.id}`;
+  if (price > 0) {
+    const charge = await chargeFirm(firm, price, `Malpractice lead delivered by the operator — ${type || 'other'}`, { sessionId, firmId: String(firm.id) }, key);
+    if (charge.status === 'unknown') return { ok: false, status: 502, error: `Stripe did not confirm the charge (idempotency key ${key}). Check Stripe before trying again.` };
+    if (charge.status !== 'charged') return { ok: false, status: 402, error: `The firm could not be charged: ${charge.reason}` };
+    chargeId = charge.id;
+  }
+  const tier = scoreData?.tier || 'cold';
+  let leadId;
+  try {
+    const deadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+    const [lead] = await sql`
+      INSERT INTO leads (firm_id, session_id, case_type, tier, price_paid, stripe_charge_id, accept_deadline, lead_data)
+      VALUES (${firm.id}, ${sessionId}, ${type}, ${tier}, ${price}, ${chargeId}, ${deadline}, ${JSON.stringify(leadData)})
+      RETURNING id`;
+    leadId = lead.id;
+  } catch (err) {
+    const refunded = chargeId
+      ? await createRefund({ paymentIntentId: chargeId, amountDollars: price, idempotencyKey: `refund-${key}` }).then(() => true, () => false)
+      : true;
+    return { ok: false, status: 500, error: `The lead could not be recorded${chargeId ? (refunded ? '; the charge was refunded' : '; the refund also failed, so refund it in Stripe') : ''}.` };
+  }
+  await sql`UPDATE conversations SET lead_sent_at = COALESCE(lead_sent_at, NOW()) WHERE session_id = ${sessionId}`.catch(() => {});
+  try {
+    const token = await createMagicLink(firm.id, { leadId, expiresInHours: 72 });
+    await sendLeadDeliveryEmail(firm, leadId, token, leadData, scoreData || {}, tier, price);
+  } catch (err) {
+    return { ok: true, leadId, emailed: false, error: `Lead #${leadId} is in the firm's portal, but the email failed: ${err.message}` };
+  }
+  return { ok: true, leadId, emailed: true };
 }
 
 // Emails the operator (NOTIFICATION_EMAIL). Never throws: a notice that cannot be sent is logged.

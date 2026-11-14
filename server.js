@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { neon } from '@neondatabase/serverless';
 import { answerUserQuestion } from './ask.js';
-import { closeExpiredAuctions, createAuction, deliverColdLead, getAuctionStatus, placeBid, acceptLead, declineLead, notifyOperatorOfContactRequest, notifyOperator, TIER_CONFIG } from './auction.js';
+import { closeExpiredAuctions, createAuction, deliverColdLead, getAuctionStatus, placeBid, acceptLead, declineLead, notifyOperatorOfContactRequest, notifyOperator, TIER_CONFIG, DECLINE_REASONS, deliverLeadByHand } from './auction.js';
 import { registerFirm, sendVerificationCode, verifyPhoneCode, validateToken, updateFirmSubscription, getFirm, updateFirmProfile, createMagicLink, VerificationLimitError, recentDeclineCounts, linkOpensAuction, linkOpensLead, linkOpensAccount, approveFirm, setSubscriptionStatus, ensureStripeCustomer, changeUnverifiedPhone, setCustomerCard, findFirmByEmail } from './firms.js';
 import { rateLimit } from './rate-limit.js';
 import nodemailer from 'nodemailer';
@@ -209,10 +209,13 @@ app.post('/api/ask', limitChat, async (req, res) => {
 
     const updatedHistory = [...history, { role: 'user', content: question }, { role: 'assistant', content: result.answer }];
     // A qualifying lead score is kept with the conversation. The lead goes to firms only from
-    // /api/contact, once the visitor has given contact details and agreed to be contacted.
-    const leadScore = result.leadScore ? { ...result.leadScore, scoredAt: new Date().toISOString() } : null;
+    // /api/contact, once the visitor has given contact details and agreed to be contacted. A rejection clears an
+    // earlier score; no verdict (an error or a timeout) leaves it as it was.
+    const verdict = result.leadScore;
+    const leadScore = verdict?.tier ? { ...verdict, scoredAt: new Date().toISOString() } : null;
+    const clearLeadScore = verdict?.viable === false;
     if (historyTrusted) {
-      await finishBeforeReply('saving the conversation', upsertConversation(sessionId, mode, result.caseType, updatedHistory, leadScore, result.evaluation || null), finishBy());
+      await finishBeforeReply('saving the conversation', upsertConversation(sessionId, mode, result.caseType, updatedHistory, leadScore, result.evaluation || null, { clearLeadScore }), finishBy());
     }
 
     await finishBeforeReply('closing expired auctions', closingAuctions, finishBy());
@@ -296,16 +299,7 @@ app.post('/api/contact', limitContact, async (req, res) => {
       // The old check read a log row that might not exist, and two submissions at once could both pass it.
       const [claimed] = await sql`UPDATE conversations SET lead_sent_at = NOW() WHERE session_id = ${sessionId} AND lead_sent_at IS NULL RETURNING session_id`;
       if (claimed) {
-        const leadData = {
-          caseType: conv.case_type, mode: conv.mode, history: conv.history,
-          preview: score.preview, score: score.score, dimensions: score.dimensions, scoredAt: score.scoredAt || null,
-          // The exact consent travels with the lead, which is kept for 3 years: the conversation that also records
-          // it is deleted after 90 days.
-          contact: { name: cleanName, phone: phoneNumber, email: cleanEmail || null, bestTime: cleanTime || null, consentedAt: saved?.contact_consent_at || null, consentText: CONTACT_CONSENT_TEXT },
-          // The gate's full audit of the last reply — every attempt, the citation audit and the
-          // checklist for the supervising attorney — for the reviewing firm (lead.html).
-          evaluation: conv.gate_audit || null,
-        };
+        const leadData = leadDataFrom(conv, { name: cleanName, phone: phoneNumber, email: cleanEmail || null, bestTime: cleanTime || null, consentedAt: saved?.contact_consent_at || null, consentText: CONTACT_CONSENT_TEXT });
         const handOff = score.tier === 'cold'
           ? deliverColdLead(sessionId, conv.case_type, score, leadData)
           : createAuction(sessionId, conv.case_type, score, leadData);
@@ -616,11 +610,15 @@ app.post('/api/leads/:id/accept', async (req, res) => {
   res.json(result);
 });
 
+// A decline says why (DECLINE_REASONS): the operator learns which leads are bad, and a lead declined for a reason
+// of the firm's own is offered to another firm.
 app.post('/api/leads/:id/decline', async (req, res) => {
-  const tokenData = await validateToken(req.body.token);
+  const { token, reason } = req.body || {};
+  if (!Object.hasOwn(DECLINE_REASONS, reason)) return res.status(400).json({ error: 'Choose why you are declining this lead.' });
+  const tokenData = await validateToken(token);
   if (!tokenData) return res.status(401).json({ error: 'Invalid token' });
   if (!linkOpensLead(tokenData, req.params.id)) return res.status(403).json({ error: WRONG_LEAD });
-  res.json(await declineLead(req.params.id, tokenData.firm_id));
+  res.json(await declineLead(req.params.id, tokenData.firm_id, reason));
 });
 
 // ─── Firm Portal ──────────────────────────────────────────────────────────────
@@ -668,7 +666,13 @@ function requireAdmin(req, res) {
 
 app.get('/api/admin/firms', async (req, res) => {
   if (!requireAdmin(req, res)) return;
-  const firms      = await sql`SELECT * FROM firms ORDER BY created_at DESC`;
+  // With each firm's leads, what it has paid after refunds, and its declines in the last 30 days.
+  const firms = await sql`
+    SELECT f.*,
+      (SELECT count(*) FROM leads l WHERE l.firm_id = f.id)::int AS leads_bought,
+      (SELECT COALESCE(sum(COALESCE(l.price_paid, 0) - COALESCE(l.refund_amount, 0)), 0) FROM leads l WHERE l.firm_id = f.id) AS net_spend,
+      (SELECT count(*) FROM leads l WHERE l.firm_id = f.id AND l.status = 'declined' AND l.declined_at > NOW() - INTERVAL '30 days')::int AS declines_30d
+    FROM firms f ORDER BY f.created_at DESC`;
   const [counts]   = await sql`SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE subscription_active) AS active, COUNT(*) FILTER (WHERE NOT active) AS inactive FROM firms`;
   const [leadCounts] = await sql`SELECT COUNT(*) AS total FROM leads`;
   res.json({ firms, counts, leadCounts });
@@ -694,6 +698,98 @@ app.post('/api/admin/firms/:id/send-link', async (req, res) => {
   res.json({ ok: true });
 });
 
+// ─── Admin: requests, auctions and leads ─────────────────────────────────────
+// The operator's view of every consented contact request and what became of it, which used to need database
+// access: the alerts said the contact details were "saved with the conversation", with no screen to read them.
+app.get('/api/admin/requests', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const requests = await sql`
+      SELECT c.session_id, c.case_type, c.mode, c.name, c.phone, c.email, c.best_time, c.contact_consent_at, c.lead_sent_at,
+             c.lead_score->>'tier' AS tier, c.lead_score->>'score' AS score,
+             (SELECT COALESCE(json_agg(json_build_object('id', l.id, 'firm_id', l.firm_id, 'firm_name', f.name, 'status', l.status,
+                       'price_paid', l.price_paid, 'decline_reason', l.decline_reason) ORDER BY l.created_at), '[]'::json)
+                FROM leads l LEFT JOIN firms f ON f.id = l.firm_id WHERE l.session_id = c.session_id) AS leads,
+             (SELECT COALESCE(json_agg(json_build_object('id', a.id, 'status', a.status, 'tier', a.tier, 'current_bid', a.current_bid) ORDER BY a.created_at), '[]'::json)
+                FROM auctions a WHERE a.session_id = c.session_id) AS auctions
+      FROM conversations c
+      WHERE c.contact_consent_at IS NOT NULL
+      ORDER BY c.contact_consent_at DESC LIMIT 100`;
+    res.json({ requests, declineReasons: DECLINE_REASONS });
+  } catch (err) { serverError(req, res, err); }
+});
+
+// One request with its conversation, to read before calling the client or delivering it by hand.
+app.get('/api/admin/requests/:sessionId', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const [request] = await sql`
+      SELECT session_id, mode, case_type, name, phone, email, best_time, contact_consent_at, contact_consent_text, lead_sent_at, lead_score, history
+      FROM conversations WHERE session_id = ${req.params.sessionId} AND contact_consent_at IS NOT NULL LIMIT 1`;
+    if (!request) return res.status(404).json({ error: 'No consented request with that session' });
+    res.json({ request });
+  } catch (err) { serverError(req, res, err); }
+});
+
+// Delivers a consented request to a chosen approved firm by hand, at a price (0 for a free sample lead), within the
+// three firms the client agreed to. This is how leads go out while no firm subscribes, and how a stuck one is finished.
+app.post('/api/admin/requests/:sessionId/deliver', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const firmId = Number(req.body?.firmId);
+  const price = Math.round(Number(req.body?.price ?? 0) * 100) / 100;
+  if (!Number.isInteger(firmId) || firmId <= 0) return res.status(400).json({ error: 'Choose a firm.' });
+  if (!Number.isFinite(price) || price < 0 || price > 5000) return res.status(400).json({ error: 'Enter a price from $0 to $5,000.' });
+  try {
+    const [conv] = await sql`
+      SELECT session_id, mode, case_type, history, lead_score, gate_audit, name, phone, email, best_time, contact_consent_at, contact_consent_text
+      FROM conversations WHERE session_id = ${req.params.sessionId} AND contact_consent_at IS NOT NULL LIMIT 1`;
+    if (!conv) return res.status(404).json({ error: 'No consented request with that session' });
+    const leadData = leadDataFrom(conv, { name: conv.name, phone: conv.phone, email: conv.email || null, bestTime: conv.best_time || null, consentedAt: conv.contact_consent_at, consentText: conv.contact_consent_text || CONTACT_CONSENT_TEXT });
+    const score = conv.lead_score || {};
+    const result = await deliverLeadByHand({
+      sessionId: conv.session_id, firmId, price, type: conv.case_type, leadData,
+      scoreData: { score: score.score, preview: score.preview, tier: score.tier || 'cold' },
+    });
+    res.status(result.ok ? 200 : result.status || 500).json(result.ok ? { ok: true, leadId: result.leadId, emailed: result.emailed, ...(result.error ? { warning: result.error } : {}) } : { error: result.error });
+  } catch (err) { serverError(req, res, err); }
+});
+
+app.get('/api/admin/auctions', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const auctions = await sql`
+      SELECT a.id, a.session_id, a.case_type, a.tier, a.quality_score, a.reserve_price, a.current_bid, a.status, a.closes_at, a.created_at,
+             a.winner_firm_id, a.winning_bid, w.name AS winner_name,
+             (SELECT count(*) FROM bids b WHERE b.auction_id = a.id)::int AS bid_count
+      FROM auctions a LEFT JOIN firms w ON w.id = a.winner_firm_id
+      ORDER BY a.created_at DESC LIMIT 100`;
+    res.json({ auctions });
+  } catch (err) { serverError(req, res, err); }
+});
+
+// An auction stuck 'closing' (a charge Stripe could not confirm, or a win that was not recorded) is finished by
+// hand: the operator checks Stripe, delivers the lead from the request if it was paid for, and cancels the auction.
+app.post('/api/admin/auctions/:id/cancel', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const [cancelled] = await sql`UPDATE auctions SET status = 'cancelled' WHERE id = ${req.params.id} AND status IN ('open', 'closing') RETURNING id`;
+    if (!cancelled) return res.status(409).json({ error: 'Only an open or closing auction can be cancelled.' });
+    res.json({ ok: true });
+  } catch (err) { serverError(req, res, err); }
+});
+
+app.get('/api/admin/leads', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const leads = await sql`
+      SELECT l.id, l.session_id, l.auction_id, l.firm_id, f.name AS firm_name, l.case_type, l.tier, l.price_paid, l.status,
+             l.refund_amount, l.stripe_refund_id, l.decline_reason, l.created_at, l.accepted_at, l.declined_at
+      FROM leads l LEFT JOIN firms f ON f.id = l.firm_id
+      ORDER BY l.created_at DESC LIMIT 200`;
+    res.json({ leads, declineReasons: DECLINE_REASONS });
+  } catch (err) { serverError(req, res, err); }
+});
+
 // ─── Case Types ───────────────────────────────────────────────────────────────
 app.get('/api/case-types', (_req, res) => {
   res.json({
@@ -715,16 +811,32 @@ app.post('/api/reset-session', async (req, res) => {
 // Saves the conversation after each reply, with the latest lead score and the gate's audit of the
 // latest reply. The name, phone number and best time to call are saved only by /api/contact, from the
 // form the visitor submits with consent; they are no longer picked out of the chat text.
-async function upsertConversation(sessionId, mode, caseType, history, leadScore = null, gateAudit = null) {
+async function upsertConversation(sessionId, mode, caseType, history, leadScore = null, gateAudit = null, { clearLeadScore = false } = {}) {
   await sql`
     INSERT INTO conversations (session_id, mode, case_type, history, lead_score, gate_audit, updated_at)
     VALUES (${sessionId}, ${mode}, ${caseType}, ${JSON.stringify(history)}, ${leadScore ? JSON.stringify(leadScore) : null}, ${gateAudit ? JSON.stringify(gateAudit) : null}, NOW())
     ON CONFLICT (session_id) DO UPDATE SET
       mode = EXCLUDED.mode, case_type = COALESCE(EXCLUDED.case_type, conversations.case_type),
       history = EXCLUDED.history,
-      lead_score = COALESCE(EXCLUDED.lead_score, conversations.lead_score),
+      lead_score = CASE WHEN ${clearLeadScore} THEN NULL ELSE COALESCE(EXCLUDED.lead_score, conversations.lead_score) END,
       gate_audit = COALESCE(EXCLUDED.gate_audit, conversations.gate_audit), updated_at = NOW()
   `;
+}
+
+// What a firm receives with a lead: the conversation, its score, the client's contact details and consent, and the
+// gate's audit of the last reply. Used for a request sent from the contact form and for one the operator delivers.
+function leadDataFrom(conv, contact) {
+  const score = conv.lead_score || {};
+  return {
+    caseType: conv.case_type, mode: conv.mode, history: conv.history,
+    preview: score.preview, score: score.score, dimensions: score.dimensions, scoredAt: score.scoredAt || null,
+    // The exact consent travels with the lead, which is kept for 3 years: the conversation that also records
+    // it is deleted after 90 days.
+    contact,
+    // The gate's full audit of the last reply — every attempt, the citation audit and the
+    // checklist for the supervising attorney — for the reviewing firm (lead.html).
+    evaluation: conv.gate_audit || null,
+  };
 }
 
 function getTransporter() {

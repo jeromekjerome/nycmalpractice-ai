@@ -164,10 +164,11 @@ CORE PRINCIPLES:
 - Foreign object left in the body: the claim may still be brought within 1 year of discovering the object (or of facts that would reasonably have led to its discovery), even after the 2 years and 6 months have run; implants, fixation devices and chemical compounds do not count as foreign objects
 - Infancy: for a patient who was a minor, the deadline is extended, but in malpractice cases never beyond 10 years after the malpractice (CPLR §208)
 - Public hospitals: a claim against NYC Health + Hospitals (for example Bellevue, Kings County or Elmhurst) or another city- or county-run hospital needs a notice of claim within 90 days and a lawsuit within 1 year and 90 days; state-run hospitals have their own short deadlines in the Court of Claims. These are far shorter than the usual deadline, so raise them as soon as a public hospital is involved
+- Federal providers: care at a VA or military hospital or clinic, or at a community health center whose staff are deemed federal employees, is a claim against the United States under the Federal Tort Claims Act: a written administrative claim (usually Standard Form 95) to the agency within 2 years, sooner than the 2 years and 6 months above, and no lawsuit until the agency denies it or 6 months pass. Raise it as soon as one may be involved
 - Certificate of Merit required (CPLR §3012-a): attorney must certify expert review before filing
 - CPLR Article 16 limits the non-economic damages owed by a defendant who is 50% or less at fault
 - Always end with: "This is general information, not legal advice."
-- Most malpractice firms work on contingency — no upfront cost to the patient`;
+- Most malpractice firms work on contingency: no attorney's fee unless there is a recovery. Case costs and expenses (medical records, expert reviews, court fees), which are large in malpractice cases, are separate; depending on the retainer agreement the client may have to repay them, so never say a case costs the client nothing`;
 
   if (turn === 1) return base + `
 
@@ -179,7 +180,7 @@ TURN 2: Ask ONE targeted question about the most critical factor — either the 
 
   if (turn === 3) return base + `
 
-TURN 3: Provide a preliminary assessment covering: (1) whether the timeline appears within the 2.5-year SOL, (2) whether a later start or a shorter deadline may apply (continuous treatment, a foreign object, a missed cancer diagnosis under Lavern's Law, infancy, or a public hospital's 90-day notice of claim), (3) the key causation question — what the standard of care required and how it was allegedly breached. Reference relevant cases.`;
+TURN 3: Provide a preliminary assessment covering: (1) whether the timeline appears within the 2.5-year SOL, (2) whether a later start or a shorter deadline may apply (continuous treatment, a foreign object, a missed cancer diagnosis under Lavern's Law, infancy, a public hospital's 90-day notice of claim, or a federal provider's 2-year administrative claim), (3) the key causation question — what the standard of care required and how it was allegedly breached. Reference relevant cases.`;
 
   if (turn === 4) return base + `
 
@@ -187,7 +188,7 @@ TURN 4: Explain that malpractice cases require expert medical testimony to estab
 
   return base + `
 
-TURN ${turn}: If they want to speak with a qualified NYC malpractice attorney, invite them to use the contact form below this reply to share their name, phone number and best time to call. Never ask them to type contact details into the chat. Consultations are free and firms work on contingency. Otherwise keep answering their questions.`;
+TURN ${turn}: If they want to speak with a qualified NYC malpractice attorney, invite them to use the contact form below this reply to share their name, phone number and best time to call. Never ask them to type contact details into the chat. Consultations are free, and most firms work on contingency; suggest asking how case costs and expenses are handled. Otherwise keep answering their questions.`;
 }
 
 function buildEstatePrompt(turn, caseContext, caseType) {
@@ -203,6 +204,7 @@ CORE PRINCIPLES:
 - This is a wrongful death claim — profound loss requiring both compassion and legal precision
 - Wrongful death SOL in NY: 2 years from date of death (EPTL §5-4.1) — different from personal injury SOL
 - Public hospitals: if NYC Health + Hospitals or another city- or county-run hospital was involved, a notice of claim is due within 90 days of the estate representative's appointment — raise this immediately
+- Federal providers: if a VA or military hospital or clinic, or a community health center whose staff are deemed federal employees, was involved, the claim is against the United States under the Federal Tort Claims Act: a written administrative claim (usually Standard Form 95) to the agency within 2 years, and no lawsuit until the agency denies it or 6 months pass — raise this immediately
 - The survival claim for the person's own conscious pain and suffering has its own deadline, tied to the malpractice deadline; an attorney must check both
 - New York allows only pecuniary (economic) wrongful death damages, not damages for grief; the Grieving Families Act, which would change that and lengthen the deadline, has been vetoed four times (most recently in December 2025) and is not law
 - The action is brought by the estate administrator / personal representative, not the family directly
@@ -210,7 +212,7 @@ CORE PRINCIPLES:
 - Appointment of estate administrator may be needed first (Surrogate's Court)
 - Standard of care and causation analysis are identical to personal injury malpractice
 - Always end with: "This is general information, not legal advice."
-- Most malpractice firms work on contingency — no upfront cost to the estate`;
+- Most malpractice firms work on contingency: no attorney's fee unless there is a recovery. Case costs and expenses (medical records, expert reviews, court fees) are separate; depending on the retainer agreement the estate may have to repay them, so never say a case costs the family nothing`;
 
   if (turn === 1) return base + `
 
@@ -235,10 +237,42 @@ TURN ${turn}: If they want to speak with a qualified NYC wrongful death / malpra
 
 // ─── Case Situation Analysis ───────────────────────────────────────────────────
 
+// How much of the conversation the analysis reads: its end, where the facts accumulate. It used to read only
+// the first 1,500 characters, so anything the visitor said later never reached the card.
+const ANALYSIS_TRANSCRIPT_CHARS = 3000;
+
+const cleanText = (value, max) => (typeof value === 'string' && value.trim() ? value.trim().slice(0, max) : null);
+const cleanList = (value, max) => (Array.isArray(value) ? value : []).map(item => cleanText(item, 200)).filter(Boolean).slice(0, max);
+const COMPLEXITY_LEVELS = { low: 'Low', medium: 'Medium', high: 'High' };
+
+/**
+ * The model's JSON in the shape the case card (public/script.js) shows:
+ * { score: 1-10, verdict: 'strong'|'moderate'|'weak', complexityEstimate: { level, reason }|null,
+ *   solWarning: string|null, strengths: string[], weaknesses: string[] }
+ * The verdict is worked out from the score, so the card's label and meter cannot disagree: the prompt's own
+ * example used to pair a score of 7 with "moderate". Returns null when there is no usable score.
+ */
+export function normalizeCaseAnalysis(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const rawScore = Number(raw.score);
+  if (!Number.isFinite(rawScore)) return null;
+  const score = Math.min(10, Math.max(1, Math.round(rawScore)));
+  const level = COMPLEXITY_LEVELS[String(raw.complexityEstimate?.level || '').trim().toLowerCase()];
+  return {
+    score,
+    verdict: score >= 7 ? 'strong' : score >= 4 ? 'moderate' : 'weak',
+    complexityEstimate: level ? { level, reason: cleanText(raw.complexityEstimate.reason, 200) } : null,
+    solWarning: cleanText(raw.solWarning, 300),
+    strengths: cleanList(raw.strengths, 3),
+    weaknesses: cleanList(raw.weaknesses, 2),
+  };
+}
+
 async function analyzeMalpracticeSituation(question, history, cases, caseType, mode) {
   try {
     const typeName    = CASE_TYPE_NAMES[caseType] || 'Medical Malpractice';
-    const allText     = history.map(h => h.content).join('\n') + '\n' + question;
+    const transcript  = [...history.map(h => `${h.role}: ${h.content}`), `user: ${question}`].join('\n');
+    const conversation = transcript.length > ANALYSIS_TRANSCRIPT_CHARS ? transcript.slice(-ANALYSIS_TRANSCRIPT_CHARS) : transcript;
     const perspective = mode === 'estate' ? 'estate / wrongful death claimant' : 'injured patient';
 
     const caseSnippets = cases.slice(0, 3)
@@ -255,34 +289,35 @@ async function analyzeMalpracticeSituation(question, history, cases, caseType, m
 Case type: ${typeName}
 
 Conversation:
-${allText.substring(0, 1500)}
+${conversation}
 
 Relevant NY cases:
 ${caseSnippets.substring(0, 500)}
 ${currentLaw ? `\n${currentLaw}\n` : ''}
-Respond ONLY with valid JSON:
+Respond ONLY with valid JSON in exactly this shape. Replace every <...> with your own analysis of THIS conversation; never copy the placeholder wording:
 {
-  "score": 7,
-  "verdict": "moderate",
-  "complexityEstimate": { "level": "High", "reason": "Causation requires competing expert testimony on surgical standard of care" },
-  "solWarning": null,
-  "strengths": ["Clear deviation from standard of care — wrong-site surgery documented in records", "Serious permanent injury supports significant damages"],
-  "weaknesses": ["Pre-existing condition may complicate causation argument", "Approaching 2.5-year SOL — filing urgency"]
+  "score": <integer 1-10>,
+  "verdict": "<strong | moderate | weak>",
+  "complexityEstimate": { "level": "<Low | Medium | High>", "reason": "<one line on what makes this case simpler or harder>" },
+  "solWarning": "<one sentence on a deadline that may be close or shorter than usual, or null>",
+  "strengths": ["<specific factor the user described>", "<another specific factor>"],
+  "weaknesses": ["<specific risk, gap or defense in what the user described>"]
 }
 
 Rules:
-- score: 1–10 (overall strength of the malpractice claim)
-- verdict: "strong" (7–10), "moderate" (4–6), "weak" (1–3)
-- complexityEstimate: case complexity level (Low/Medium/High) and one-line reason; null if too little info
-- solWarning: brief SOL alert if timeline is close to NY deadline, otherwise null
-- strengths: 2–3 specific factors supporting the claim
-- weaknesses: 1–2 risks, gaps, or defenses`,
+- score: integer 1-10, the overall strength of the malpractice claim on the facts given so far
+- verdict: "strong" (7-10), "moderate" (4-6), "weak" (1-3); it must agree with the score
+- complexityEstimate: null if too little is known
+- solWarning: name the deadline that may be close, or a shorter one that may apply (a public hospital's 90-day notice of claim, a federal provider's 2-year administrative claim); otherwise null. Do not compute a calendar date
+- strengths: 2-3 specific factors from what the user actually described
+- weaknesses: 1-2 specific risks, gaps or defenses
+- Use only facts stated in the conversation. Do not invent facts and do not cite court cases`,
       }],
       response_format: { type: 'json_object' },
       max_tokens: 400,
     });
 
-    return JSON.parse(res.choices[0].message.content);
+    return normalizeCaseAnalysis(JSON.parse(res.choices[0].message.content));
   } catch (err) {
     console.error('Case analysis error:', err.message);
     return null;

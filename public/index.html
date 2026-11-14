@@ -116,6 +116,7 @@
             </div>
             <p id="solText" style="font-size:0.8rem;color:var(--muted);line-height:1.55">
               <strong style="color:var(--text)">Personal injury:</strong> 2.5 years from the act or omission, or from the last treatment for the same condition<br><br><strong style="color:var(--text)">Public hospitals:</strong> notice of claim within 90 days; lawsuit within 1 year and 90 days<br><br>
+              <strong style="color:var(--text)">Federal providers</strong> (VA and military hospitals, many community health centers): written claim to the agency within 2 years<br><br>
               <strong style="color:var(--text)">Wrongful death:</strong> 2 years from date of death<br><br>
               Later deadlines: foreign object (1 year from discovery), missed cancer diagnosis (Lavern’s Law, up to 7 years), infancy (no more than 10 years). <em>Act promptly.</em>
             </p>
@@ -150,9 +151,18 @@
 
   </div>
 
+  <!-- Shown when the visitor names a federal provider (deadlines.js). script.js keeps the paragraph for the current mode. -->
+  <template id="federalNoticeTemplate">
+    <div class="deadline-notice" role="note" data-notice="federal">
+      <div class="deadline-title">⏱️ Federal provider: a 2-year claim deadline</div>
+      <p class="deadline-text deadline-personal">If your care was at a VA hospital or clinic, a military hospital or a federally funded community health center, the claim may be against the federal government. A written claim must then be filed with the agency, usually on Standard Form 95, within 2 years, sooner than the 2 years and 6 months under New York law, and a lawsuit can follow only after the agency denies the claim or 6 months pass. Speak with a malpractice attorney as soon as possible.</p>
+      <p class="deadline-text deadline-estate">If your loved one was treated at a VA hospital or clinic, a military hospital or a federally funded community health center, the claim may be against the federal government. A written claim must then be filed with the agency, usually on Standard Form 95, within 2 years, and a lawsuit can follow only after the agency denies the claim or 6 months pass. Speak with a malpractice attorney as soon as possible.</p>
+    </div>
+  </template>
+
   <!-- Shown when the visitor names a public hospital (deadlines.js). script.js keeps the paragraph for the current mode. -->
   <template id="publicHospitalNoticeTemplate">
-    <div class="deadline-notice" role="note">
+    <div class="deadline-notice" role="note" data-notice="public_hospital">
       <div class="deadline-title">⏱️ Public hospital: a 90-day deadline may apply</div>
       <p class="deadline-text deadline-personal">If your care was at a hospital or clinic run by New York City, a county or the State (for example NYC Health + Hospitals/Bellevue, Kings County, Elmhurst or Jacobi, or SUNY Downstate), a written notice of the claim generally must be filed within 90 days of the malpractice. That is far sooner than the usual deadline, and a court allows a late notice only in limited cases. Speak with a malpractice attorney as soon as possible.</p>
       <p class="deadline-text deadline-estate">If your loved one was treated at a hospital or clinic run by New York City, a county or the State (for example NYC Health + Hospitals/Bellevue, Kings County, Elmhurst or Jacobi, or SUNY Downstate), a written notice of the wrongful-death claim generally must be filed within 90 days after the estate's representative is appointed. Claims for the patient's own injuries can have earlier deadlines. Speak with a malpractice attorney as soon as possible.</p>

@@ -48,8 +48,8 @@ modeToggle.addEventListener('change', async () => {
     ? 'Wrongful Death SOL'
     : 'NY Statute of Limitations';
   document.getElementById('solText').innerHTML = currentMode === 'estate'
-    ? '<strong style="color:var(--text)">Wrongful death:</strong> 2 years from date of death (EPTL §5-4.1)<br><br><strong style="color:var(--text)">Public hospitals:</strong> notice of claim within 90 days after an administrator is appointed<br><br>The action is brought by the estate administrator, not the family directly. Estate appointment may be required first. <em>Act promptly.</em>'
-    : '<strong style="color:var(--text)">Personal injury:</strong> 2.5 years from the act or omission, or from the last treatment for the same condition<br><br><strong style="color:var(--text)">Public hospitals:</strong> notice of claim within 90 days; lawsuit within 1 year and 90 days<br><br><strong style="color:var(--text)">Wrongful death:</strong> 2 years from date of death<br><br>Later deadlines: foreign object (1 year from discovery), missed cancer diagnosis (Lavern’s Law, up to 7 years), infancy (no more than 10 years). <em>Act promptly.</em>';
+    ? '<strong style="color:var(--text)">Wrongful death:</strong> 2 years from date of death (EPTL §5-4.1)<br><br><strong style="color:var(--text)">Public hospitals:</strong> notice of claim within 90 days after an administrator is appointed<br><br><strong style="color:var(--text)">Federal providers</strong> (VA and military hospitals, many community health centers): written claim to the agency within 2 years<br><br>The action is brought by the estate administrator, not the family directly. Estate appointment may be required first. <em>Act promptly.</em>'
+    : '<strong style="color:var(--text)">Personal injury:</strong> 2.5 years from the act or omission, or from the last treatment for the same condition<br><br><strong style="color:var(--text)">Public hospitals:</strong> notice of claim within 90 days; lawsuit within 1 year and 90 days<br><br><strong style="color:var(--text)">Federal providers</strong> (VA and military hospitals, many community health centers): written claim to the agency within 2 years<br><br><strong style="color:var(--text)">Wrongful death:</strong> 2 years from date of death<br><br>Later deadlines: foreign object (1 year from discovery), missed cancer diagnosis (Lavern’s Law, up to 7 years), infancy (no more than 10 years). <em>Act promptly.</em>';
 });
 
 function updateModeUI() {
@@ -109,7 +109,7 @@ async function submitQuestion() {
 
     if (data.cases?.length) renderCases(data.cases);
     if (data.caseAnalysis)  renderCaseAnalysis(data.caseAnalysis);
-    if (data.deadlineNotice === 'public_hospital') showPublicHospitalNotice();
+    showDeadlineNotices(data);
     if (data.contactForm)   offerContactForm();
 
   } catch (err) {
@@ -125,15 +125,23 @@ document.getElementById('userInput').addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitQuestion(); }
 });
 
-// ─── Public hospital deadline ─────────────────────────────────────────────────
-// Shown once, beside the reply, when the visitor names a city, county or State hospital: the
-// 90-day notice deadline is far shorter than the usual one. The server decides (deadlines.js).
-function showPublicHospitalNotice() {
-  if (document.querySelector('#conversation .deadline-notice')) return;
-  const notice = document.getElementById('publicHospitalNoticeTemplate').content.firstElementChild.cloneNode(true);
-  notice.querySelector(currentMode === 'estate' ? '.deadline-personal' : '.deadline-estate').remove();
-  document.getElementById('conversation').appendChild(notice);
-  notice.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+// ─── Deadline notices ─────────────────────────────────────────────────────────
+// Shown once each, beside the reply, when the visitor names a provider with a far shorter deadline than the
+// usual one: a city, county or State hospital (90-day notice) or a federal provider (2-year claim). The
+// server decides which (deadlines.js); a page loaded before the list existed gets only deadlineNotice.
+const DEADLINE_TEMPLATES = { public_hospital: 'publicHospitalNoticeTemplate', federal: 'federalNoticeTemplate' };
+
+function showDeadlineNotices(data) {
+  const codes = Array.isArray(data?.deadlineNotices) ? data.deadlineNotices
+    : data?.deadlineNotice === 'public_hospital' ? ['public_hospital'] : [];
+  for (const code of codes) {
+    const templateId = DEADLINE_TEMPLATES[code];
+    if (!templateId || document.querySelector(`#conversation .deadline-notice[data-notice="${code}"]`)) continue;
+    const notice = document.getElementById(templateId).content.firstElementChild.cloneNode(true);
+    notice.querySelector(currentMode === 'estate' ? '.deadline-personal' : '.deadline-estate').remove();
+    document.getElementById('conversation').appendChild(notice);
+    notice.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
 }
 
 // ─── Contact form ─────────────────────────────────────────────────────────────
@@ -322,7 +330,7 @@ function getCookie(name) {
       div.innerHTML = msg.role === 'user' ? escHtml(msg.content) : markdownToHtml(msg.content);
       conv.appendChild(div);
     }
-    if (data.deadlineNotice === 'public_hospital') showPublicHospitalNotice();
+    showDeadlineNotices(data);
     conv.lastElementChild?.scrollIntoView({ behavior: 'smooth' });
   } catch {}
 })();

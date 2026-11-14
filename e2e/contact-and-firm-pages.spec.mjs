@@ -247,3 +247,25 @@ test('a lead with no audit on file says so, and its checks still gate Accept', a
   await expect(page.locator('#gateSummary')).toContainText('No compliance audit is stored');
   await expect(page.locator('#acceptButton')).toBeDisabled();
 });
+
+test('a federal provider shows its 2-year claim deadline, and a restored conversation brings it back', async ({ page, context, baseURL }) => {
+  await page.route('**/api/reset-session', route => route.fulfill(json({ ok: true })));
+  await page.route('**/api/case-types', route => route.fulfill(json({ caseTypes: ['Surgical Error'] })));
+  let saved = { history: [] };
+  await page.route('**/api/conversations/**', route => route.fulfill(json(saved)));
+  await page.route('**/api/ask', route => route.fulfill(json({ answer: 'I am so sorry. When did this happen?', cases: [], deadlineNotices: ['public_hospital', 'federal'] })));
+  await page.goto('/');
+  await page.locator('#userInput').fill('Bellevue sent me to the VA clinic, and they missed it.');
+  await page.locator('#submitBtn').click();
+  const notices = page.locator('#conversation .deadline-notice');
+  await expect(notices).toHaveCount(2);
+  await expect(notices.nth(1)).toContainText('Standard Form 95, within 2 years');
+  await expect(notices.nth(1)).not.toContainText('your loved one');
+
+  // The visitor comes back later: the conversation and its deadline notice return.
+  saved = { mode: 'personal', history: [{ role: 'user', content: 'The VA clinic missed it.' }, { role: 'assistant', content: 'When?' }], deadlineNotices: ['federal'] };
+  await page.reload();
+  await expect(page.locator('#conversation .msg-user')).toContainText('The VA clinic missed it.');
+  await expect(notices).toHaveCount(1);
+  await expect(notices).toContainText('Federal provider');
+});

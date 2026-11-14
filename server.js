@@ -15,7 +15,7 @@ import { createSubscriptionCheckout, createPortalSession, constructWebhookEvent,
 import OpenAI from 'openai';
 import { buildModelList, probeAllModelChains } from './openaiModelFailover.js';
 import { APP_URL, CONTACT_CONSENT_TEXT, CONTACT_FORM_FROM_STEP } from './site.js';
-import { mentionsPublicHospital } from './deadlines.js';
+import { mentionsPublicHospital, deadlineNotices } from './deadlines.js';
 import { toPublicEvaluation, isHitlVerificationComplete, loadRubric, loadCurrentLawNotes } from './gatekeeper.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -178,7 +178,9 @@ app.post('/api/ask', limitChat, async (req, res) => {
       evaluation: toPublicEvaluation(result.evaluation),
       // From the referral step on, the page offers the contact form.
       contactForm: result.turn >= CONTACT_FORM_FROM_STEP,
-      // The visitor named a public hospital: the page shows its 90-day notice deadline.
+      // Deadlines shorter than the usual one that the visitor's words point to (deadlines.js): a public hospital's
+      // 90-day notice, or a federal provider's 2-year claim. deadlineNotice is kept for pages loaded before this.
+      deadlineNotices: deadlineNotices(updatedHistory),
       deadlineNotice: mentionsPublicHospital(updatedHistory) ? 'public_hospital' : null,
     });
   } catch (err) {
@@ -197,8 +199,11 @@ app.get('/api/conversations/:sessionId', async (req, res) => {
     // the page never shows them again, and they are not needed to continue.
     const [conv] = await sql`SELECT session_id, mode, case_type, history, contact_consent_at, updated_at FROM conversations WHERE session_id = ${req.params.sessionId} LIMIT 1`;
     if (!conv) return res.json({ history: [] });
-    res.json({ ...conv, deadlineNotice: mentionsPublicHospital(conv.history) ? 'public_hospital' : null });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    res.json({ ...conv, deadlineNotices: deadlineNotices(conv.history), deadlineNotice: mentionsPublicHospital(conv.history) ? 'public_hospital' : null });
+  } catch (err) {
+    console.error('Error in /api/conversations:', err);
+    res.status(500).json({ error: 'The conversation could not be loaded.' });
+  }
 });
 
 // ─── Contact request ──────────────────────────────────────────────────────────

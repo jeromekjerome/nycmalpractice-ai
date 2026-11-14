@@ -1,7 +1,7 @@
 {
   "id": "ny_malpractice_current_law",
   "jurisdiction": "New York",
-  "as_of": "2026-11-13",
+  "as_of": "2026-11-14",
   "purpose": "New York law that the models this app calls may state wrongly: changes after their training data, and bills they may mistake for law. The notes are injected into the drafting prompt, the Gatekeeper evaluator and the case-analysis prompt so replies state current law. Review and update this file whenever New York medical malpractice or wrongful death law changes.",
   "notes": [
     {
@@ -13,6 +13,11 @@
       "id": "NY-2026-EE-NOT-MALPRACTICE",
       "topic": "The 2026 motor-vehicle tort reform does not reach medical malpractice",
       "rule": "Part EE of Chapter 58 of the Laws of 2026, in effect May 26, 2026, changed rules for motor vehicle (no-fault) cases only: the serious injury threshold of Insurance Law §5102(d), Insurance Law §5104, and a new CPLR §1411(b) that bars a motor-vehicle claimant who is more at fault than the defendants. It did not change medical malpractice law. CPLR §1411(a) pure comparative negligence still applies to malpractice: a patient's own fault reduces damages in proportion but does not bar recovery. CPLR §214-a, EPTL §5-4.1 and the 90-day notice of claim (GML §50-e) are unchanged."
+    },
+    {
+      "id": "US-FTCA-FEDERAL-PROVIDERS",
+      "topic": "Federal providers — Federal Tort Claims Act, 28 U.S.C. §§2401(b) and 2675",
+      "rule": "Malpractice by a federal provider is a claim against the United States, not under CPLR §214-a: VA hospitals and clinics, military hospitals, the Indian Health Service, and community health centers whose doctors and staff are deemed federal employees under 42 U.S.C. §233 (many New York City community health centers are). A written administrative claim, usually on Standard Form 95, must be presented to the responsible agency within 2 years after the claim accrues, which is sooner than the 2 years and 6 months of CPLR §214-a; New York's deadline rules (continuous treatment, Lavern's Law, the foreign-object rule) do not govern it. No lawsuit may be filed until the agency denies the claim in writing or 6 months pass without a final decision, and the lawsuit must be filed within 6 months after a written denial. Whether a community health center is deemed is a question for an attorney to check promptly."
     }
   ]
 }

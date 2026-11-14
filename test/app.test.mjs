@@ -1475,6 +1475,7 @@ test('POST /api/ask tells the page to show the public hospital deadline when the
         const { response, body } = await postJson(server.baseUrl, '/api/ask', { question, mode: 'personal', sessionId: 'sess-public-hospital', history: [] });
         assert.equal(response.status, 200);
         assert.equal(body.deadlineNotice, expected, question);
+        assert.deepEqual(body.deadlineNotices, expected ? [expected] : [], question);
       });
     }
   } finally {
@@ -1496,6 +1497,7 @@ test("a restored conversation brings back the public hospital deadline, and not 
       assert.equal(response.status, 200);
       const body = await response.json();
       assert.equal(body.deadlineNotice, 'public_hospital');
+      assert.deepEqual(body.deadlineNotices, ['public_hospital']);
       assert.equal(body.history.length, 2);
       assert.ok(!('name' in body) && !('phone' in body));
     });
@@ -2808,5 +2810,81 @@ test('an auction being closed alongside a chat message is finished before an err
     await server.close();
     if (previous === undefined) delete process.env.AUCTION_SWEEP_IN_TESTS;
     else process.env.AUCTION_SWEEP_IN_TESTS = previous;
+  }
+});
+
+// ─── Federal providers, the case card, and what the prompts promise ───────────
+
+const { deadlineNotices } = await import('../deadlines.js');
+const { normalizeCaseAnalysis } = await import('../ask.js');
+
+test('a federal provider gets the 2-year claim notice, alongside a public hospital when both are named', () => {
+  const visitor = content => [{ role: 'user', content }];
+  assert.deepEqual(deadlineNotices(visitor('The VA hospital in Manhattan misread my scan.')), ['federal']);
+  assert.deepEqual(deadlineNotices(visitor('The doctor at my community health center missed it.')), ['federal']);
+  assert.deepEqual(deadlineNotices(visitor('Ryan Health Center misdiagnosed me.')), ['federal']);
+  assert.deepEqual(deadlineNotices(visitor('Bellevue sent me to the VA clinic.')), ['public_hospital', 'federal']);
+  assert.deepEqual(deadlineNotices(visitor('A surgeon at Mount Sinai botched my surgery.')), []);
+  assert.deepEqual(deadlineNotices([{ role: 'assistant', content: 'If a VA hospital or Bellevue was involved...' }]), []);
+});
+
+test('POST /api/ask sends the federal notice when the visitor names a VA hospital', async () => {
+  clearSearchCache();
+  const world = fakeWorld();
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(world.handler, async () => {
+      const { response, body } = await postJson(server.baseUrl, '/api/ask', { question: 'The VA hospital missed my cancer.', mode: 'personal', sessionId: 'sess-federal', history: [] });
+      assert.equal(response.status, 200);
+      assert.deepEqual(body.deadlineNotices, ['federal']);
+      assert.equal(body.deadlineNotice, null);
+    });
+  } finally {
+    await server.close();
+  }
+});
+
+test('the case card agrees with its own score, and reads the end of a long conversation', async () => {
+  // The prompt's example used to pair a score of 7 with "moderate"; the verdict now follows the score.
+  assert.deepEqual(normalizeCaseAnalysis({
+    score: '7', verdict: 'moderate',
+    complexityEstimate: { level: 'high', reason: 'Competing experts on causation.' },
+    solWarning: '  ', strengths: ['One', '', 3, 'Two', 'Three', 'Four'], weaknesses: ['A', 'B', 'C'],
+  }), {
+    score: 7, verdict: 'strong',
+    complexityEstimate: { level: 'High', reason: 'Competing experts on causation.' },
+    solWarning: null, strengths: ['One', 'Two', 'Three'], weaknesses: ['A', 'B'],
+  });
+  assert.equal(normalizeCaseAnalysis({ score: 12, complexityEstimate: { level: 'extreme' } }).complexityEstimate, null);
+  assert.equal(normalizeCaseAnalysis({ score: 12 }).score, 10);
+  assert.equal(normalizeCaseAnalysis({ verdict: 'strong' }), null);
+
+  clearSearchCache();
+  const world = fakeWorld({ caseAnalysis: { score: 3, verdict: 'strong', strengths: ['Clear records'], weaknesses: [] } });
+  // A long first message, then the facts that matter at the end: the analysis used to read only the
+  // first 1,500 characters.
+  const history = [
+    { role: 'user', content: 'Background. ' + 'My medical history is long. '.repeat(120) },
+    { role: 'assistant', content: 'I am sorry. When did this happen?' },
+    { role: 'user', content: 'Last spring.' },
+    { role: 'assistant', content: 'Thank you. What happened next?' },
+  ];
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(world.handler, async () => {
+      const { response, body } = await postJson(server.baseUrl, '/api/ask', { question: 'LATEST-FACT: the surgeon operated on the wrong knee.', mode: 'personal', sessionId: 'sess-analysis-tail', history });
+      assert.equal(response.status, 200);
+      assert.equal(body.caseAnalysis.verdict, 'weak');
+      const prompt = String(world.calls.openai.find(call => call.kind === 'caseAnalysis').request.messages[0].content);
+      assert.match(prompt, /LATEST-FACT: the surgeon operated on the wrong knee/);
+      assert.doesNotMatch(prompt, /"score": 7,\s*"verdict": "moderate"/);
+      const system = String(world.calls.openai.find(call => call.kind === 'answer').request.messages[0].content);
+      assert.match(system, /costs and expenses/);
+      assert.doesNotMatch(system, /no upfront cost/i);
+      assert.match(system, /Federal Tort Claims Act/);
+      assert.match(system, /Standard Form 95/);
+    });
+  } finally {
+    await server.close();
   }
 });

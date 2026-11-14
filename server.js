@@ -97,6 +97,25 @@ async function ownsRegistration(token, firmId) {
 }
 const REGISTRATION_EXPIRED = 'This registration session has expired. Use Firm Login to get a sign-in link by email.';
 
+// The longest message the chat accepts. Each message goes to several model calls.
+const MAX_QUESTION_CHARS = 4000;
+
+// The conversation so far, from the server's own record. A history sent with the request is never trusted:
+// it could be invented, and the stored one is what gets scored and, with consent, sent to law firms.
+async function loadStoredHistory(sessionId, mode) {
+  const [row] = await sql`SELECT mode, history FROM conversations WHERE session_id = ${sessionId} LIMIT 1`;
+  if (!row || row.mode !== mode || !Array.isArray(row.history)) return [];
+  return row.history.filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string');
+}
+
+// Used only when the stored record cannot be read: what the page sent, limited to visitor and AI messages.
+function cleanClientHistory(raw) {
+  return (Array.isArray(raw) ? raw : [])
+    .filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
+    .slice(-40)
+    .map(m => ({ role: m.role, content: m.content.slice(0, MAX_QUESTION_CHARS) }));
+}
+
 // Auctions last 2 to 6 hours, but scheduled jobs run only once a day on this hosting plan. So requests from
 // firms and visitors also close any auction past its time, at most once a minute per server instance, and
 // the winner is charged and gets the lead soon after the auction ends.
@@ -110,12 +129,31 @@ function sweepExpiredAuctions() {
 }
 
 app.post('/api/ask', limitChat, async (req, res) => {
-  const { question, mode = 'personal', sessionId, history = [] } = req.body;
+  const { question, sessionId } = req.body;
+  const mode = req.body.mode === 'estate' ? 'estate' : 'personal';
   if (!question?.trim() || !sessionId) return res.status(400).json({ error: 'question and sessionId required' });
+  if (typeof question !== 'string' || typeof sessionId !== 'string' || sessionId.length > 100) {
+    return res.status(400).json({ error: 'question and sessionId required' });
+  }
+  if (question.length > MAX_QUESTION_CHARS) {
+    return res.status(400).json({ error: `Please keep your message under ${MAX_QUESTION_CHARS.toLocaleString('en-US')} characters.` });
+  }
   const closingAuctions = sweepExpiredAuctions();
 
+  let history;
+  let historyTrusted = true;
   try {
-    const result = await answerUserQuestion({ question, mode, sessionId, history });
+    history = await loadStoredHistory(sessionId, mode);
+  } catch (err) {
+    // The record could not be read. The reply still uses what the page sent, cleaned up, but nothing from
+    // this turn is scored or saved, since that history cannot be checked.
+    console.error('Could not read the stored conversation:', err.message);
+    history = cleanClientHistory(req.body.history);
+    historyTrusted = false;
+  }
+
+  try {
+    const result = await answerUserQuestion({ question, mode, sessionId, history, allowLeadScoring: historyTrusted });
 
     try {
       await sql`INSERT INTO user_interactions (session_id, question, mode, case_type) VALUES (${sessionId}, ${question}, ${mode}, ${result.caseType || 'other'})`;
@@ -125,7 +163,9 @@ app.post('/api/ask', limitChat, async (req, res) => {
     // A qualifying lead score is kept with the conversation. The lead goes to firms only from
     // /api/contact, once the visitor has given contact details and agreed to be contacted.
     const leadScore = result.leadScore ? { ...result.leadScore, scoredAt: new Date().toISOString() } : null;
-    await finishBeforeReply('saving the conversation', upsertConversation(sessionId, mode, result.caseType, updatedHistory, leadScore, result.evaluation || null), followUpDeadline());
+    if (historyTrusted) {
+      await finishBeforeReply('saving the conversation', upsertConversation(sessionId, mode, result.caseType, updatedHistory, leadScore, result.evaluation || null), followUpDeadline());
+    }
 
     await finishBeforeReply('closing expired auctions', closingAuctions, followUpDeadline());
     res.json({
@@ -183,10 +223,10 @@ app.post('/api/contact', limitContact, async (req, res) => {
 
     const score = conv.lead_score;
     if (score?.tier) {
-      // Once per session, as before.
-      const alreadyProcessed = await sql`SELECT 1 FROM user_interactions WHERE session_id = ${sessionId} AND lead_email_sent = TRUE LIMIT 1`;
-      if (alreadyProcessed.length === 0) {
-        await sql`UPDATE user_interactions SET lead_email_sent = TRUE WHERE session_id = ${sessionId}`;
+      // Claimed on the conversation itself, so a second submission (a retry, a second tab) sends nothing more.
+      // The old check read a log row that might not exist, and two submissions at once could both pass it.
+      const [claimed] = await sql`UPDATE conversations SET lead_sent_at = NOW() WHERE session_id = ${sessionId} AND lead_sent_at IS NULL RETURNING session_id`;
+      if (claimed) {
         const leadData = {
           caseType: conv.case_type, mode: conv.mode, history: conv.history,
           preview: score.preview, score: score.score, dimensions: score.dimensions, scoredAt: score.scoredAt || null,
@@ -198,7 +238,9 @@ app.post('/api/contact', limitContact, async (req, res) => {
         const handOff = score.tier === 'cold'
           ? deliverColdLead(sessionId, conv.case_type, score, leadData)
           : createAuction(sessionId, conv.case_type, score, leadData);
-        await finishBeforeReply('lead hand-off', handOff, followUpDeadline());
+        const outcome = await finishBeforeReply('lead hand-off', handOff, followUpDeadline());
+        // A hand-off that failed outright is released, so asking again can send it; one still running is not.
+        if (outcome === 'failed') await sql`UPDATE conversations SET lead_sent_at = NULL WHERE session_id = ${sessionId}`;
       }
     } else {
       await finishBeforeReply('contact request notice', notifyOperatorOfContactRequest(conv.case_type, conv.mode), followUpDeadline());

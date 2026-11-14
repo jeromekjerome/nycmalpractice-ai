@@ -55,7 +55,9 @@ function buildCaseContext(cases, { recalled = false } = {}) {
   return [...notes, blocks].join('\n\n');
 }
 
-export async function answerUserQuestion({ question, mode = 'personal', sessionId, history }) {
+// allowLeadScoring is false when the conversation could not be read from the server's record: a lead is
+// scored only on a history the server can vouch for.
+export async function answerUserQuestion({ question, mode = 'personal', sessionId, history, allowLeadScoring = true }) {
   // The conversation step: the number of the visitor's own message. The history also holds the AI's
   // replies, so counting every message ran steps 1, 3, 5 and skipped steps 2 and 4.
   const turn = history.filter(h => h.role === 'user').length + 1;
@@ -101,7 +103,7 @@ export async function answerUserQuestion({ question, mode = 'personal', sessionI
 
   const parallelTasks = [
     chatCompletionsWithFallback(openai, { models: ANSWER_MODELS, messages, temperature: 0.7, max_tokens: 1000 }),
-    turn >= 2 ? scoreLead(question, history, caseType, mode)                         : Promise.resolve(null),
+    turn >= 2 && allowLeadScoring ? scoreLead(question, history, caseType, mode)                         : Promise.resolve(null),
     turn >= 3 ? analyzeMalpracticeSituation(question, history, cases, caseType, mode) : Promise.resolve(null),
   ];
 

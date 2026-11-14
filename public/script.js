@@ -67,9 +67,9 @@ function updateModeUI() {
 
 function getModeWelcome() {
   if (currentMode === 'estate') {
-    return 'I\'m deeply sorry for your loss. This AI is specialized in New York wrongful death medical malpractice claims.<br><br>When a family member dies due to a healthcare provider\'s negligence, the law provides a path for the estate to seek accountability and compensation — but the statute of limitations is only <strong>2 years from the date of death</strong>.<br><br><strong>To get started</strong> — tell me about your loved one: who they were, what the alleged medical error was, and when they passed away.';
+    return 'I\'m deeply sorry for your loss. I\'ll ask a few questions about what happened and, when your family is ready, match you with a New York malpractice firm that handles cases like yours.<br><br>When a family member dies because of a healthcare provider\'s negligence, the estate can seek accountability and compensation, but the deadline is only <strong>2 years from the date of death</strong>.<br><br><strong>To get started</strong> — tell me about your loved one: who they were, what the alleged medical error was, and when they passed away.';
   }
-  return 'Welcome. This AI is specialized in New York medical malpractice law. Whether you were personally harmed by a healthcare provider or you\'ve lost a loved one due to medical negligence, I can help you understand your rights and the strength of your potential claim.<br><br><strong>To get started</strong> — tell me what happened. What type of provider was involved, and what injury resulted?';
+  return 'Welcome. I\'ll ask a few questions about what happened and, when you\'re ready, match you with a New York malpractice firm that handles cases like yours.<br><br><strong>To get started</strong> — tell me what happened. What type of provider was involved, and what injury resulted?';
 }
 
 // ─── Submit ───────────────────────────────────────────────────────────────────

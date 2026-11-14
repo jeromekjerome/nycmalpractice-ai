@@ -6,7 +6,7 @@ const CL_BASE = 'https://www.courtlistener.com/api/rest/v4';
 
 const AUX_MODELS = buildModelList(
   process.env.OPENAI_MODEL_AUX || 'gpt-4o-mini',
-  process.env.OPENAI_MODEL_AUX_FALLBACKS || 'gpt-5.4-mini,gpt-4.1'
+  process.env.OPENAI_MODEL_AUX_FALLBACKS || 'gpt-4.1-mini,gpt-5.4-mini'
 );
 
 // New York Court of Appeals, Supreme Court, and Appellate Division.

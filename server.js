@@ -10,6 +10,7 @@ import { answerUserQuestion } from './ask.js';
 import { closeExpiredAuctions, createAuction, deliverColdLead, getAuctionStatus, placeBid, acceptLead, declineLead, notifyOperatorOfContactRequest, notifyOperator, TIER_CONFIG, DECLINE_REASONS, deliverLeadByHand } from './auction.js';
 import { registerFirm, sendVerificationCode, verifyPhoneCode, validateToken, updateFirmSubscription, getFirm, updateFirmProfile, createMagicLink, VerificationLimitError, recentDeclineCounts, linkOpensAuction, linkOpensLead, linkOpensAccount, approveFirm, setSubscriptionStatus, ensureStripeCustomer, changeUnverifiedPhone, setCustomerCard, findFirmByEmail } from './firms.js';
 import { rateLimit } from './rate-limit.js';
+import { alertOperatorOnce, recordInteraction, deepHealth, runSteps, recordJobRun, reportFailedSteps, sendDailyDigest } from './operations.js';
 import nodemailer from 'nodemailer';
 import { createSubscriptionCheckout, createPortalSession, constructWebhookEvent, getSubscriptionDetails, getCustomerCard } from './stripe.js';
 import OpenAI from 'openai';
@@ -25,11 +26,11 @@ const sql = neon(process.env.DATABASE_URL);
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 30_000, maxRetries: 1 });
 const answerModels = buildModelList(
   process.env.OPENAI_MODEL_ANSWER || 'gpt-4o',
-  process.env.OPENAI_MODEL_ANSWER_FALLBACKS || 'gpt-5.4-mini,gpt-4.1'
+  process.env.OPENAI_MODEL_ANSWER_FALLBACKS || 'gpt-4.1,gpt-5.4-mini'
 );
 const auxModels = buildModelList(
   process.env.OPENAI_MODEL_AUX || 'gpt-4o-mini',
-  process.env.OPENAI_MODEL_AUX_FALLBACKS || 'gpt-5.4-mini,gpt-4.1'
+  process.env.OPENAI_MODEL_AUX_FALLBACKS || 'gpt-4.1-mini,gpt-5.4-mini'
 );
 const embeddingModels = buildModelList(
   process.env.OPENAI_MODEL_EMBEDDING || 'text-embedding-3-small',
@@ -183,15 +184,25 @@ app.post('/api/ask', limitChat, async (req, res) => {
 
   let history;
   let historyTrusted = true;
+  let databaseAlert = null;
   try {
     history = await loadStoredHistory(sessionId, mode);
   } catch (err) {
     // The record could not be read. The reply still uses what the page sent, cleaned up, but nothing from
-    // this turn is scored or saved, since that history cannot be checked.
+    // this turn is scored or saved, since that history cannot be checked. The site looks healthy meanwhile,
+    // so the operator is told.
     console.error('Could not read the stored conversation:', err.message);
     history = cleanClientHistory(req.body.history);
     historyTrusted = false;
+    databaseAlert = alertOperatorOnce('database-read', 30 * MINUTE, 'NYCMalpractice.ai cannot read its database',
+      `<p>The chat could not read a stored conversation: ${escapeHtml(err.message)}.</p><p>Replies still go out, but no lead can be scored or saved, and contact requests fail. You will not be emailed about this again for 30 minutes.</p>`);
   }
+  // Every message is recorded with how it ended; a run of failures tells the operator (operations.js).
+  const record = (outcome, extra = {}) => recordInteraction({ sessionId, question, mode, outcome, latencyMs: Date.now() - requestStart, ...extra });
+  const beforeReply = async () => {
+    await finishBeforeReply('closing expired auctions', closingAuctions, finishBy());
+    if (databaseAlert) await finishBeforeReply('the database alert', databaseAlert, finishBy());
+  };
 
   try {
     const result = await withinDeadline(answerUserQuestion({ question, mode, sessionId, history, allowLeadScoring: historyTrusted }),
@@ -199,13 +210,12 @@ app.post('/api/ask', limitChat, async (req, res) => {
     if (!result) {
       // Nothing from this turn is saved, so the visitor can simply send it again.
       console.error('[ask] no reply in time; the visitor was asked to send the message again');
-      await finishBeforeReply('closing expired auctions', closingAuctions, finishBy());
+      await finishBeforeReply('recording the message', record('slow'), finishBy());
+      await beforeReply();
       return res.status(503).json({ error: SLOW_REPLY, retry: true });
     }
 
-    try {
-      await sql`INSERT INTO user_interactions (session_id, question, mode, case_type) VALUES (${sessionId}, ${question}, ${mode}, ${result.caseType || 'other'})`;
-    } catch (dbErr) { console.warn('DB log failed:', dbErr.message); }
+    await record('ok', { caseType: result.caseType, gateStatus: result.evaluation?.gate_status || null });
 
     const updatedHistory = [...history, { role: 'user', content: question }, { role: 'assistant', content: result.answer }];
     // A qualifying lead score is kept with the conversation. The lead goes to firms only from
@@ -218,7 +228,7 @@ app.post('/api/ask', limitChat, async (req, res) => {
       await finishBeforeReply('saving the conversation', upsertConversation(sessionId, mode, result.caseType, updatedHistory, leadScore, result.evaluation || null, { clearLeadScore }), finishBy());
     }
 
-    await finishBeforeReply('closing expired auctions', closingAuctions, finishBy());
+    await beforeReply();
     res.json({
       answer: result.answer, cases: result.cases || [], caseType: result.caseType || null,
       caseAnalysis: result.caseAnalysis || null, leadTier: result.leadScore?.tier || null,
@@ -233,9 +243,10 @@ app.post('/api/ask', limitChat, async (req, res) => {
     });
   } catch (err) {
     console.error('Error in /api/ask:', err);
+    await finishBeforeReply('recording the message', record('error'), finishBy());
     // An auction being closed alongside this message is finished first: once the reply is sent the function
     // may be suspended, leaving the auction part-way through.
-    await finishBeforeReply('closing expired auctions', closingAuctions, finishBy());
+    await beforeReply();
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -313,6 +324,10 @@ app.post('/api/contact', limitContact, async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error('Error in /api/contact:', err);
+    // A client who asked to be contacted may be lost: the operator is told at once, without the client's details.
+    await finishBeforeReply('the contact failure notice', alertOperatorOnce('contact-failed', 10 * MINUTE, 'NYCMalpractice.ai: a contact request failed',
+      `<p>A visitor's request to be contacted could not be completed: ${escapeHtml(err.message)}.</p><p>They were asked to try again; what they typed may not have been saved. The admin page lists the requests that were. You will not be emailed about this again for 10 minutes.</p>`),
+      followUpDeadline());
     res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 });
@@ -869,22 +884,35 @@ function verifyCron(req, res) {
 // Combined nightly job — this is the path vercel.json actually schedules. Until it existed the
 // scheduled call got a 404 and nothing ran: expired auctions stayed open and overdue leads pending.
 // Runs close-auctions → overdue-leads → reset-declines → the 90-day conversation purge, in sequence.
+// The nightly job. Each step runs whatever happened to the ones before it (a failure used to stop every later
+// step, the privacy deletions included); the run is recorded for /health/deep, failed steps are emailed to the
+// operator, and a summary of the day goes out with it. A failed step makes the answer a 500.
 app.get('/api/cron', async (req, res) => {
   if (!verifyCron(req, res)) return;
   try {
     const { declineOverdueLeads, reportStuckAuctions } = await import('./auction.js');
     const { resetDeclineCounts } = await import('./firms.js');
-
-    const closed = await closeExpiredAuctions();
-    await reportStuckAuctions();
-
-    const declined = await declineOverdueLeads();
-    await resetDeclineCounts();
-
     // The privacy policy's retention periods: conversations after 90 days, lead records after 3 years (retention.js).
     const { purgeExpiredConversations, purgeExpiredLeadRecords } = await import('./retention.js');
-    const purged = { ...(await purgeExpiredConversations()), ...(await purgeExpiredLeadRecords()) };
-    res.json({ ok: true, closed, declined, purged });
+
+    const { results, failed } = await runSteps([
+      ['close expired auctions', closeExpiredAuctions],
+      ['report stuck auctions', reportStuckAuctions],
+      ['decline overdue leads', declineOverdueLeads],
+      ['recount declines', resetDeclineCounts],
+      ['delete old conversations', purgeExpiredConversations],
+      ['delete old lead records', purgeExpiredLeadRecords],
+    ]);
+    await recordJobRun('nightly', failed).catch(err => console.error('Recording the nightly run failed:', err.message));
+    await reportFailedSteps('nightly', failed);
+    await sendDailyDigest({ failed }).catch(err => console.error('The daily summary failed:', err.message));
+    res.status(failed.length ? 500 : 200).json({
+      ok: failed.length === 0,
+      closed: results['close expired auctions'] ?? null,
+      declined: results['decline overdue leads'] ?? null,
+      purged: { ...(results['delete old conversations'] || {}), ...(results['delete old lead records'] || {}) },
+      failed: failed.map(f => f.step),
+    });
   } catch (err) {
     serverError(req, res, err);
   }
@@ -920,6 +948,11 @@ function gatekeeperHealth() {
 }
 
 app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'malpractice-ai', gatekeeper: gatekeeperHealth() }));
+// For an uptime monitor: the database, its columns and the nightly job (operations.js). 503 when any is wrong.
+app.get('/health/deep', async (_req, res) => {
+  const health = await deepHealth();
+  res.status(health.ok ? 200 : 503).json(health);
+});
 app.get('/health/models', async (_req, res) => {
   await refreshModelHealthSnapshot();
   res.json(modelHealthSnapshot);

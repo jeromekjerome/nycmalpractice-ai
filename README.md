@@ -28,14 +28,16 @@ As the conversation develops, the AI scores the lead in the background. Qualifie
 - Phone verification (Twilio SMS) on registration
 - Lead tiers: Cold ($25), Warm ($100), Hot ($200), Premium ($400)
 - Hot/Premium leads go to timed auctions (2–6 hours); firms bid in real time
-- Cold leads distributed directly to all active subscribed firms
+- Cold leads go to up to three matching firms (the client agreed to "up to three"); an auction nobody wins is offered the same way
 - Magic-link portal — no passwords; secure 30-day session links sent via email
-- Lead accept/decline within 3-day window with tiered refund policy
+- Lead accept/decline within 3-day window with tiered refund policy; a decline needs a reason, and a lead declined for the firm's own reasons, or left unanswered, is offered to firms that have not had it
+- A firm that stopped part-way through sign-up finishes in its portal (verify or change the phone number, start the subscription)
+- Lead charges follow the card set under Manage Billing; a firm whose card is declined is emailed a link to update it
 - Firms suspended from auctions for 30 days after 3 declines in a billing period
 - Firm profile: specializations, service area, contact name
 
 **Admin**
-- Admin dashboard at `/admin.html` — view all firms, leads, and counts
+- Admin dashboard at `/admin.html` — contact requests (read the conversation, deliver by hand to an approved firm), auctions (cancel a stuck one), leads with refunds and decline reasons, and firms with their activity
 - Manually send portal links, toggle firm active status, update profiles
 - Protected via `ADMIN_SECRET` header (`x-admin-secret`)
 
@@ -170,7 +172,7 @@ Server runs at `http://localhost:3003`.
 | `APP_URL` | Public app URL (e.g. `https://nycmalpractice.ai`) |
 | `CRON_SECRET` | Bearer token for cron endpoint auth |
 | `ADMIN_SECRET` | Header secret for admin API routes |
-| `NOTIFICATION_EMAIL` | Admin fallback email for undeliverable leads |
+| `NOTIFICATION_EMAIL` | Operator notices: new firms, unplaced leads, declined cards, failed refunds, chat and contact-form failures, failed nightly steps, and a daily summary (`DAILY_DIGEST=off` stops the summary) |
 
 ---
 
@@ -180,7 +182,7 @@ Server runs at `http://localhost:3003`.
 vercel --name nycmalpractice-ai --prod
 ```
 
-Set all environment variables in the Vercel dashboard. The daily reset cron (`/api/cron`) runs via Vercel at 7am UTC (2am ET).
+Set all environment variables in the Vercel dashboard. The nightly job (`/api/cron`) runs via Vercel at 7am UTC (2am ET). Each of its steps runs even if an earlier one fails; failed steps are emailed to the operator with a summary of the day. `/health/deep` answers 503 when the database cannot be reached, lacks a column the code uses, or the nightly job has not succeeded in 26 hours: point an uptime monitor at it.
 
 **cron-job.org** — two additional jobs needed:
 
@@ -193,7 +195,7 @@ Set all environment variables in the Vercel dashboard. The daily reset cron (`/a
 1. Register `nycmalpractice.ai` on Cloudflare Registrar
 2. Point Cloudflare DNS to Vercel
 3. Set up Cloudflare Email Routing for `hello@`, `legal@`, `privacy@nycmalpractice.ai`
-4. Register Stripe webhook at `https://nycmalpractice.ai/api/webhooks/stripe`
+4. Register Stripe webhook at `https://nycmalpractice.ai/api/webhooks/stripe` with `checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.payment_failed`, `invoice.paid` and `customer.updated`
 5. Set `APP_URL=https://nycmalpractice.ai` in Vercel env vars
 
 ---

@@ -20,6 +20,8 @@ process.env.SMTP_PORT ||= '465';
 process.env.SMTP_USER ||= 'ops@example.test';
 process.env.SMTP_PASS ||= 'password';
 process.env.NOTIFICATION_EMAIL ||= 'ops@example.test';
+// The nightly job's summary email is off unless a test checks it (withDigest).
+process.env.DAILY_DIGEST ||= 'off';
 // Set before server.js loads dotenv, so a real token in a local .env is never used by the tests.
 process.env.COURTLISTENER_TOKEN ||= 'cl-test-token';
 
@@ -396,7 +398,7 @@ test('GET /api/cron with the cron secret closes auctions, declines overdue leads
     await withOutboundHttp(world.handler, async () => {
       const response = await fetch(`${server.baseUrl}/api/cron`, { headers: { authorization: `Bearer ${process.env.CRON_SECRET}` } });
       assert.equal(response.status, 200);
-      assert.deepEqual(await response.json(), { ok: true, closed: 0, declined: 0, purged: { conversations: 0, messages: 0, leads: 0, auctions: 0, bids: 0 } });
+      assert.deepEqual(await response.json(), { ok: true, closed: 0, declined: 0, purged: { conversations: 0, messages: 0, leads: 0, auctions: 0, bids: 0 }, failed: [] });
     });
     const queries = world.calls.sql.map(call => call.query);
     assert.ok(queries.some(query => /FROM auctions WHERE status = 'open' AND closes_at <= NOW\(\)/.test(query)), 'expired auctions were not looked up');
@@ -3863,4 +3865,187 @@ test('a firm whose code cannot be texted keeps its sign-up session, and can corr
   const change = sql.find(call => /^UPDATE firms SET phone = \$1 WHERE id = \$2 AND phone_verified IS NOT TRUE/.test(call.query));
   assert.deepEqual(change.params.map(String), ['+12125550199', '9']);
   assert.ok(sql.filter(call => /^INSERT INTO phone_codes/.test(call.query)).length >= 2, 'no new code was sent to the corrected number');
+});
+
+// ─── The model chain, failures that are noticed, and the nightly job ───────────
+
+// Runs fn with the nightly job's summary email switched on (the suite switches it off).
+async function withDigest(fn) {
+  const previous = process.env.DAILY_DIGEST;
+  process.env.DAILY_DIGEST = 'on';
+  try {
+    return await fn();
+  } finally {
+    process.env.DAILY_DIGEST = previous;
+  }
+}
+
+test('a fallback to a reasoning model gets the parameters it takes, and a model that refuses one is passed over', async () => {
+  const { chatCompletionsWithFallback, requestFor, probeChatModelChain } = await import('../openaiModelFailover.js');
+  const seen = [];
+  const openai = { chat: { completions: { create: async request => {
+    seen.push(request);
+    if (request.model === 'gpt-4o') throw Object.assign(new Error('Overloaded'), { status: 503 });
+    if (request.model === 'gpt-5.4-mini') throw Object.assign(new Error("Unsupported parameter: 'logprobs'"), { status: 400, code: 'unsupported_parameter' });
+    return { choices: [{ message: { content: 'ok' } }] };
+  } } } };
+  const { result } = await capturingLogs(() => chatCompletionsWithFallback(openai, {
+    models: ['gpt-4o', 'gpt-5.4-mini', 'gpt-4.1'], messages: [{ role: 'user', content: 'hi' }],
+    temperature: 0.7, max_tokens: 1000, response_format: { type: 'json_object' },
+  }));
+  assert.equal(result.choices[0].message.content, 'ok');
+  assert.deepEqual(seen.map(request => request.model), ['gpt-4o', 'gpt-5.4-mini', 'gpt-4.1']);
+  // The reasoning model gets no max_tokens or temperature, room to think, and the rest as written.
+  assert.equal(seen[1].max_tokens, undefined);
+  assert.equal(seen[1].temperature, undefined);
+  assert.equal(seen[1].max_completion_tokens, 3000);
+  assert.equal(seen[1].reasoning_effort, 'low');
+  assert.deepEqual(seen[1].response_format, { type: 'json_object' });
+  assert.equal(seen[2].max_tokens, 1000);
+  assert.equal(seen[2].temperature, 0.7);
+  assert.deepEqual(requestFor('gpt-4.1', { max_tokens: 5 }), { model: 'gpt-4.1', max_tokens: 5 });
+
+  // Any other 400 still ends the chain: the request is wrong, not the model.
+  const refused = { chat: { completions: { create: async () => { throw Object.assign(new Error('bad request'), { status: 400, code: 'invalid_value' }); } } } };
+  await assert.rejects(chatCompletionsWithFallback(refused, { models: ['gpt-4o', 'gpt-4.1'], messages: [] }), /bad request/);
+
+  // The health probe sends what a real call would.
+  const probed = [];
+  await capturingLogs(() => probeChatModelChain({ chat: { completions: { create: async request => { probed.push(request); return {}; } } } }, ['gpt-5.4-mini']));
+  assert.equal(probed[0].max_tokens, undefined);
+  assert.equal(probed[0].temperature, undefined);
+  assert.ok(probed[0].max_completion_tokens > 1);
+
+  // The default chains try gpt-4.1 before gpt-5.4-mini.
+  for (const file of ['../server.js', '../ask.js', '../auction.js', '../courtlistener.js']) {
+    assert.doesNotMatch(readFileSync(new URL(file, import.meta.url), 'utf8'), /'gpt-5\.4-mini,gpt-4\.1'/, file);
+  }
+});
+
+test('every chat message is recorded with how it ended, and a run of failures tells the operator once', async () => {
+  const sql = [];
+  let failedOfTen = 1;
+  const handler = async (url, init) => {
+    if (url.startsWith('https://api.openai.com/')) {
+      return jsonResponse({ error: { message: 'The request failed.', type: 'invalid_request_error' } }, 400);
+    }
+    if (url.endsWith('/sql')) {
+      const { query, params } = JSON.parse(init.body);
+      const q = query.replace(/\s+/g, ' ').trim();
+      sql.push({ query: q, params });
+      if (/FROM \(SELECT outcome FROM user_interactions/.test(q)) return rowsResponse([['failed', INT], ['total', INT]], [[String(failedOfTen), '10']]);
+      return jsonResponse(EMPTY_ROWS);
+    }
+    return jsonResponse({ results: [] });
+  };
+  resetRateLimits();
+  const server = await startServer(app);
+  try {
+    const { logs } = await capturingLogs(() => withoutMail(() => withOutboundHttp(handler, async () => {
+      // One failure among ten: recorded, no alert.
+      assert.equal((await postJson(server.baseUrl, '/api/ask', { question: 'I was hurt.', mode: REVIEW_APP.mode, sessionId: 'sess-fail-1', history: [] })).response.status, 500);
+      // Three among ten: the operator is told, once.
+      failedOfTen = 3;
+      await postJson(server.baseUrl, '/api/ask', { question: 'Hello?', mode: REVIEW_APP.mode, sessionId: 'sess-fail-2', history: [] });
+      await postJson(server.baseUrl, '/api/ask', { question: 'Hello again?', mode: REVIEW_APP.mode, sessionId: 'sess-fail-3', history: [] });
+    })));
+    const records = sql.filter(call => /^INSERT INTO user_interactions/.test(call.query));
+    assert.equal(records.length, 3, 'a failed message left no record');
+    assert.match(records[0].query, /\(session_id, question, mode, \w+, outcome, latency_ms, gate_status\)/);
+    assert.ok(records.every(call => call.params.includes('error')));
+    assert.equal(logs.filter(line => /the chat is failing \(3 of the last 10 messages\)/.test(line)).length, 1, 'the operator was not told exactly once');
+  } finally {
+    await server.close();
+  }
+});
+
+test('a contact request that fails tells the operator at once, without the visitor\'s details', async () => {
+  resetRateLimits();
+  const handler = async (url, init) => {
+    const q = JSON.parse(init.body).query.replace(/\s+/g, ' ').trim();
+    if (/^SELECT mode, \w+, history, lead_score, gate_audit FROM conversations/.test(q)) return jsonResponse({ message: 'database unavailable' }, 500);
+    return jsonResponse(EMPTY_ROWS);
+  };
+  const server = await startServer(app);
+  try {
+    const { logs } = await capturingLogs(() => withoutMail(() => withOutboundHttp(handler, async () => {
+      const { response } = await postJson(server.baseUrl, '/api/contact', { sessionId: 'sess-contact-fail', name: 'Jane Roe', phone: '(555) 123-4567', consent: true });
+      assert.equal(response.status, 500);
+    })));
+    const notice = logs.find(line => /a contact request failed/.test(line));
+    assert.ok(notice, 'the operator was not told');
+    assert.doesNotMatch(logs.filter(line => /Operator notice/.test(line)).join('\n'), /Jane Roe|555/);
+  } finally {
+    await server.close();
+  }
+});
+
+test('/health/deep reports the database, its columns and the nightly job, for an uptime monitor', async () => {
+  const previous = process.env.HEALTH_DEEP_CACHE_MS;
+  process.env.HEALTH_DEEP_CACHE_MS = '0';
+  const columns = ['firms.card_declined_at', 'leads.decline_reason', 'user_interactions.outcome', 'job_runs.ran_at'];
+  const pgTime = ms => new Date(ms).toISOString().replace('T', ' ').replace('Z', '+00');
+  let world = {};
+  const handler = async (url, init) => {
+    const q = JSON.parse(init.body).query.replace(/\s+/g, ' ').trim();
+    if (world.down) return jsonResponse({ message: 'database unavailable' }, 500);
+    if (/^SELECT 1$/.test(q)) return rowsResponse([['?column?', INT]], [['1']]);
+    if (/FROM information_schema\.columns/.test(q)) return rowsResponse([['col', TEXT]], (world.columns || columns).map(col => [col]));
+    if (/FROM job_runs/.test(q)) return rowsResponse([['last_ok', BOOL], ['last_run', TIMESTAMPTZ]], [[world.lastOk ?? 't', world.lastRun ?? pgTime(Date.now() - 3600_000)]]);
+    return jsonResponse(EMPTY_ROWS);
+  };
+  const server = await startServer(app);
+  const check = async () => {
+    const response = await fetch(server.baseUrl + '/health/deep');
+    return { status: response.status, body: await response.json() };
+  };
+  try {
+    await capturingLogs(() => withOutboundHttp(handler, async () => {
+      assert.deepEqual(await check(), { status: 200, body: { ok: true, database: 'ok', schema: 'ok', nightlyJob: 'ok' } });
+      world = { columns: columns.slice(1) };
+      assert.deepEqual((await check()).body, { ok: false, database: 'ok', schema: 'missing columns', nightlyJob: 'ok' });
+      world = { lastOk: 'f' };
+      assert.equal((await check()).body.nightlyJob, 'failed');
+      world = { lastRun: pgTime(Date.now() - 30 * 3600_000) };
+      assert.equal((await check()).status, 503);
+      world = { down: true };
+      assert.deepEqual(await check(), { status: 503, body: { ok: false, database: 'down', schema: 'unknown', nightlyJob: 'unknown' } });
+    }));
+  } finally {
+    if (previous === undefined) delete process.env.HEALTH_DEEP_CACHE_MS; else process.env.HEALTH_DEEP_CACHE_MS = previous;
+    await server.close();
+  }
+});
+
+test('the nightly job runs every step when one fails, records the run, and tells the operator', async () => {
+  const sql = [];
+  const handler = async (url, init) => {
+    const { query, params } = JSON.parse(init.body);
+    const q = query.replace(/\s+/g, ' ').trim();
+    sql.push({ query: q, params });
+    if (/^UPDATE leads SET status = 'declined'/.test(q)) return jsonResponse({ message: 'column "decline_reason" does not exist' }, 500);
+    return jsonResponse(EMPTY_ROWS);
+  };
+  const server = await startServer(app);
+  try {
+    const { logs } = await capturingLogs(() => withDigest(() => withoutMail(() => withOutboundHttp(handler, async () => {
+      const response = await fetch(`${server.baseUrl}/api/cron`, { headers: { authorization: `Bearer ${process.env.CRON_SECRET}` } });
+      assert.equal(response.status, 500);
+      const body = await response.json();
+      assert.equal(body.ok, false);
+      assert.deepEqual(body.failed, ['decline overdue leads']);
+      assert.equal(body.closed, 0, 'the steps before the failure did not report');
+    }))));
+    // The steps after the failure still ran, the privacy deletions included.
+    assert.ok(sql.some(call => /^UPDATE firms SET auction_decline_count/.test(call.query)), 'the decline counts were not recounted');
+    assert.ok(sql.some(call => /^DELETE FROM conversations WHERE updated_at/.test(call.query)), 'old conversations were not deleted');
+    assert.ok(sql.some(call => /^DELETE FROM leads WHERE created_at/.test(call.query)), 'old lead records were not deleted');
+    const run = sql.find(call => /^INSERT INTO job_runs/.test(call.query));
+    assert.equal(String(run.params[1]), 'false');
+    assert.match(String(run.params[2]), /decline overdue leads/);
+    assert.ok(logs.some(line => /1 step of the nightly job failed/.test(line)), 'the operator was not told');
+    assert.ok(logs.some(line => /daily summary/.test(line)), 'no daily summary was sent');
+  } finally {
+    await server.close();
+  }
 });

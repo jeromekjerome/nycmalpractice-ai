@@ -14,7 +14,7 @@ const sql    = neon(process.env.DATABASE_URL);
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 30_000, maxRetries: 1 });
 const AUX_MODELS = buildModelList(
   process.env.OPENAI_MODEL_AUX || 'gpt-4o-mini',
-  process.env.OPENAI_MODEL_AUX_FALLBACKS || 'gpt-5.4-mini,gpt-4.1'
+  process.env.OPENAI_MODEL_AUX_FALLBACKS || 'gpt-4.1-mini,gpt-5.4-mini'
 );
 
 export const TIER_CONFIG = {

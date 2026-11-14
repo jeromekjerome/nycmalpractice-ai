@@ -11,11 +11,11 @@ import { evaluateAndRemediateDraft, renderRubricForPrompt, renderCurrentLawForPr
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 30_000, maxRetries: 1 });
 const ANSWER_MODELS = buildModelList(
   process.env.OPENAI_MODEL_ANSWER || 'gpt-4o',
-  process.env.OPENAI_MODEL_ANSWER_FALLBACKS || 'gpt-5.4-mini,gpt-4.1'
+  process.env.OPENAI_MODEL_ANSWER_FALLBACKS || 'gpt-4.1,gpt-5.4-mini'
 );
 const AUX_MODELS = buildModelList(
   process.env.OPENAI_MODEL_AUX || 'gpt-4o-mini',
-  process.env.OPENAI_MODEL_AUX_FALLBACKS || 'gpt-5.4-mini,gpt-4.1'
+  process.env.OPENAI_MODEL_AUX_FALLBACKS || 'gpt-4.1-mini,gpt-5.4-mini'
 );
 
 const CASE_TYPE_NAMES = {

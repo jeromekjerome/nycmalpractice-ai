@@ -309,7 +309,9 @@
         if (action === 'accept') {
           notice('Lead accepted. Please contact the client promptly.', 'success');
         } else {
-          notice(`Lead declined.${data.refundAmount ? ` Refund: $${Number(data.refundAmount).toFixed(2)}.` : ''}`, 'success');
+          notice(data.refundPending
+            ? 'Lead declined. Your refund could not be issued automatically; we have been told and will issue it.'
+            : `Lead declined.${data.refundAmount ? ` Refund: $${Number(data.refundAmount).toFixed(2)}.` : ' No refund applies to this lead.'}`, 'success');
         }
         document.querySelector('#actionsPanel .actions').style.display = 'none';
       } catch {

@@ -244,14 +244,41 @@ export async function declineLead(leadId, firmId) {
   const refundAmount = isAuction
     ? (auctionCount === 1 ? pricePaid * 0.5 : auctionCount === 2 ? pricePaid * 0.25 : 0)
     : (coldCount <= 3 ? pricePaid : pricePaid * 0.5);
+  // A refund is due only on a lead that was paid for, and is recorded only once Stripe has issued it. A
+  // failed refund used to be recorded as paid; the operator is now told, so it can be issued by hand.
+  const due = lead.stripe_charge_id ? refundAmount : 0;
+  let refunded = 0;
   let stripeRefundId = null;
-  if (refundAmount > 0 && lead.stripe_charge_id) {
-    try { const r = await createRefund({ paymentIntentId: lead.stripe_charge_id, amountDollars: refundAmount }); stripeRefundId = r.id; }
-    catch (err) { console.error('Refund failed:', err.message); }
+  let refundPending = 0;
+  if (due > 0) {
+    try {
+      const refund = await createRefund({ paymentIntentId: lead.stripe_charge_id, amountDollars: due, idempotencyKey: `refund-lead-${leadId}` });
+      stripeRefundId = refund.id;
+      refunded = due;
+    } catch (err) {
+      console.error(`Refund for lead ${leadId} failed:`, err.message);
+      refundPending = due;
+      await notifyOperator(`Refund failed for lead #${leadId}`,
+        `<p>A refund of $${due.toFixed(2)} for lead #${leadId} (firm ${escapeHtml(firmId)}) could not be issued automatically: ${escapeHtml(err.message)}</p>` +
+        `<p>Issue it in Stripe against payment ${escapeHtml(lead.stripe_charge_id)}.</p>`);
+    }
   }
-  await sql`UPDATE leads SET refund_amount = ${refundAmount}, stripe_refund_id = ${stripeRefundId} WHERE id = ${leadId}`;
+  await sql`UPDATE leads SET refund_amount = ${refunded}, stripe_refund_id = ${stripeRefundId} WHERE id = ${leadId}`;
   await recordDecline(firmId, isAuction);
-  return { ok: true, refundAmount };
+  return { ok: true, refundAmount: refunded, ...(refundPending ? { refundPending } : {}) };
+}
+
+// Emails the operator (NOTIFICATION_EMAIL). Never throws: a notice that cannot be sent is logged.
+export async function notifyOperator(subject, html) {
+  const adminEmail = process.env.NOTIFICATION_EMAIL;
+  if (!adminEmail) { console.warn(`[operator notice, NOTIFICATION_EMAIL not set] ${subject}`); return; }
+  const t = getTransporter();
+  if (!t) { console.log(`[EMAIL MOCK] Operator notice: ${subject} → ${adminEmail}`); return; }
+  await t.sendMail({ from: process.env.SMTP_USER, to: adminEmail, subject, html }).catch(err => console.error('Operator notice failed:', err.message));
+}
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 function getTransporter() {

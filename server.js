@@ -11,7 +11,7 @@ import { createAuction, deliverColdLead, getAuctionStatus, placeBid, acceptLead,
 import { registerFirm, sendVerificationCode, verifyPhoneCode, validateToken, updateFirmSubscription, getFirm, updateFirmProfile, createMagicLink, VerificationLimitError, recentDeclineCounts } from './firms.js';
 import { rateLimit } from './rate-limit.js';
 import nodemailer from 'nodemailer';
-import { createSubscriptionCheckout, createPortalSession, constructWebhookEvent } from './stripe.js';
+import { createSubscriptionCheckout, createPortalSession, constructWebhookEvent, getSubscriptionPaymentMethod } from './stripe.js';
 import OpenAI from 'openai';
 import { buildModelList, probeAllModelChains } from './openaiModelFailover.js';
 import { APP_URL, CONTACT_CONSENT_TEXT, CONTACT_FORM_FROM_STEP } from './site.js';
@@ -281,10 +281,8 @@ app.post('/api/webhooks/stripe', async (req, res) => {
     const firmId  = session.metadata?.firmId || session.subscription_data?.metadata?.firmId;
     if (firmId && session.subscription) {
       try {
-        const Stripe = (await import('stripe')).default;
-        const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
-        const sub    = await stripe.subscriptions.retrieve(session.subscription, { expand: ['default_payment_method'] });
-        await updateFirmSubscription(firmId, { stripeSubscriptionId: session.subscription, stripePaymentMethodId: sub.default_payment_method?.id || null });
+        const paymentMethodId = await getSubscriptionPaymentMethod(session.subscription);
+        await updateFirmSubscription(firmId, { stripeSubscriptionId: session.subscription, stripePaymentMethodId: paymentMethodId });
       } catch (err) { console.error('Subscription activation error:', err.message); }
     }
   }

@@ -7,8 +7,8 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { neon } from '@neondatabase/serverless';
 import { answerUserQuestion } from './ask.js';
-import { closeExpiredAuctions, createAuction, deliverColdLead, getAuctionStatus, placeBid, acceptLead, declineLead, notifyOperatorOfContactRequest, TIER_CONFIG } from './auction.js';
-import { registerFirm, sendVerificationCode, verifyPhoneCode, validateToken, updateFirmSubscription, getFirm, updateFirmProfile, createMagicLink, VerificationLimitError, recentDeclineCounts, linkOpensAuction, linkOpensLead, linkOpensAccount } from './firms.js';
+import { closeExpiredAuctions, createAuction, deliverColdLead, getAuctionStatus, placeBid, acceptLead, declineLead, notifyOperatorOfContactRequest, notifyOperator, TIER_CONFIG } from './auction.js';
+import { registerFirm, sendVerificationCode, verifyPhoneCode, validateToken, updateFirmSubscription, getFirm, updateFirmProfile, createMagicLink, VerificationLimitError, recentDeclineCounts, linkOpensAuction, linkOpensLead, linkOpensAccount, approveFirm, setSubscriptionStatus } from './firms.js';
 import { rateLimit } from './rate-limit.js';
 import nodemailer from 'nodemailer';
 import { createSubscriptionCheckout, createPortalSession, constructWebhookEvent, getSubscriptionDetails } from './stripe.js';
@@ -100,6 +100,9 @@ function serverError(req, res, err) {
   console.error(`Error in ${req.method} ${req.path}:`, err);
   return res.status(500).json({ error: 'Something went wrong. Please try again.' });
 }
+
+// The Stripe events that can change whether a firm's subscription is paid up.
+const SUBSCRIPTION_EVENTS = new Set(['customer.subscription.updated', 'customer.subscription.deleted', 'invoice.payment_failed', 'invoice.paid']);
 
 // A webhook that fails Stripe's signature check is refused without saying why.
 function refuseWebhook(res, err) {
@@ -256,13 +259,18 @@ app.get('/api/conversations/:sessionId', async (req, res) => {
 // contact form and agreed to the consent text. The lead carries those details, so the firm that takes
 // it can reach the visitor.
 app.post('/api/contact', limitContact, async (req, res) => {
-  const { sessionId, name, phone, bestTime, consent } = req.body || {};
+  const { sessionId, name, phone, bestTime, email, consent } = req.body || {};
   const cleanName = typeof name === 'string' ? name.trim().replace(/\s+/g, ' ') : '';
   const digits    = typeof phone === 'string' ? phone.replace(/\D/g, '') : '';
   const cleanTime = typeof bestTime === 'string' ? bestTime.trim().replace(/\s+/g, ' ').slice(0, 100) : '';
   if (typeof sessionId !== 'string' || !sessionId) return res.status(400).json({ error: 'sessionId required' });
   if (cleanName.length < 2 || cleanName.length > 100) return res.status(400).json({ error: 'Please enter your name.' });
   if (!(digits.length === 10 || (digits.length === 11 && digits.startsWith('1')))) return res.status(400).json({ error: 'Please enter a 10-digit phone number.' });
+  // Optional: used to tell the client which firm accepted.
+  const cleanEmail = typeof email === 'string' ? email.trim() : '';
+  if (cleanEmail && (cleanEmail.length > 254 || !/^[^\s@<>"'()]+@[^\s@<>"'()]+\.[A-Za-z]{2,}$/.test(cleanEmail))) {
+    return res.status(400).json({ error: 'Please enter a valid email address, or leave it blank.' });
+  }
   if (consent !== true) return res.status(400).json({ error: 'Please check the box to agree to be contacted.' });
 
   try {
@@ -272,7 +280,7 @@ app.post('/api/contact', limitContact, async (req, res) => {
     const phoneNumber = digits.slice(-10);
     const [saved] = await sql`
       UPDATE conversations
-      SET name = ${cleanName}, phone = ${phoneNumber}, best_time = ${cleanTime || null},
+      SET name = ${cleanName}, phone = ${phoneNumber}, best_time = ${cleanTime || null}, email = ${cleanEmail || null},
           contact_consent_at = NOW(), contact_consent_text = ${CONTACT_CONSENT_TEXT}, updated_at = NOW()
       WHERE session_id = ${sessionId}
       RETURNING contact_consent_at`;
@@ -288,7 +296,7 @@ app.post('/api/contact', limitContact, async (req, res) => {
           preview: score.preview, score: score.score, dimensions: score.dimensions, scoredAt: score.scoredAt || null,
           // The exact consent travels with the lead, which is kept for 3 years: the conversation that also records
           // it is deleted after 90 days.
-          contact: { name: cleanName, phone: phoneNumber, bestTime: cleanTime || null, consentedAt: saved?.contact_consent_at || null, consentText: CONTACT_CONSENT_TEXT },
+          contact: { name: cleanName, phone: phoneNumber, email: cleanEmail || null, bestTime: cleanTime || null, consentedAt: saved?.contact_consent_at || null, consentText: CONTACT_CONSENT_TEXT },
           // The gate's full audit of the last reply — every attempt, the citation audit and the
           // checklist for the supervising attorney — for the reviewing firm (lead.html).
           evaluation: conv.gate_audit || null,
@@ -313,23 +321,33 @@ app.post('/api/contact', limitContact, async (req, res) => {
 // ─── Firm Registration ────────────────────────────────────────────────────────
 // Firm sign-up fields are later shown on the admin page: plain text of a sensible length. A firm name
 // never needs angle brackets, so they are refused outright.
-function signupProblem({ name, email, phone }) {
+function signupProblem({ name, email, phone, attorneyName, attorneyRegistration }) {
   const cleanName = typeof name === 'string' ? name.trim() : '';
   if (cleanName.length < 2 || cleanName.length > 120 || /[<>\u0000-\u001f\u007f]/.test(cleanName)) return 'Please enter the firm name (up to 120 characters).';
   const cleanEmail = typeof email === 'string' ? email.trim() : '';
   if (cleanEmail.length > 254 || !/^[^\s@<>"'()]+@[^\s@<>"'()]+\.[A-Za-z]{2,}$/.test(cleanEmail)) return 'Please enter a valid email address.';
   const digits = typeof phone === 'string' ? phone.replace(/\D/g, '') : '';
   if (digits.length < 10 || digits.length > 15) return 'Please enter a valid phone number.';
+  const attorney = typeof attorneyName === 'string' ? attorneyName.trim() : '';
+  if (attorney.length < 2 || attorney.length > 100 || /[<>\u0000-\u001f\u007f]/.test(attorney)) return "Please enter the supervising attorney's name.";
+  if (!/^\d{6,8}$/.test(registrationNumber(attorneyRegistration))) return "Please enter the supervising attorney's New York registration number (7 digits).";
   return null;
 }
 
+// New York attorney registration numbers are 7 digits; spaces and dashes typed with them are dropped.
+const registrationNumber = value => (typeof value === 'string' ? value.replace(/[\s-]/g, '') : '');
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 app.post('/api/firms/register', limitSignup, async (req, res) => {
-  const { name, email, phone } = req.body;
+  const { name, email, phone, attorneyName, attorneyRegistration } = req.body;
   if (!name || !email || !phone) return res.status(400).json({ error: 'name, email, phone required' });
-  const problem = signupProblem({ name, email, phone });
+  const problem = signupProblem({ name, email, phone, attorneyName, attorneyRegistration });
   if (problem) return res.status(400).json({ error: problem });
   try {
-    const { firm, isNew } = await registerFirm({ name, email, phone });
+    const { firm, isNew } = await registerFirm({ name, email, phone, attorneyName: attorneyName.trim(), attorneyRegistration: registrationNumber(attorneyRegistration) });
     if (!isNew) {
       // An existing firm signs in through the link emailed to it, never through this form: otherwise
       // anyone who knew a firm's email could change its profile or billing.
@@ -339,6 +357,12 @@ app.post('/api/firms/register', limitSignup, async (req, res) => {
     try { await sendVerificationCode(firm.id); }
     catch (err) { if (!(err instanceof VerificationLimitError)) throw err; notice = err.message; }
     const registrationToken = await createMagicLink(firm.id, { expiresInHours: 6 });
+    // The operator checks the attorney's registration and approves the firm before it gets any lead.
+    await notifyOperator(`New firm awaiting approval: ${firm.name}`,
+      `<p>${escapeHtml(firm.name)} (${escapeHtml(firm.email)}) has registered. Supervising attorney: ${escapeHtml(firm.attorney_name)}, ` +
+      `New York registration number ${escapeHtml(firm.attorney_registration)}.</p>` +
+      `<p>Check the registration in the <a href="https://iapps.courts.state.ny.us/attorneyservices/search?0">New York attorney search</a>, ` +
+      `then approve the firm on the admin page. It gets no leads until then.</p>`);
     res.json({ firmId: firm.id, isNew, phoneVerified: firm.phone_verified, registrationToken, ...(notice ? { notice } : {}) });
   } catch (err) {
     console.error('Error in /api/firms/register:', err);
@@ -428,8 +452,24 @@ app.post('/api/webhooks/stripe', async (req, res) => {
     }
   }
 
-  if (event.type === 'customer.subscription.deleted') {
-    await sql`UPDATE firms SET subscription_active = FALSE WHERE stripe_subscription_id = ${event.data.object.id}`;
+  // A subscription that stops being paid stops the firm's leads until it is paid again; a failed payment used
+  // to leave them coming. The subscription's live status is read from Stripe, so events that arrive out of
+  // order cannot switch a firm on or off wrongly. The Stripe webhook must send these four events.
+  if (SUBSCRIPTION_EVENTS.has(event.type)) {
+    const object = event.data.object;
+    const subscriptionId = event.type.startsWith('customer.subscription.')
+      ? object.id
+      : (object.subscription || object.parent?.subscription_details?.subscription || null);
+    if (subscriptionId) {
+      try {
+        const { status } = await getSubscriptionDetails(subscriptionId);
+        const firms = await setSubscriptionStatus(subscriptionId, status);
+        console.log(`Subscription ${subscriptionId} is ${status}: ${firms} firm(s) updated`);
+      } catch (err) {
+        console.error('Subscription status update error:', err.message);
+        return res.status(500).json({ error: 'Subscription update failed; Stripe will retry' });
+      }
+    }
   }
   res.json({ received: true });
 });
@@ -456,6 +496,7 @@ app.post('/api/auctions/:id/bid', async (req, res) => {
   if (!tokenData) return res.status(401).json({ error: 'Invalid or expired link' });
   if (!linkOpensAuction(tokenData, req.params.id)) return res.status(403).json({ error: WRONG_AUCTION });
   if (!tokenData.subscription_active) return res.status(403).json({ error: 'Active subscription required' });
+  if (!tokenData.approved_at) return res.status(403).json({ error: 'Your firm is awaiting approval.' });
   if (tokenData.suspended_until && new Date(tokenData.suspended_until) > new Date()) return res.status(403).json({ error: `Account suspended until ${new Date(tokenData.suspended_until).toLocaleDateString()}` });
   res.json(await placeBid(req.params.id, tokenData.firm_id, parseFloat(amount)));
 });
@@ -499,7 +540,13 @@ app.post('/api/leads/:id/accept', async (req, res) => {
   if (!linkOpensLead(tokenData, req.params.id)) return res.status(403).json({ error: WRONG_LEAD });
   // The supervising attorney's checks are stored on the lead. They used to be only logged, and the host keeps
   // logs for about an hour.
-  const attestation = { ...Object.fromEntries(HITL_ATTESTATION_KEYS.map(key => [key, true])), attestedAt: new Date().toISOString() };
+  const firm = await getFirm(tokenData.firm_id);
+  const attestation = {
+    ...Object.fromEntries(HITL_ATTESTATION_KEYS.map(key => [key, true])),
+    attestedAt: new Date().toISOString(),
+    attorneyName: firm?.attorney_name || null,
+    attorneyRegistration: firm?.attorney_registration || null,
+  };
   const result = await acceptLead(req.params.id, tokenData.firm_id, attestation);
   if (result.ok) {
     console.log(`[HITL] Lead ${req.params.id} accepted by firm ${tokenData.firm_id} with the supervising attorney's three checks`);
@@ -567,7 +614,8 @@ app.get('/api/admin/firms', async (req, res) => {
 
 app.patch('/api/admin/firms/:id', async (req, res) => {
   if (!requireAdmin(req, res)) return;
-  const { active, specializations, serviceArea, contactName } = req.body;
+  const { active, approved, specializations, serviceArea, contactName } = req.body;
+  if (typeof approved === 'boolean') await approveFirm(req.params.id, approved);
   if (typeof active === 'boolean') await sql`UPDATE firms SET active = ${active} WHERE id = ${req.params.id}`;
   if (specializations !== undefined || serviceArea !== undefined || contactName !== undefined) await updateFirmProfile(req.params.id, { specializations, serviceArea, contactName });
   res.json({ ok: true });

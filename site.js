@@ -7,7 +7,11 @@ export const APP_URL = (process.env.APP_URL || 'https://nycmalpractice-ai.vercel
 // The wording a visitor agrees to before their contact details and conversation go to law firms.
 // public/index.html shows exactly this text (a test checks that they match), and the text stored with
 // each consent is this constant, never anything the browser sends.
-export const CONTACT_CONSENT_TEXT = "I agree that NYCMalpractice.ai may share my name, phone number, preferred time to call and this conversation with one or more licensed New York attorneys, who may contact me by phone or text message about my possible claim. Message and data rates may apply. I can withdraw this consent at any time by emailing privacy@nycmalpractice.ai.";
+export const CONTACT_CONSENT_TEXT = "I agree that NYCMalpractice.ai may share my name, phone number, email address (if I give one), preferred time to call and this conversation with up to three licensed New York attorneys, who may contact me by phone, text message or email about my possible claim. Message and data rates may apply. If I give my email address, NYCMalpractice.ai may also email me when an attorney accepts my request. I can withdraw this consent at any time by emailing privacy@nycmalpractice.ai.";
+
+// The most firms one lead goes to (the consent above says "up to three"). An auction lead goes to its winner
+// only; a cold lead used to go to every matching firm, so a client could get many calls.
+export const MAX_FIRMS_PER_LEAD = 3;
 
 // The contact form is offered from the step where the AI offers a referral.
 export const CONTACT_FORM_FROM_STEP = 4;

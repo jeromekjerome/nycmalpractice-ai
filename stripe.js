@@ -62,5 +62,5 @@ export async function createRefund({ paymentIntentId, amountDollars, idempotency
 // the firm id on the subscription as well as on the checkout session).
 export async function getSubscriptionDetails(subscriptionId) {
   const sub = await getStripe().subscriptions.retrieve(subscriptionId, { expand: ['default_payment_method'] });
-  return { paymentMethodId: sub.default_payment_method?.id || null, firmId: sub.metadata?.firmId || null };
+  return { paymentMethodId: sub.default_payment_method?.id || null, firmId: sub.metadata?.firmId || null, status: sub.status || null };
 }

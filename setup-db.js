@@ -141,6 +141,11 @@ async function setup() {
   await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS declined_at TIMESTAMPTZ`;  // decline counts look back 30 days from here
   await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS accepted_at TIMESTAMPTZ`;        // when the firm accepted it
   await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS hitl_verification JSONB`;        // the supervising attorney's checks, as attested
+  await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS email TEXT`;                // optional, given in the contact form
+  await sql`ALTER TABLE firms ADD COLUMN IF NOT EXISTS attorney_name TEXT`;                // the supervising attorney, given at sign-up
+  await sql`ALTER TABLE firms ADD COLUMN IF NOT EXISTS attorney_registration TEXT`;        // their New York attorney registration number
+  await sql`ALTER TABLE firms ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ`;           // set by the operator after checking it; no leads before
+  await sql`ALTER TABLE firms ADD COLUMN IF NOT EXISTS subscription_status TEXT`;          // Stripe's status: active, past_due, canceled ...
 
   // The last decisions found for each case type, used when CourtListener cannot be searched (case-memory.js).
   await sql`

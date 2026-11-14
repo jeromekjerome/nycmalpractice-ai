@@ -36,7 +36,7 @@ test('the contact form appears from the referral step, needs consent, and sends 
   await page.locator('#submitBtn').click();
   const form = page.locator('#conversation .contact-card');
   await expect(form).toBeVisible();
-  await expect(form).toContainText('one or more licensed New York attorneys');
+  await expect(form).toContainText('up to three licensed New York attorneys');
 
   // Without the consent box, nothing is sent.
   await form.locator('input[name=name]').fill('Jane Roe');
@@ -46,11 +46,12 @@ test('the contact form appears from the referral step, needs consent, and sends 
   expect(contactRequest).toBeNull();
 
   await form.locator('input[name=bestTime]').fill('mornings');
+  await form.locator('input[name=email]').fill('jane@example.test');
   await form.locator('input[name=consent]').check();
   await form.locator('.contact-submit').click();
   await expect(page.locator('#conversation .contact-done')).toContainText('Your request has been received');
   await expect(page.locator('#conversation .contact-card')).toHaveCount(0);
-  expect(contactRequest).toMatchObject({ name: 'Jane Roe', phone: '(555) 123-4567', bestTime: 'mornings', consent: true });
+  expect(contactRequest).toMatchObject({ name: 'Jane Roe', phone: '(555) 123-4567', email: 'jane@example.test', bestTime: 'mornings', consent: true });
   expect(typeof contactRequest.sessionId).toBe('string');
 });
 
@@ -75,7 +76,7 @@ const LEAD = {
       { role: 'user', content: 'My scan was misread. <img src=x onerror="window.__xss=1">' },
       { role: 'assistant', content: 'I am so sorry. When did you learn about it?' },
     ],
-    contact: { name: 'Jane Roe', phone: '5551234567', bestTime: 'mornings', consentedAt: '2026-11-14T10:00:00.000Z', consentText: 'I agree to be contacted by phone.' },
+    contact: { name: 'Jane Roe', phone: '5551234567', email: 'jane@example.test', bestTime: 'mornings', consentedAt: '2026-11-14T10:00:00.000Z', consentText: 'I agree to be contacted by phone.' },
     evaluation: {
       domain_id: 'nyc_malpractice_personal', gate_status: 'PASSED', evaluator: 'llm', first_pass_compliant: false, final_attempt_number: 2,
       initial_coaching: { gate_status: 'BLOCKED', summary: 'Attempt 1 was BLOCKED on PROH-MM-01 <b>bold</b>.' },
@@ -103,6 +104,7 @@ test('the lead page shows the contact details and the conversation, and accepts 
   await expect(page.locator('#contactPhone a')).toHaveText('(555) 123-4567');
   await expect(page.locator('#contactPhone a')).toHaveAttribute('href', 'tel:+15551234567');
   await expect(page.locator('#contactTime')).toHaveText('mornings');
+  await expect(page.locator('#contactEmail a')).toHaveAttribute('href', 'mailto:jane@example.test');
   await expect(page.locator('#consentNote')).toContainText('agreed to be contacted');
   await expect(page.locator('#consentNote')).toContainText('The wording they agreed to: “I agree to be contacted by phone.”');
   await expect(page.locator('#preview')).toHaveText('Delayed cancer diagnosis after a misread scan.');
@@ -185,7 +187,7 @@ test('the auction page shows the case summary without contact details and places
 
 test('firm sign-up sends its registration token with every later step, and keeps the contact name', async ({ page }) => {
   const sent = {};
-  await page.route('**/api/firms/register', route => route.fulfill(json({ firmId: 7, isNew: true, phoneVerified: false, registrationToken: 'reg-token' })));
+  await page.route('**/api/firms/register', async route => { sent.register = route.request().postDataJSON(); await route.fulfill(json({ firmId: 7, isNew: true, phoneVerified: false, registrationToken: 'reg-token' })); });
   await page.route('**/api/firms/verify-phone', async route => { sent.verify = route.request().postDataJSON(); await route.fulfill(json({ ok: true })); });
   await page.route('**/api/firms/7/profile', async route => { sent.profile = route.request().postDataJSON(); await route.fulfill(json({ ok: true })); });
   await page.route('**/api/billing/checkout', async route => { sent.checkout = route.request().postDataJSON(); await route.fulfill(json({ url: '/register.html?subscribed=1' })); });
@@ -195,7 +197,10 @@ test('firm sign-up sends its registration token with every later step, and keeps
   await page.locator('#contactName').fill('Pat Lee');
   await page.locator('#firmEmail').fill('intake@roe.example');
   await page.locator('#firmPhone').fill('5551234567');
+  await page.locator('#attorneyName').fill('Pat Lee, Esq.');
+  await page.locator('#attorneyRegistration').fill('1234567');
   await page.locator('button[onclick="registerFirm()"]').click();
+  await expect.poll(() => sent.register).toMatchObject({ attorneyName: 'Pat Lee, Esq.', attorneyRegistration: '1234567' });
 
   const digits = page.locator('.otp-digit');
   for (let i = 0; i < 6; i += 1) await digits.nth(i).fill(String(i + 1));

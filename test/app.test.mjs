@@ -617,7 +617,7 @@ test('POST /api/contact with consent hands the lead off with the contact details
     assert.ok(saved.params.includes(CONTACT_CONSENT_TEXT), 'the consent text stored is not the one the page shows');
     const auction = leadDataOf(hot.calls.sql.find(call => /INSERT INTO auctions/.test(call.query)));
     // The exact wording agreed to goes with the lead, which outlives the conversation (3 years against 90 days).
-    assert.deepEqual(auction.contact, { name: 'Jane Roe', phone: '5551234567', bestTime: 'weekday mornings', consentedAt: '2026-11-14T10:00:00.000Z', consentText: CONTACT_CONSENT_TEXT });
+    assert.deepEqual(auction.contact, { name: 'Jane Roe', phone: '5551234567', bestTime: 'weekday mornings', consentedAt: '2026-11-14T10:00:00.000Z', consentText: CONTACT_CONSENT_TEXT, email: null });
     assert.equal(auction.history.length, CONTACT_HISTORY.length);
     assert.equal(auction.preview, 'Delayed cancer diagnosis after a misread scan.');
     // The firm also gets the gate's audit of the last reply, for its supervising attorney, as the privacy policy says.
@@ -1137,7 +1137,7 @@ test('the registration steps need their registration token, and a registered ema
   try {
     await withOutboundHttp(world.handler, async () => {
       // Someone who knows a registered firm's email gets neither its number's steps nor a token.
-      const again = await send('/api/firms/register', { name: 'Other', email: 'firm@example.test', phone: '5550000000' });
+      const again = await send('/api/firms/register', { name: 'Other', email: 'firm@example.test', phone: '5550000000', attorneyName: 'Pat Lee', attorneyRegistration: '1234567' });
       assert.equal(again.status, 409);
       assert.equal(again.body.registrationToken, undefined);
       assert.match(again.body.error, /already registered/);
@@ -2207,7 +2207,7 @@ test('a lead is accepted only with all three supervising-attorney checks confirm
       assert.equal((await postJson(server.baseUrl, '/api/leads/501/accept', { token: 'wrong', hitlVerification: all })).response.status, 401);
       const { response, body } = await postJson(server.baseUrl, '/api/leads/501/accept', { token: 'firm-token', hitlVerification: all });
       assert.equal(response.status, 200);
-      assert.deepEqual(body, { ok: true });
+      assert.deepEqual(body, { ok: true, clientTold: false });
     });
   } finally {
     await server.close();
@@ -2406,8 +2406,8 @@ function auctionWorld({ bids = [], firms = {}, declined = [] } = {}) {
     if (/FROM firms WHERE id = \$1/.test(q)) {
       const firm = firms[String(params[0])];
       return firm
-        ? rowsResponse([['id', INT], ['name', TEXT], ['email', TEXT], ['active', BOOL], ['subscription_active', BOOL], ['suspended_until', TIMESTAMPTZ], ['stripe_customer_id', TEXT], ['stripe_payment_method_id', TEXT]],
-          [[String(params[0]), 'Firm ' + params[0], 'firm' + params[0] + '@example.test', 't', 't', null, firm.customer ?? null, firm.card ?? null]])
+        ? rowsResponse([['id', INT], ['name', TEXT], ['email', TEXT], ['active', BOOL], ['subscription_active', BOOL], ['suspended_until', TIMESTAMPTZ], ['stripe_customer_id', TEXT], ['stripe_payment_method_id', TEXT], ['approved_at', TIMESTAMPTZ]],
+          [[String(params[0]), 'Firm ' + params[0], 'firm' + params[0] + '@example.test', 't', 't', null, firm.customer ?? null, firm.card ?? null, firm.approved === false ? null : '2026-11-01 00:00:00+00']])
         : rowsResponse([], []);
     }
     if (/^INSERT INTO leads/.test(q)) return rowsResponse([['id', INT]], [['601']], 'INSERT');
@@ -2501,7 +2501,7 @@ test('a cold lead goes only to firms whose card is charged, and the operator is 
   const leads = mixed.sql.filter(call => /^INSERT INTO leads/.test(call.query));
   assert.equal(leads.length, 1);
   assert.equal(String(leads[0].params[0]), '3');
-  assert.deepEqual(mixed.stripe, [['cus_2', 'cold-sess-cold-2'], ['cus_3', 'cold-sess-cold-3']]);
+  assert.deepEqual([...mixed.stripe].sort(), [['cus_2', 'cold-sess-cold-2'], ['cus_3', 'cold-sess-cold-3']]);
 
   const none = await run([{ id: 1 }], []);
   assert.equal(none.delivered, 0);
@@ -2946,6 +2946,7 @@ test("accepting a lead stores the supervising attorney's three checks on it", as
     }
     if (/^SELECT \* FROM leads WHERE id/.test(q)) return rowsResponse([['id', INT], ['firm_id', INT], ['status', TEXT]], [['501', '7', 'pending']]);
     if (/^UPDATE leads SET status = 'accepted'/.test(q)) return rowsResponse([['id', INT]], [['501']], 'UPDATE');
+    if (/^SELECT \* FROM firms WHERE id = \$1/.test(q)) return rowsResponse([['id', INT], ['name', TEXT], ['attorney_name', TEXT], ['attorney_registration', TEXT]], [['7', 'Test Firm', 'Pat Lee', '1234567']]);
     return jsonResponse(EMPTY_ROWS);
   };
   const checks = { sol_and_notice_verified: true, conflict_check_completed: true, case_quality_reviewed: true };
@@ -2962,7 +2963,7 @@ test("accepting a lead stores the supervising attorney's three checks on it", as
   const accepted = calls.find(call => /^UPDATE leads SET status = 'accepted', accepted_at = NOW\(\), hitl_verification = \$1/.test(call.query));
   assert.ok(accepted, 'the acceptance did not record the checks');
   const stored = JSON.parse(accepted.params[0]);
-  assert.deepEqual({ ...stored, attestedAt: undefined }, { ...checks, attestedAt: undefined });
+  assert.deepEqual({ ...stored, attestedAt: undefined }, { ...checks, attestedAt: undefined, attorneyName: 'Pat Lee', attorneyRegistration: '1234567' });
   assert.ok(!Number.isNaN(Date.parse(stored.attestedAt)));
 });
 
@@ -3089,4 +3090,208 @@ test('a restored conversation offers the contact form again until it is sent', a
   } finally {
     await server.close();
   }
+});
+
+// ─── Approved firms, three firms a lead, the client told, payments kept up ────
+
+test('sign-up needs the supervising attorney and a New York registration number, and tells the operator', async () => {
+  resetRateLimits();
+  const sql = [];
+  const handler = async (url, init) => {
+    if (url.startsWith('https://api.stripe.com/')) return jsonResponse({ id: 'cus_new', object: 'customer' });
+    const { query, params } = JSON.parse(init.body);
+    const q = query.replace(/\s+/g, ' ').trim();
+    sql.push({ query: q, params });
+    if (/^INSERT INTO firms/.test(q)) {
+      return rowsResponse([['id', INT], ['name', TEXT], ['email', TEXT], ['phone_verified', BOOL], ['attorney_name', TEXT], ['attorney_registration', TEXT]],
+        [['9', params[0], params[1], 'f', params[4], params[5]]], 'INSERT');
+    }
+    return jsonResponse(EMPTY_ROWS);
+  };
+  const base = { name: 'Roe & Partners', email: 'intake@roe.example', phone: '(555) 123-4567', attorneyName: 'Jane Roe, Esq.', attorneyRegistration: '123-4567' };
+  const server = await startServer(app);
+  try {
+    const { logs } = await capturingLogs(() => withoutTexts(() => withoutMail(() => withOutboundHttp(handler, async () => {
+      for (const [change, error] of [
+        [{ attorneyName: '' }, /supervising attorney's name/],
+        [{ attorneyName: '<b>Roe</b>' }, /supervising attorney's name/],
+        [{ attorneyRegistration: '' }, /registration number/],
+        [{ attorneyRegistration: '12AB567' }, /registration number/],
+        [{ attorneyRegistration: '123' }, /registration number/],
+      ]) {
+        const { response, body } = await postJson(server.baseUrl, '/api/firms/register', { ...base, ...change });
+        assert.equal(response.status, 400, JSON.stringify(change));
+        assert.match(body.error, error);
+      }
+      resetRateLimits();   // sign-up allows five tries an hour
+      const { response, body } = await postJson(server.baseUrl, '/api/firms/register', base);
+      assert.equal(response.status, 200);
+      assert.equal(body.firmId, 9);
+    }))));
+    const insert = sql.find(call => /^INSERT INTO firms/.test(call.query));
+    assert.deepEqual(insert.params.slice(4).map(String), ['Jane Roe, Esq.', '1234567']);
+    assert.ok(logs.some(line => /New firm awaiting approval: Roe & Partners/.test(line)), 'the operator was not told');
+  } finally {
+    await server.close();
+  }
+});
+
+test('a firm gets no lead and cannot bid until approved, and the admin page approves it', async () => {
+  const { getActiveFirms } = await import('../firms.js');
+  const queries = [];
+  await withOutboundHttp(async (url, init) => { queries.push(JSON.parse(init.body).query.replace(/\s+/g, ' ')); return jsonResponse(EMPTY_ROWS); },
+    () => getActiveFirms('misdiagnosis'));
+  assert.match(queries[0], /approved_at IS NOT NULL/);
+
+  const { closeAuction } = await import('../auction.js');
+  const world = auctionWorld({
+    bids: [[11, '300.00'], [12, '250.00']],
+    firms: { 11: { customer: 'cus_11', card: 'pm_11', approved: false }, 12: { customer: 'cus_12', card: 'pm_12' } },
+  });
+  const result = await withoutMail(() => withOutboundHttp(world.handler, () => closeAuction(9)));
+  assert.deepEqual(result, { winnerFirmId: 12, amount: 250 });
+  assert.deepEqual(world.stripe.map(call => call.customer), ['cus_12'], 'a firm not yet approved was charged');
+
+  const sql = [];
+  const handler = async (url, init) => {
+    const { query, params } = JSON.parse(init.body);
+    const q = query.replace(/\s+/g, ' ').trim();
+    sql.push({ query: q, params });
+    if (/FROM firm_tokens/.test(q)) {
+      return rowsResponse([['firm_id', INT], ['name', TEXT], ['auction_id', INT], ['subscription_active', BOOL], ['approved_at', TIMESTAMPTZ]], [['7', 'Test Firm', '9', 't', null]]);
+    }
+    if (/^UPDATE firms SET approved_at/.test(q)) return rowsResponse([['id', INT], ['approved_at', TIMESTAMPTZ]], [['7', '2026-11-14 10:00:00+00']], 'UPDATE');
+    return jsonResponse(EMPTY_ROWS);
+  };
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(handler, async () => {
+      const bid = await postJson(server.baseUrl, '/api/auctions/9/bid', { token: 'auction-9', amount: 400 });
+      assert.equal(bid.response.status, 403);
+      assert.match(bid.body.error, /awaiting approval/);
+      assert.ok(!sql.some(call => /UPDATE auctions SET current_bid/.test(call.query)), 'a firm not yet approved placed a bid');
+
+      const approve = await fetch(server.baseUrl + '/api/admin/firms/7', {
+        method: 'PATCH', headers: { 'content-type': 'application/json', 'x-admin-secret': process.env.ADMIN_SECRET }, body: JSON.stringify({ approved: true }),
+      });
+      assert.equal(approve.status, 200);
+    });
+  } finally {
+    await server.close();
+  }
+  const approval = sql.find(call => /^UPDATE firms SET approved_at = CASE WHEN \$1 THEN COALESCE\(approved_at, NOW\(\)\) ELSE NULL END WHERE id = \$2/.test(call.query));
+  assert.ok(approval, 'the firm was not approved');
+  assert.equal(String(approval.params[0]), 'true');
+});
+
+test('a cold lead goes to at most three firms, and a firm whose card fails is replaced by the next', async () => {
+  const { deliverColdLead } = await import('../auction.js');
+  const run = async (firmCount, declined = []) => {
+    const charged = [];
+    const leads = [];
+    const handler = async (url, init) => {
+      if (url.startsWith('https://api.stripe.com/')) {
+        const customer = new URLSearchParams(String(init.body)).get('customer');
+        charged.push(customer);
+        return declined.includes(customer)
+          ? jsonResponse({ error: { type: 'card_error', code: 'card_declined', message: 'Your card was declined.' } }, 402)
+          : jsonResponse({ id: 'pi_' + customer, object: 'payment_intent', status: 'succeeded' });
+      }
+      const { query, params } = JSON.parse(init.body);
+      const q = query.replace(/\s+/g, ' ').trim();
+      if (/FROM firms WHERE active/.test(q)) {
+        return rowsResponse([['id', INT], ['name', TEXT], ['email', TEXT], ['stripe_customer_id', TEXT], ['stripe_payment_method_id', TEXT]],
+          Array.from({ length: firmCount }, (_, i) => [String(i + 1), 'Firm ' + (i + 1), 'f' + (i + 1) + '@example.test', 'cus_' + (i + 1), 'pm_' + (i + 1)]));
+      }
+      if (/^INSERT INTO leads/.test(q)) { leads.push(String(params[0])); return rowsResponse([['id', INT]], [[String(700 + leads.length)]], 'INSERT'); }
+      return jsonResponse(EMPTY_ROWS);
+    };
+    const delivered = await withoutMail(() => withOutboundHttp(handler, () => deliverColdLead('sess-cap', 'misdiagnosis', { score: 60, tier: 'cold' }, { preview: 'A preview.' })));
+    return { delivered, charged, leads };
+  };
+  const five = await run(5);
+  assert.equal(five.delivered, 3);
+  assert.equal(five.charged.length, 3, 'more than three firms were charged');
+  assert.equal(new Set(five.leads).size, 3);
+
+  // Every firm's card but two fails: the first three tried are not the only ones tried.
+  const mostDeclined = await run(5, ['cus_1', 'cus_2', 'cus_3']);
+  assert.equal(mostDeclined.delivered, 2);
+  assert.equal(mostDeclined.charged.length, 5);
+});
+
+test('the contact form takes an optional email, and the client is told when a firm accepts', async () => {
+  // A valid email goes with the lead; an invalid one is refused.
+  resetRateLimits();
+  const world = contactWorld({ leadScore: { ...leadScoreOf(84), tier: 'hot', reserve: 150 } });
+  const server = await startServer(app);
+  try {
+    await withoutMail(() => withOutboundHttp(world.handler, async () => {
+      const bad = await postJson(server.baseUrl, '/api/contact', { sessionId: 'sess-email', ...CONTACT, email: 'not-an-email' });
+      assert.equal(bad.response.status, 400);
+      assert.match(bad.body.error, /valid email/);
+      const good = await postJson(server.baseUrl, '/api/contact', { sessionId: 'sess-email', ...CONTACT, email: ' jane@example.test ' });
+      assert.equal(good.response.status, 200);
+    }));
+  } finally {
+    await server.close();
+  }
+  const saved = world.calls.sql.find(call => /^UPDATE conversations SET name/.test(call.query));
+  assert.ok(saved.params.includes('jane@example.test'));
+  const auction = JSON.parse(world.calls.sql.find(call => /INSERT INTO auctions/.test(call.query)).params.find(param => typeof param === 'string' && param.startsWith('{"caseType"')));
+  assert.equal(auction.contact.email, 'jane@example.test');
+
+  // Accepting: the client who gave an email hears which firm accepted; one who did not, nothing.
+  const { acceptLead } = await import('../auction.js');
+  for (const [email, expected] of [['jane@example.test', true], [null, false]]) {
+    const handler = async (url, init) => {
+      const q = JSON.parse(init.body).query.replace(/\s+/g, ' ').trim();
+      if (/^SELECT \* FROM leads WHERE id/.test(q)) {
+        return rowsResponse([['id', INT], ['firm_id', INT], ['auction_id', INT], ['status', TEXT], ['lead_data', JSONB]],
+          [['501', '7', null, 'pending', JSON.stringify({ contact: { name: 'Jane Roe', phone: '5551234567', email } })]]);
+      }
+      if (/^UPDATE leads SET status = 'accepted'/.test(q)) return rowsResponse([['id', INT]], [['501']], 'UPDATE');
+      if (/^SELECT \* FROM firms WHERE id/.test(q)) return rowsResponse([['id', INT], ['name', TEXT], ['phone', TEXT], ['email', TEXT]], [['7', 'Roe & Partners', '5559876543', 'intake@roe.example']]);
+      return jsonResponse(EMPTY_ROWS);
+    };
+    const { result, logs } = await capturingLogs(() => withoutMail(() => withOutboundHttp(handler, () => acceptLead(501, 7, { sol_and_notice_verified: true }))));
+    assert.deepEqual(result, { ok: true, clientTold: expected }, String(email));
+    assert.equal(logs.some(line => /Acceptance notice → client of lead 501/.test(line)), expected);
+  }
+});
+
+test('a subscription that stops being paid stops the leads, and starts them again when paid', async () => {
+  const { default: Stripe } = await import('stripe');
+  const signed = event => {
+    const payload = JSON.stringify({ id: 'evt_' + event.type, object: 'event', ...event });
+    return { payload, signature: new Stripe('sk_test_123').webhooks.generateTestHeaderString({ payload, secret: process.env.STRIPE_WEBHOOK_SECRET }) };
+  };
+  let liveStatus = 'past_due';
+  const sql = [];
+  const handler = async (url, init) => {
+    if (url.startsWith('https://api.stripe.com/')) {
+      return jsonResponse({ id: 'sub_9', object: 'subscription', status: liveStatus, default_payment_method: null, metadata: {} });
+    }
+    const { query, params } = JSON.parse(init.body);
+    sql.push({ query: query.replace(/\s+/g, ' ').trim(), params });
+    return rowsResponse([['id', INT]], [['7']], 'UPDATE');
+  };
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(handler, async () => {
+      const send = ({ payload, signature }) => fetch(server.baseUrl + '/api/webhooks/stripe', {
+        method: 'POST', headers: { 'content-type': 'application/json', 'stripe-signature': signature }, body: payload,
+      });
+      // A failed payment (the invoice names the subscription in either API version's place).
+      assert.equal((await send(signed({ type: 'invoice.payment_failed', data: { object: { id: 'in_1', object: 'invoice', subscription: 'sub_9' } } }))).status, 200);
+      assert.equal((await send(signed({ type: 'invoice.payment_failed', data: { object: { id: 'in_2', object: 'invoice', parent: { subscription_details: { subscription: 'sub_9' } } } } }))).status, 200);
+      // Paid again: the live status decides, whatever the event says.
+      liveStatus = 'active';
+      assert.equal((await send(signed({ type: 'customer.subscription.updated', data: { object: { id: 'sub_9', object: 'subscription', status: 'past_due' } } }))).status, 200);
+    });
+  } finally {
+    await server.close();
+  }
+  const updates = sql.filter(call => /^UPDATE firms SET subscription_active = \$1, subscription_status = \$2 WHERE stripe_subscription_id = \$3/.test(call.query));
+  assert.deepEqual(updates.map(call => call.params.map(String)), [['false', 'past_due', 'sub_9'], ['false', 'past_due', 'sub_9'], ['true', 'active', 'sub_9']]);
 });

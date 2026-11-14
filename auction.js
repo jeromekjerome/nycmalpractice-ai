@@ -6,7 +6,8 @@ import nodemailer from 'nodemailer';
 import { getActiveFirms, createMagicLink, getFirm, recordDecline, recentDeclineCounts } from './firms.js';
 import { chargeCustomer, createRefund } from './stripe.js';
 import { buildModelList, chatCompletionsWithFallback } from './openaiModelFailover.js';
-import { APP_URL } from './site.js';
+import { APP_URL, MAX_FIRMS_PER_LEAD } from './site.js';
+import { randomInt } from 'node:crypto';
 
 const sql    = neon(process.env.DATABASE_URL);
 // Each AI call is cut off after 30 seconds and retried once; it could wait 10 minutes.
@@ -123,9 +124,12 @@ export async function deliverColdLead(sessionId, caseType, scoreData, leadData) 
     return 0;
   }
 
+  // At most three firms get a cold lead (the consent says "up to three"), tried in random order so every matching
+  // firm has the same chance. It used to go to every matching firm.
   let delivered = 0;
-  for (const firm of firms) {
-    // Charged first: a firm whose card is missing or declined does not get the lead.
+  for (const firm of shuffled(firms)) {
+    if (delivered >= MAX_FIRMS_PER_LEAD) break;
+    // Charged first: a firm whose card is missing or declined does not get the lead, and the next one is tried.
     const key = `cold-${sessionId}-${firm.id}`;
     const charge = await chargeFirm(firm, TIER_CONFIG.cold.reserve, `Cold malpractice lead — ${caseType}`, { sessionId, firmId: String(firm.id) }, key);
     if (charge.status === 'unknown') {
@@ -283,7 +287,7 @@ export async function closeAuction(auctionId) {
     GROUP BY firm_id ORDER BY MAX(amount) DESC, MIN(created_at) ASC`;
   for (const bid of bids) {
     const firm = await getFirm(bid.firm_id);
-    if (!firm || firm.active === false || !firm.subscription_active) continue;
+    if (!firm || firm.active === false || !firm.subscription_active || !firm.approved_at) continue;
     if (firm.suspended_until && new Date(firm.suspended_until) > new Date()) continue;
     const amount = parseFloat(bid.amount);
     const key = `auction-${auctionId}-${firm.id}`;
@@ -368,7 +372,10 @@ export async function acceptLead(leadId, firmId, attestation = null) {
     UPDATE leads SET status = 'accepted', accepted_at = NOW(), hitl_verification = ${attestation ? JSON.stringify(attestation) : null}
     WHERE id = ${leadId} AND status = 'pending' RETURNING id`;
   if (!claimed) return { ok: false, error: 'Lead already answered' };
-  return { ok: true };
+  // The client hears which firm accepted, by email if they gave an address; nobody used to tell them anything.
+  const clientTold = await notifyClientOfAcceptance(lead, firmId)
+    .catch(err => { console.error(`The acceptance notice for lead ${leadId} failed:`, err.message); return false; });
+  return { ok: true, clientTold };
 }
 
 // Terms: a lead not accepted or declined within 3 days is declined automatically, counts as a decline
@@ -478,4 +485,56 @@ async function sendLoserEmail(firm, auction, winningBid) {
   const msg = `Auction #${auction.id} closed. Winning bid: $${winningBid.toFixed(2)}. You were not charged.`;
   if (!t) { console.log(`[EMAIL MOCK] Loser → ${firm.email}`); return; }
   await t.sendMail({ from: process.env.SMTP_USER, to: firm.email, subject: 'Auction Closed — Lead Went to Another Firm', html: `<p style="font-family:sans-serif">${msg}</p>` });
+}
+
+// A fair order for the firms offered a cold lead.
+function shuffled(list) {
+  const copy = [...list];
+  for (let i = copy.length - 1; i > 0; i -= 1) {
+    const j = randomInt(i + 1);
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
+function withTimeout(promise, ms) {
+  let timer;
+  const late = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`no answer in ${ms / 1000} seconds`)), ms); });
+  return Promise.race([promise, late]).finally(() => clearTimeout(timer));
+}
+
+// Emails the client that a firm has accepted their request, with the firm's name and how to reach it, if they
+// gave an email address in the contact form. Returns whether a notice went out.
+async function notifyClientOfAcceptance(lead, firmId) {
+  let data = lead.lead_data;
+  if (lead.auction_id) {
+    const [auction] = await sql`SELECT lead_data FROM auctions WHERE id = ${lead.auction_id}`;
+    data = auction?.lead_data;
+  }
+  if (typeof data === 'string') data = JSON.parse(data);
+  const contact = data?.contact || {};
+  if (typeof contact.email !== 'string' || !contact.email.includes('@')) return false;
+  const firm = await getFirm(firmId);
+  if (!firm) return false;
+
+  const digits = String(firm.phone || '').replace(/\D/g, '').slice(-10);
+  const phone = digits.length === 10 ? `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}` : String(firm.phone || '');
+  const reach = [phone && `by phone at ${escapeHtml(phone)}`, firm.email && `by email at ${escapeHtml(firm.email)}`].filter(Boolean).join(' or ');
+  const html = `
+    <div style="font-family:sans-serif;max-width:580px;margin:auto;line-height:1.5">
+      <p>Hello ${escapeHtml(contact.name || '')},</p>
+      <p><strong>${escapeHtml(firm.name)}</strong>, a New York law firm, has accepted your request for a free consultation and will contact you${contact.phone ? ' at the phone number you gave us' : ''}.</p>
+      ${reach ? `<p>You can also reach them ${reach}.</p>` : ''}
+      <p>NYCMalpractice.ai is not a law firm and is not part of this firm. You are free to speak with any attorney you choose, and to ask any attorney how fees and case costs would work before you agree to anything.</p>
+      <p style="color:#777;font-size:12px">You are receiving this because you asked NYCMalpractice.ai to connect you with an attorney. To withdraw your consent to be contacted, email privacy@nycmalpractice.ai.</p>
+    </div>`;
+  const t = getTransporter();
+  if (!t) { console.log(`[EMAIL MOCK] Acceptance notice → client of lead ${lead.id}`); return true; }
+  await withTimeout(t.sendMail({
+    from: process.env.SMTP_USER,
+    to: contact.email,
+    subject: `${firm.name} has accepted your consultation request`,
+    html,
+  }), 10_000);
+  return true;
 }

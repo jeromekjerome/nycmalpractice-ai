@@ -8,7 +8,7 @@ import { dirname, join } from 'path';
 import { neon } from '@neondatabase/serverless';
 import { answerUserQuestion } from './ask.js';
 import { createAuction, deliverColdLead, getAuctionStatus, placeBid, acceptLead, declineLead, notifyOperatorOfContactRequest, TIER_CONFIG } from './auction.js';
-import { registerFirm, sendVerificationCode, verifyPhoneCode, validateToken, updateFirmSubscription, getFirm, updateFirmProfile, createMagicLink, VerificationLimitError } from './firms.js';
+import { registerFirm, sendVerificationCode, verifyPhoneCode, validateToken, updateFirmSubscription, getFirm, updateFirmProfile, createMagicLink, VerificationLimitError, recentDeclineCounts } from './firms.js';
 import { rateLimit } from './rate-limit.js';
 import nodemailer from 'nodemailer';
 import { createSubscriptionCheckout, createPortalSession, constructWebhookEvent } from './stripe.js';
@@ -16,6 +16,7 @@ import OpenAI from 'openai';
 import { buildModelList, probeAllModelChains } from './openaiModelFailover.js';
 import { APP_URL, CONTACT_CONSENT_TEXT, CONTACT_FORM_FROM_STEP } from './site.js';
 import { mentionsPublicHospital } from './deadlines.js';
+import { toPublicEvaluation, isHitlVerificationComplete, loadRubric, loadCurrentLawNotes } from './gatekeeper.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -111,11 +112,13 @@ app.post('/api/ask', limitChat, async (req, res) => {
     // A qualifying lead score is kept with the conversation. The lead goes to firms only from
     // /api/contact, once the visitor has given contact details and agreed to be contacted.
     const leadScore = result.leadScore ? { ...result.leadScore, scoredAt: new Date().toISOString() } : null;
-    await finishBeforeReply('saving the conversation', upsertConversation(sessionId, mode, result.caseType, updatedHistory, leadScore), followUpDeadline());
+    await finishBeforeReply('saving the conversation', upsertConversation(sessionId, mode, result.caseType, updatedHistory, leadScore, result.evaluation || null), followUpDeadline());
 
     res.json({
       answer: result.answer, cases: result.cases || [], caseType: result.caseType || null,
       caseAnalysis: result.caseAnalysis || null, leadTier: result.leadScore?.tier || null,
+      // The gate's verdict on the reply above. Drafts the gate blocked are not sent to the browser.
+      evaluation: toPublicEvaluation(result.evaluation),
       // From the referral step on, the page offers the contact form.
       contactForm: result.turn >= CONTACT_FORM_FROM_STEP,
       // The visitor named a public hospital: the page shows its 90-day notice deadline.
@@ -153,7 +156,7 @@ app.post('/api/contact', limitContact, async (req, res) => {
   if (consent !== true) return res.status(400).json({ error: 'Please check the box to agree to be contacted.' });
 
   try {
-    const [conv] = await sql`SELECT mode, case_type, history, lead_score FROM conversations WHERE session_id = ${sessionId} LIMIT 1`;
+    const [conv] = await sql`SELECT mode, case_type, history, lead_score, gate_audit FROM conversations WHERE session_id = ${sessionId} LIMIT 1`;
     if (!conv) return res.status(404).json({ error: 'We could not find your conversation. Please send a message first.' });
 
     const phoneNumber = digits.slice(-10);
@@ -174,6 +177,9 @@ app.post('/api/contact', limitContact, async (req, res) => {
           caseType: conv.case_type, mode: conv.mode, history: conv.history,
           preview: score.preview, score: score.score, dimensions: score.dimensions, scoredAt: score.scoredAt || null,
           contact: { name: cleanName, phone: phoneNumber, bestTime: cleanTime || null, consentedAt: saved?.contact_consent_at || null },
+          // The gate's full audit of the last reply — every attempt, the citation audit and the
+          // checklist for the supervising attorney — for the reviewing firm (lead.html).
+          evaluation: conv.gate_audit || null,
         };
         const handOff = score.tier === 'cold'
           ? deliverColdLead(sessionId, conv.case_type, score, leadData)
@@ -326,8 +332,10 @@ app.get('/api/leads/:id', async (req, res) => {
     fullData = { ...lead.lead_data, tier: lead.tier };
   }
   const daysLeft     = Math.max(0, Math.ceil((new Date(lead.accept_deadline) - new Date()) / (1000 * 60 * 60 * 24)));
-  const coldCount    = (tokenData.cold_decline_count || 0) + 1;
-  const auctionCount = (tokenData.auction_decline_count || 0) + 1;
+  // The same 30-day count declineLead uses, so the policy shown is the one applied.
+  const recent       = await recentDeclineCounts(tokenData.firm_id);
+  const coldCount    = recent.cold + 1;
+  const auctionCount = recent.auction + 1;
   const isAuction    = !!lead.auction_id;
   const declinePolicy = isAuction
     ? (auctionCount === 1 ? { refundPct: 50, message: '50% refund' } : auctionCount === 2 ? { refundPct: 25, message: '25% refund' } : { refundPct: 0, message: 'No refund + 30-day suspension' })
@@ -336,9 +344,19 @@ app.get('/api/leads/:id', async (req, res) => {
 });
 
 app.post('/api/leads/:id/accept', async (req, res) => {
-  const tokenData = await validateToken(req.body.token);
+  const { token, hitlVerification } = req.body || {};
+  // A lead is accepted only after the supervising attorney confirms the three checks on lead.html.
+  // The page enforces this too; this is the same rule where calling the endpoint directly cannot skip it.
+  if (!isHitlVerificationComplete(hitlVerification)) {
+    return res.status(400).json({ error: 'Confirm all three supervising-attorney checks before accepting this lead.' });
+  }
+  const tokenData = await validateToken(token);
   if (!tokenData) return res.status(401).json({ error: 'Invalid token' });
-  res.json(await acceptLead(req.params.id, tokenData.firm_id));
+  const result = await acceptLead(req.params.id, tokenData.firm_id);
+  if (result.ok) {
+    console.log(`[HITL] Lead ${req.params.id} accepted by firm ${tokenData.firm_id} with attorney attestation ${JSON.stringify(hitlVerification)} at ${new Date().toISOString()}`);
+  }
+  res.json(result);
 });
 
 app.post('/api/leads/:id/decline', async (req, res) => {
@@ -431,24 +449,18 @@ app.post('/api/reset-session', async (req, res) => {
 });
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-async function upsertConversation(sessionId, mode, caseType, history, leadScore = null) {
-  const userText   = history.filter(h => h.role === 'user').map(h => h.content).join(' ');
-  const phoneMatch = userText.match(/\b(\+?1?\s?[-.]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})\b/);
-  const phone      = phoneMatch ? phoneMatch[0].replace(/[\s.-]/g, '') : null;
-  const nameMatch  = userText.match(/my name is\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)/i);
-  const name       = nameMatch ? nameMatch[1] : null;
-  const timeMatch  = userText.match(/(?:best time(?:\s+to call)?(?:\s+is)?|call(?:\s+me)?(?:\s+at)?)\s+([a-z0-9: ]+(?:am|pm|morning|afternoon|evening|noon|midnight)?)/i);
-  const bestTime   = timeMatch ? timeMatch[1].trim() : null;
-
+// Saves the conversation after each reply, with the latest lead score and the gate's audit of the
+// latest reply. The name, phone number and best time to call are saved only by /api/contact, from the
+// form the visitor submits with consent; they are no longer picked out of the chat text.
+async function upsertConversation(sessionId, mode, caseType, history, leadScore = null, gateAudit = null) {
   await sql`
-    INSERT INTO conversations (session_id, mode, case_type, history, name, phone, best_time, lead_score, updated_at)
-    VALUES (${sessionId}, ${mode}, ${caseType}, ${JSON.stringify(history)}, ${name}, ${phone}, ${bestTime}, ${leadScore ? JSON.stringify(leadScore) : null}, NOW())
+    INSERT INTO conversations (session_id, mode, case_type, history, lead_score, gate_audit, updated_at)
+    VALUES (${sessionId}, ${mode}, ${caseType}, ${JSON.stringify(history)}, ${leadScore ? JSON.stringify(leadScore) : null}, ${gateAudit ? JSON.stringify(gateAudit) : null}, NOW())
     ON CONFLICT (session_id) DO UPDATE SET
       mode = EXCLUDED.mode, case_type = COALESCE(EXCLUDED.case_type, conversations.case_type),
-      history = EXCLUDED.history, name = COALESCE(EXCLUDED.name, conversations.name),
-      phone = COALESCE(EXCLUDED.phone, conversations.phone),
-      best_time = COALESCE(EXCLUDED.best_time, conversations.best_time),
-      lead_score = COALESCE(EXCLUDED.lead_score, conversations.lead_score), updated_at = NOW()
+      history = EXCLUDED.history,
+      lead_score = COALESCE(EXCLUDED.lead_score, conversations.lead_score),
+      gate_audit = COALESCE(EXCLUDED.gate_audit, conversations.gate_audit), updated_at = NOW()
   `;
 }
 
@@ -516,7 +528,21 @@ app.get('/api/cron/overdue-leads', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'malpractice-ai' }));
+// `gatekeeper` reports whether the compliance rubrics and current-law notes load in this deployment.
+// They are read from rubrics/*.json at runtime, so this is the quickest way to see they were bundled.
+function gatekeeperHealth() {
+  try {
+    loadRubric('personal');
+    loadRubric('estate');
+    loadCurrentLawNotes();
+    return 'ok';
+  } catch (err) {
+    console.error('[Health] Gatekeeper rubrics failed to load:', err.message);
+    return 'rubrics_unavailable';
+  }
+}
+
+app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'malpractice-ai', gatekeeper: gatekeeperHealth() }));
 app.get('/health/models', async (_req, res) => {
   await refreshModelHealthSnapshot();
   res.json(modelHealthSnapshot);

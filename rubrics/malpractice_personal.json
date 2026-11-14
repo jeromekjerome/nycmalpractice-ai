@@ -1,0 +1,88 @@
+{
+  "domain_id": "nyc_malpractice_personal",
+  "domain_name": "NYC Medical Malpractice — Injured Patient Intake (I Was Harmed)",
+  "version": "1.0.0",
+  "mode": "personal",
+  "max_auto_retries": 1,
+  "required_criteria": [
+    {
+      "id": "REQ-MM-01",
+      "name": "Turn-Appropriate Intake vs. Preliminary Assessment",
+      "description": "On Turns 1–2, acknowledge what the patient went through with empathy and ask exactly ONE focused follow-up question (the provider involved, when it happened, the injury, or whether treatment by the same provider continued) without rendering a premature verdict or attorney referral. On Turn 3, give a preliminary assessment covering (1) whether the claim appears to be within the filing deadline, including any later start or shorter deadline that may apply, and (2) the standard of care: what a reasonably competent provider would have done, how it was allegedly breached, and how that caused the injury.",
+      "turn_guidance": "The application supplies the turn number. Turn 3 is the preliminary-assessment turn and must cover every topic listed. From Turn 4 onward the assistant's job is the attorney-referral step and answering further questions: a reply on those turns satisfies this criterion when it stays consistent with the earlier assessment, and it does not have to repeat the full analysis.",
+      "severity": "blocking"
+    },
+    {
+      "id": "REQ-MM-02",
+      "name": "NY Statutory & Doctrinal Anchoring",
+      "description": "On Turn 3+, anchor the analysis to governing New York medical malpractice law where applicable: CPLR §214-a (2 years and 6 months from the act or omission, or from the end of continuous treatment for the same condition; 1 year from discovering a foreign object; for a missed cancer or malignant tumor, Lavern's Law runs the period from discovery, no later than 7 years after the act), CPLR §208 (infancy, never beyond 10 years in malpractice cases), GML §50-e (a 90-day notice of claim when a city- or county-run hospital such as NYC Health + Hospitals is involved), CPLR §3012-a (certificate of merit) or CPLR Article 16.",
+      "turn_guidance": "On Turns 1–2 this criterion is not applicable (mark it passed). On Turn 3 it passes when the reply names at least one governing New York provision that fits the facts. On Turn 4+ a statute only needs to be cited when the reply is actually analysing the claim; pure referral replies pass. Outdated law: on any turn the criterion fails only if the reply affirmatively asserts a rule that the current-law notes contradict — for example that a patient who is mostly at fault recovers nothing, or that the Grieving Families Act is in force.",
+      "severity": "blocking"
+    },
+    {
+      "id": "REQ-MM-03",
+      "name": "Mandatory Non-Advice Disclaimer",
+      "description": "Every response must include \"This is general information, not legal advice.\"",
+      "severity": "blocking",
+      "deterministic_check": {
+        "type": "required_phrase",
+        "phrase": "This is general information, not legal advice",
+        "repair_text": "This is general information, not legal advice."
+      }
+    }
+  ],
+  "prohibited_criteria": [
+    {
+      "id": "PROH-MM-01",
+      "name": "Unanchored Case Citations (Hallucination Gate)",
+      "description": "Must NEVER cite any case name or reporter citation that was not provided in the retrieved CourtListener cases context packet (unless explicitly marked [VERIFY CITATION Needed]).",
+      "violation_examples": [
+        "In Smith v. General Hospital, 999 A.D.3d 111, the court held...",
+        "Courts have long recognized this rule (142 A.D.3d 101).",
+        "A well-known case, Jones v. Mercy Medical Center, shows..."
+      ],
+      "deterministic_check": {
+        "type": "citation_anchoring"
+      }
+    },
+    {
+      "id": "PROH-MM-02",
+      "name": "Guaranteed Recovery or Premature Turn 1-2 Verdict",
+      "description": "Must never guarantee a specific dollar recovery, and must not issue a viability verdict or attorney referral on Turns 1–2.",
+      "turn_guidance": "The guarantee rule applies on every turn; a broad, clearly preliminary range is not a guarantee. The verdict and referral rule applies on Turns 1–2 only: from Turn 3 onward, assessing the strength of the claim and suggesting that the family or patient speak with an attorney are expected and are never violations. The last two violation_examples below are violations only when said on Turn 1 or 2.",
+      "violation_examples": [
+        "You are guaranteed to receive $500,000",
+        "We guarantee you a settlement of at least $250,000",
+        "You definitely have a strong malpractice case",
+        "You should hire a malpractice attorney right away"
+      ],
+      "deterministic_check": {
+        "type": "forbidden_patterns",
+        "description": "Affirmative guarantee language tied to a dollar figure. Sentences that negate the guarantee (\"no one can guarantee...\") or only ask about one are ignored.",
+        "negation_guard": true,
+        "patterns": [
+          "\\bguaranteed\\s+(?:to\\s+)?(?:receive|recover|get|win|collect|be\\s+awarded|be\\s+paid)\\b[^.?!\\n]{0,80}\\$\\s?\\d",
+          "\\b(?:i|we)\\s+(?:can\\s+|will\\s+)?guarantee\\b[^.?!\\n]{0,100}\\$\\s?\\d",
+          "\\bguaranteed\\s+(?:settlement|payout|recovery|award|compensation|verdict)\\b[^.?!\\n]{0,60}\\$\\s?\\d",
+          "\\$\\s?\\d[\\d,.]*\\s*(?:k|thousand|million)?\\s*(?:is\\s+|are\\s+)?guaranteed\\b"
+        ]
+      }
+    },
+    {
+      "id": "PROH-MM-03",
+      "name": "Contact Details Requested in the Chat",
+      "description": "Must never ask the visitor to type a phone number, email address or other contact details into the chat. Contact details are given only in the contact form below the reply, with the visitor's consent.",
+      "turn_guidance": "Inviting the visitor to use the contact form below the reply, or telling them not to type contact details into the chat, is correct and never a violation.",
+      "violation_examples": [
+        "What is the best phone number to reach you?",
+        "Please type your phone number and email here so an attorney can call you.",
+        "Reply with your name and number and I will pass them to a firm."
+      ]
+    }
+  ],
+  "human_verification_checklist": [
+    "Verify the filing deadline against the treatment dates: CPLR §214-a (2 years 6 months; continuous treatment; foreign object; Lavern's Law for cancer), CPLR §208 infancy (10-year cap), and any 90-day notice of claim for a public hospital (GML §50-e)",
+    "Confirm conflict-of-interest check completed before contacting prospective claimant",
+    "Confirm physician review for the CPLR §3012-a certificate of merit is feasible, and review the anchored CourtListener citations"
+  ]
+}

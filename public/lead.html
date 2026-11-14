@@ -248,7 +248,8 @@
       $('contactTime').textContent = contact.bestTime || 'No preference given';
       $('contactWho').textContent = info.mode === 'estate' ? 'Family member / estate (wrongful death)' : 'Injured patient';
       $('consentNote').textContent = contact.consentedAt
-        ? `The client agreed to be contacted by phone or text on ${formatDate(contact.consentedAt)}. Use these details only for this matter.`
+        ? `The client agreed to be contacted by phone or text on ${formatDate(contact.consentedAt)}. Use these details only for this matter.` +
+          (contact.consentText ? ` The wording they agreed to: “${contact.consentText}”` : '')
         : '';
 
       $('preview').textContent = info.preview || '';

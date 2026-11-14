@@ -358,11 +358,14 @@ export async function reportStuckAuctions() {
   return stuck.length;
 }
 
-export async function acceptLead(leadId, firmId) {
+// `attestation` is the supervising attorney's three checks (lead.html), stored with the lead as the record of them.
+export async function acceptLead(leadId, firmId, attestation = null) {
   const [lead] = await sql`SELECT * FROM leads WHERE id = ${leadId} AND firm_id = ${firmId} LIMIT 1`;
   if (!lead) return { ok: false, error: 'Lead not found' };
   if (lead.status !== 'pending') return { ok: false, error: `Lead already ${lead.status}` };
-  const [claimed] = await sql`UPDATE leads SET status = 'accepted' WHERE id = ${leadId} AND status = 'pending' RETURNING id`;
+  const [claimed] = await sql`
+    UPDATE leads SET status = 'accepted', accepted_at = NOW(), hitl_verification = ${attestation ? JSON.stringify(attestation) : null}
+    WHERE id = ${leadId} AND status = 'pending' RETURNING id`;
   if (!claimed) return { ok: false, error: 'Lead already answered' };
   return { ok: true };
 }

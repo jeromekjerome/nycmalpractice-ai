@@ -396,7 +396,7 @@ test('GET /api/cron with the cron secret closes auctions, declines overdue leads
     await withOutboundHttp(world.handler, async () => {
       const response = await fetch(`${server.baseUrl}/api/cron`, { headers: { authorization: `Bearer ${process.env.CRON_SECRET}` } });
       assert.equal(response.status, 200);
-      assert.deepEqual(await response.json(), { ok: true, closed: 0, declined: 0, purged: { conversations: 0, messages: 0 } });
+      assert.deepEqual(await response.json(), { ok: true, closed: 0, declined: 0, purged: { conversations: 0, messages: 0, leads: 0, auctions: 0, bids: 0 } });
     });
     const queries = world.calls.sql.map(call => call.query);
     assert.ok(queries.some(query => /FROM auctions WHERE status = 'open' AND closes_at <= NOW\(\)/.test(query)), 'expired auctions were not looked up');
@@ -421,8 +421,10 @@ test('the nightly job deletes conversations after the 90 days the privacy policy
     const scrub = world.calls.sql.find(call => /^UPDATE user_interactions SET question = NULL WHERE question IS NOT NULL AND created_at < NOW\(\) - make_interval\(days => \$1\)/.test(call.query));
     assert.ok(scrub, 'the text of expired messages was not removed');
     assert.equal(String(scrub.params[0]), '90');
-    // Lead records sold to firms are kept for 3 years, so the nightly job never deletes them.
-    assert.ok(!world.calls.sql.some(call => /DELETE FROM (auctions|leads)/.test(call.query)));
+    // Lead records sold to firms are kept for 3 years, and then deleted.
+    const leadPurge = world.calls.sql.find(call => /^DELETE FROM leads WHERE created_at < NOW\(\) - make_interval\(years => \$1\)/.test(call.query));
+    assert.ok(leadPurge, 'lead records older than 3 years were not deleted');
+    assert.equal(String(leadPurge.params[0]), '3');
   } finally {
     await server.close();
   }
@@ -614,7 +616,8 @@ test('POST /api/contact with consent hands the lead off with the contact details
     assert.ok(saved.params.includes('5551234567'));
     assert.ok(saved.params.includes(CONTACT_CONSENT_TEXT), 'the consent text stored is not the one the page shows');
     const auction = leadDataOf(hot.calls.sql.find(call => /INSERT INTO auctions/.test(call.query)));
-    assert.deepEqual(auction.contact, { name: 'Jane Roe', phone: '5551234567', bestTime: 'weekday mornings', consentedAt: '2026-11-14T10:00:00.000Z' });
+    // The exact wording agreed to goes with the lead, which outlives the conversation (3 years against 90 days).
+    assert.deepEqual(auction.contact, { name: 'Jane Roe', phone: '5551234567', bestTime: 'weekday mornings', consentedAt: '2026-11-14T10:00:00.000Z', consentText: CONTACT_CONSENT_TEXT });
     assert.equal(auction.history.length, CONTACT_HISTORY.length);
     assert.equal(auction.preview, 'Delayed cancer diagnosis after a misread scan.');
     // The firm also gets the gate's audit of the last reply, for its supervising attorney, as the privacy policy says.
@@ -1374,7 +1377,7 @@ test('a lead is answered once: a second decline or a late accept changes nothing
     assert.deepEqual(await acceptLead(501, 7), { ok: false, error: 'Lead already answered' });
   });
   assert.ok(!calls.some(call => /refund_amount|UPDATE firms/.test(call.query)), 'a lead answered twice was refunded or counted twice');
-  assert.ok(calls.some(call => /^UPDATE leads SET status = 'accepted' WHERE id = \$1 AND status = 'pending' RETURNING id/.test(call.query)));
+  assert.ok(calls.some(call => /^UPDATE leads SET status = 'accepted', accepted_at = NOW\(\), hitl_verification = \$1 WHERE id = \$2 AND status = 'pending' RETURNING id/.test(call.query)));
 });
 
 // ─── Case law when CourtListener cannot be searched ───────────────────────────
@@ -2887,4 +2890,78 @@ test('the case card agrees with its own score, and reads the end of a long conve
   } finally {
     await server.close();
   }
+});
+
+// ─── Retention, and the supervising attorney's checks on the lead ─────────────
+
+const { CONVERSATION_RETENTION_DAYS: KEPT_DAYS, LEAD_RETENTION_YEARS, purgeExpiredLeadRecords } = await import('../retention.js');
+
+test('the nightly job deletes conversations after 90 days and lead records after 3 years, as the policy says', async () => {
+  const calls = [];
+  const handler = async (url, init) => {
+    if (!url.endsWith('/sql')) throw new Error('Unexpected request ' + url);
+    const { query, params } = JSON.parse(init.body);
+    calls.push({ query: query.replace(/\s+/g, ' ').trim(), params });
+    return rowsResponse([['id', INT]], [['1'], ['2']], 'DELETE');
+  };
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(handler, async () => {
+      const response = await fetch(server.baseUrl + '/api/cron', { headers: { authorization: 'Bearer ' + process.env.CRON_SECRET } });
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.deepEqual(body.purged, { conversations: 2, messages: 2, leads: 2, auctions: 2, bids: 2 });
+    });
+  } finally {
+    await server.close();
+  }
+  const conversations = calls.find(call => /^DELETE FROM conversations WHERE updated_at < NOW\(\) - make_interval\(days => \$1\)/.test(call.query));
+  assert.equal(String(conversations?.params[0]), '90');
+  const leads = calls.find(call => /^DELETE FROM leads WHERE created_at < NOW\(\) - make_interval\(years => \$1\)/.test(call.query));
+  assert.equal(String(leads?.params[0]), '3');
+  // An auction (and its bids) goes only once no lead refers to it, so no reference is left dangling.
+  const bids = calls.find(call => /^DELETE FROM bids WHERE auction_id IN/.test(call.query));
+  assert.match(bids.query, /NOT EXISTS \(SELECT 1 FROM leads l WHERE l\.auction_id = a\.id\)/);
+  const auctions = calls.find(call => /^DELETE FROM auctions a WHERE/.test(call.query));
+  assert.match(auctions.query, /NOT EXISTS \(SELECT 1 FROM leads l WHERE l\.auction_id = a\.id\) AND NOT EXISTS \(SELECT 1 FROM bids b WHERE b\.auction_id = a\.id\)/);
+  assert.ok(calls.indexOf(leads) < calls.indexOf(bids) && calls.indexOf(bids) < calls.indexOf(auctions), 'deleted in an order that breaks references');
+
+  // The numbers in the code are the numbers in the policy.
+  assert.equal(KEPT_DAYS, 90);
+  assert.equal(LEAD_RETENTION_YEARS, 3);
+  const policy = readFileSync(new URL('../public/privacy.html', import.meta.url), 'utf8').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+  assert.match(policy, /90 days after your last message/);
+  assert.match(policy, /3 years/);
+  assert.equal(typeof purgeExpiredLeadRecords, 'function');
+});
+
+test("accepting a lead stores the supervising attorney's three checks on it", async () => {
+  const calls = [];
+  const handler = async (url, init) => {
+    const { query, params } = JSON.parse(init.body);
+    const q = query.replace(/\s+/g, ' ').trim();
+    calls.push({ query: q, params });
+    if (/FROM firm_tokens/.test(q)) {
+      return rowsResponse([['firm_id', INT], ['name', TEXT], ['auction_id', INT], ['lead_id', INT]], [['7', 'Test Firm', null, '501']]);
+    }
+    if (/^SELECT \* FROM leads WHERE id/.test(q)) return rowsResponse([['id', INT], ['firm_id', INT], ['status', TEXT]], [['501', '7', 'pending']]);
+    if (/^UPDATE leads SET status = 'accepted'/.test(q)) return rowsResponse([['id', INT]], [['501']], 'UPDATE');
+    return jsonResponse(EMPTY_ROWS);
+  };
+  const checks = { sol_and_notice_verified: true, conflict_check_completed: true, case_quality_reviewed: true };
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(handler, async () => {
+      const { response, body } = await postJson(server.baseUrl, '/api/leads/501/accept', { token: 'lead-501', hitlVerification: checks });
+      assert.equal(response.status, 200);
+      assert.equal(body.ok, true);
+    });
+  } finally {
+    await server.close();
+  }
+  const accepted = calls.find(call => /^UPDATE leads SET status = 'accepted', accepted_at = NOW\(\), hitl_verification = \$1/.test(call.query));
+  assert.ok(accepted, 'the acceptance did not record the checks');
+  const stored = JSON.parse(accepted.params[0]);
+  assert.deepEqual({ ...stored, attestedAt: undefined }, { ...checks, attestedAt: undefined });
+  assert.ok(!Number.isNaN(Date.parse(stored.attestedAt)));
 });

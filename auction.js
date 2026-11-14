@@ -3,7 +3,7 @@
 import { neon } from '@neondatabase/serverless';
 import OpenAI from 'openai';
 import nodemailer from 'nodemailer';
-import { getActiveFirms, createMagicLink, getFirm, recordDecline } from './firms.js';
+import { getActiveFirms, createMagicLink, getFirm, recordDecline, recentDeclineCounts } from './firms.js';
 import { chargeCustomer, createRefund } from './stripe.js';
 import { buildModelList, chatCompletionsWithFallback } from './openaiModelFailover.js';
 import { APP_URL } from './site.js';
@@ -211,8 +211,21 @@ export async function acceptLead(leadId, firmId) {
   const [lead] = await sql`SELECT * FROM leads WHERE id = ${leadId} AND firm_id = ${firmId} LIMIT 1`;
   if (!lead) return { ok: false, error: 'Lead not found' };
   if (lead.status !== 'pending') return { ok: false, error: `Lead already ${lead.status}` };
-  await sql`UPDATE leads SET status = 'accepted' WHERE id = ${leadId}`;
+  const [claimed] = await sql`UPDATE leads SET status = 'accepted' WHERE id = ${leadId} AND status = 'pending' RETURNING id`;
+  if (!claimed) return { ok: false, error: 'Lead already answered' };
   return { ok: true };
+}
+
+// Terms: a lead not accepted or declined within 3 days is declined automatically, counts as a decline
+// and is not refunded. One UPDATE claims every overdue lead, so a firm's answer arriving at the same
+// moment is kept rather than overwritten.
+export async function declineOverdueLeads() {
+  const overdue = await sql`
+    UPDATE leads SET status = 'declined', declined_at = NOW()
+    WHERE status = 'pending' AND accept_deadline < NOW()
+    RETURNING id, firm_id, auction_id`;
+  for (const lead of overdue) await recordDecline(lead.firm_id, !!lead.auction_id);
+  return overdue.length;
 }
 
 export async function declineLead(leadId, firmId) {
@@ -220,9 +233,13 @@ export async function declineLead(leadId, firmId) {
   if (!lead) return { ok: false, error: 'Lead not found' };
   if (lead.status !== 'pending') return { ok: false, error: `Lead already ${lead.status}` };
   const isAuction    = !!lead.auction_id;
-  const firm         = await getFirm(firmId);
-  const coldCount    = (firm.cold_decline_count || 0) + 1;
-  const auctionCount = (firm.auction_decline_count || 0) + 1;
+  // Earlier declines in the last 30 days decide the refund for this one.
+  const recent       = await recentDeclineCounts(firmId);
+  const coldCount    = recent.cold + 1;
+  const auctionCount = recent.auction + 1;
+  // Claim the lead before any refund, so two decline clicks, or a decline racing an accept, refund at most once.
+  const [claimed] = await sql`UPDATE leads SET status = 'declined', declined_at = NOW() WHERE id = ${leadId} AND status = 'pending' RETURNING id`;
+  if (!claimed) return { ok: false, error: 'Lead already answered' };
   const pricePaid    = parseFloat(lead.price_paid);
   const refundAmount = isAuction
     ? (auctionCount === 1 ? pricePaid * 0.5 : auctionCount === 2 ? pricePaid * 0.25 : 0)
@@ -232,7 +249,7 @@ export async function declineLead(leadId, firmId) {
     try { const r = await createRefund({ paymentIntentId: lead.stripe_charge_id, amountDollars: refundAmount }); stripeRefundId = r.id; }
     catch (err) { console.error('Refund failed:', err.message); }
   }
-  await sql`UPDATE leads SET status = 'declined', refund_amount = ${refundAmount}, stripe_refund_id = ${stripeRefundId} WHERE id = ${leadId}`;
+  await sql`UPDATE leads SET refund_amount = ${refundAmount}, stripe_refund_id = ${stripeRefundId} WHERE id = ${leadId}`;
   await recordDecline(firmId, isAuction);
   return { ok: true, refundAmount };
 }

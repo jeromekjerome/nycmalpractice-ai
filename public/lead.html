@@ -166,6 +166,19 @@
           </div>
           <div id="declineConfirm" style="display:none;margin-top:0.75rem">
             <p style="font-size:0.88rem">Declining this lead: <strong id="declinePolicy"></strong>.</p>
+            <!-- Required: a lead declined for the firm's own reasons goes to another firm; a bad lead is reviewed by us. -->
+            <label for="declineReason" style="display:block;font-size:0.8rem;color:var(--muted);margin:0.6rem 0 0.3rem">Why are you declining it?</label>
+            <select id="declineReason" style="width:100%;padding:0.5rem 0.65rem;background:rgba(255,255,255,0.04);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:'Inter',sans-serif;font-size:0.86rem">
+              <option value="">Choose a reason…</option>
+              <option value="unreachable">Could not reach the client (wrong or disconnected number)</option>
+              <option value="did_not_ask">The client says they did not ask to be contacted</option>
+              <option value="represented">The client already has a lawyer</option>
+              <option value="deadline">The deadline to sue has already passed</option>
+              <option value="conflict">Conflict of interest</option>
+              <option value="outside_practice">Outside our practice area or location</option>
+              <option value="not_taking">We would not take this case</option>
+              <option value="other">Another reason</option>
+            </select>
             <div class="actions" style="margin-top:0.5rem">
               <button class="action-btn secondary" id="confirmDecline" type="button">Yes, decline</button>
               <button class="action-btn secondary" id="cancelDecline" type="button">Keep the lead</button>
@@ -300,11 +313,13 @@
     async function respond(action) {
       // Accept is sent only with all three checks confirmed right now, even if the button was re-enabled by hand.
       if (action === 'accept' && (acceptInFlight || !hitlComplete())) { updateAcceptGate(); return; }
+      const reason = $('declineReason').value;
+      if (action === 'decline' && !reason) { notice('Choose why you are declining this lead.', 'error'); return; }
       const buttons = document.querySelectorAll('#actionsPanel button');
       buttons.forEach(button => { button.disabled = true; });
       if (action === 'accept') acceptInFlight = true;
       try {
-        const payload = action === 'accept' ? { token, hitlVerification: hitlVerification() } : { token };
+        const payload = action === 'accept' ? { token, hitlVerification: hitlVerification() } : { token, reason };
         const res  = await fetch(`/api/leads/${encodeURIComponent(leadId)}/${action}`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
         });

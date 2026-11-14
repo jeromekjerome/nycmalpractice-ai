@@ -27,6 +27,17 @@
     .admin-btn { width:100%;padding:0.65rem;background:linear-gradient(135deg,#7a2040,#9e3a5a);border:none;border-radius:10px;color:#fff;font-family:'Inter',sans-serif;font-size:0.9rem;font-weight:600;cursor:pointer }
     .action-btn { font-size:0.75rem;padding:0.25rem 0.55rem;border-radius:5px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;transition:border-color 0.2s }
     .action-btn:hover { border-color:var(--accent);color:var(--text) }
+    .action-btn.primary { border-color: var(--accent); color: var(--text); }
+    .muted-note { color: var(--muted); font-size: 0.75rem; }
+    .deliver-form { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; margin-top: 0.4rem; }
+    .deliver-form select, .deliver-form input { padding: 4px 6px; background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-family: 'Inter', sans-serif; font-size: 0.75rem; }
+    .deliver-form input { width: 5.5rem; }
+    .stack { display: flex; flex-direction: column; gap: 0.3rem; align-items: flex-start; }
+    .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 9000; padding: 1rem; }
+    .modal-box { max-width: 760px; width: 100%; max-height: 85vh; overflow-y: auto; padding: 1.5rem; }
+    .transcript-msg { white-space: pre-wrap; font-size: 0.82rem; line-height: 1.5; padding: 0.6rem 0.75rem; border-radius: 8px; margin-bottom: 0.5rem; border: 1px solid var(--border); }
+    .transcript-msg.user { background: rgba(158,58,90,0.08); }
+    #adminMsg { font-size: 0.82rem; margin-bottom: 1rem; display: none; }
   </style>
 </head>
 <body>
@@ -57,16 +68,56 @@
       <div class="glass-panel stat-card"><div class="stat-n" id="statLeads">—</div><div class="stat-l">Total Leads</div></div>
     </div>
 
+    <div id="adminMsg" role="status"></div>
+
+    <!-- Contact requests: every client who asked to be contacted, and what became of the request -->
+    <div class="section-title">Contact Requests</div>
+    <div class="glass-panel" style="padding:1.25rem;overflow-x:auto">
+      <p class="muted-note" style="margin-bottom:0.75rem">A request a firm has not taken can be delivered by hand to an approved firm, at any price (0 for a free sample), up to the three firms the client agreed to. <button class="action-btn" onclick="loadOperations()">↻ Refresh</button></p>
+      <table>
+        <thead><tr><th>Received</th><th>Case</th><th>Client</th><th>Score</th><th>What happened</th><th>Actions</th></tr></thead>
+        <tbody id="requestsBody"></tbody>
+      </table>
+    </div>
+
+    <div class="section-title">Auctions</div>
+    <div class="glass-panel" style="padding:1.25rem;overflow-x:auto">
+      <table>
+        <thead><tr><th>#</th><th>Case</th><th>Tier</th><th>Status</th><th>Bids</th><th>Top bid</th><th>Closes</th><th>Winner</th><th></th></tr></thead>
+        <tbody id="auctionsBody"></tbody>
+      </table>
+    </div>
+
+    <div class="section-title">Leads</div>
+    <div class="glass-panel" style="padding:1.25rem;overflow-x:auto">
+      <table>
+        <thead><tr><th>#</th><th>Firm</th><th>Case</th><th>Tier</th><th>Price</th><th>Status</th><th>Refund</th><th>Decline reason</th><th>Delivered</th></tr></thead>
+        <tbody id="leadsBody"></tbody>
+      </table>
+    </div>
+
     <div class="section-title">Law Firms</div>
     <div class="glass-panel" style="padding:1.25rem;overflow-x:auto">
       <table>
         <thead>
           <tr>
-            <th>Firm</th><th>Email</th><th>Phone</th><th>Status</th><th>Subscription</th><th>Specializations</th><th>Actions</th>
+            <th>Firm</th><th>Email</th><th>Phone</th><th>Status</th><th>Subscription</th><th>Activity</th><th>Specializations</th><th>Actions</th>
           </tr>
         </thead>
         <tbody id="firmsBody"></tbody>
       </table>
+    </div>
+  </div>
+
+  <!-- A request's conversation -->
+  <div class="modal-backdrop" id="transcriptModal" onclick="if(event.target===this)closeTranscript()">
+    <div class="glass-panel modal-box" role="dialog" aria-modal="true" aria-labelledby="transcriptTitle">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem">
+        <div style="font-weight:700" id="transcriptTitle">Conversation</div>
+        <button class="action-btn" onclick="closeTranscript()">Close</button>
+      </div>
+      <div id="transcriptMeta" class="muted-note" style="margin-bottom:1rem"></div>
+      <div id="transcriptBody"></div>
     </div>
   </div>
 
@@ -107,14 +158,22 @@
       document.getElementById('statLeads').textContent  = data.leadCounts?.total || 0;
 
       const tbody = document.getElementById('firmsBody');
+      allFirms = data.firms || [];
       // Everything a firm typed is escaped before it goes into the page.
-      tbody.innerHTML = (data.firms || []).map(f => `
+      tbody.innerHTML = allFirms.map(f => `
         <tr>
           <td>${esc(f.name)}<div style="color:var(--muted);font-size:0.75rem">${f.attorney_registration ? `Attorney: ${esc(f.attorney_name || '—')} · NY reg. ${esc(f.attorney_registration)}` : 'No attorney registration on file'}</div></td>
           <td style="color:var(--muted)">${esc(f.email)}</td>
           <td style="color:var(--muted)">${esc(f.phone || '—')}</td>
           <td><span class="badge ${f.active ? 'b-active' : 'b-inactive'}">${f.active ? 'Active' : 'Inactive'}</span> <span class="badge ${f.approved_at ? 'b-active' : 'b-inactive'}">${f.approved_at ? 'Approved' : 'Awaiting approval'}</span></td>
-          <td>${f.subscription_active ? '<span class="badge b-subscribed">Subscribed</span>' : '<span style="color:var(--muted);font-size:0.78rem">None</span>'}</td>
+          <td>${f.subscription_active ? '<span class="badge b-subscribed">Subscribed</span>' : '<span style="color:var(--muted);font-size:0.78rem">None</span>'}
+            ${f.subscription_status && f.subscription_status !== 'active' ? `<div style="color:#f87171;font-size:0.75rem">Stripe: ${esc(f.subscription_status)}</div>` : ''}</td>
+          <td style="font-size:0.75rem;white-space:nowrap">
+            <div>${Number(f.leads_bought || 0)} lead${Number(f.leads_bought) === 1 ? '' : 's'} · ${esc(money(f.net_spend || 0))} net</div>
+            <div class="muted-note">${Number(f.declines_30d || 0)} decline${Number(f.declines_30d) === 1 ? '' : 's'} in 30 days</div>
+            ${f.suspended_until && new Date(f.suspended_until) > new Date() ? `<div style="color:#f87171">Suspended until ${esc(new Date(f.suspended_until).toLocaleDateString())}</div>` : ''}
+            ${f.card_declined_at ? `<div style="color:#f87171">Card declined ${esc(new Date(f.card_declined_at).toLocaleDateString())}</div>` : ''}
+          </td>
           <td style="color:var(--muted);font-size:0.78rem">${esc((f.specializations || []).map(s => MALP_LABELS[s] || s).join(', ') || 'All')}</td>
           <td style="display:flex;gap:0.35rem;flex-wrap:wrap">
             <button class="action-btn" onclick="setApproved(${Number(f.id)}, ${!f.approved_at})">${f.approved_at ? 'Revoke Approval' : 'Approve'}</button>
@@ -123,7 +182,175 @@
           </td>
         </tr>
       `).join('');
+      loadOperations();
     }
+
+    // ── Requests, auctions and leads ──────────────────────────────────────────
+    let allFirms = [];
+    let declineReasons = {};
+    const money = value => (value == null || value === '' ? '—' : '$' + Number(value).toFixed(2));
+    const when  = value => (value ? new Date(value).toLocaleString() : '—');
+
+    function showMessage(text, isError = false) {
+      const el = document.getElementById('adminMsg');
+      el.textContent = text;
+      el.style.color = isError ? '#f87171' : '#4ade80';
+      el.style.display = 'block';
+    }
+
+    async function adminGet(path) {
+      const res = await fetch(path, { headers: { 'x-admin-secret': adminSecret } });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `${path} failed`);
+      return data;
+    }
+
+    async function loadOperations() {
+      try {
+        const [requests, auctions, leads] = await Promise.all([adminGet('/api/admin/requests'), adminGet('/api/admin/auctions'), adminGet('/api/admin/leads')]);
+        declineReasons = requests.declineReasons || leads.declineReasons || {};
+        renderRequests(requests.requests || []);
+        renderAuctions(auctions.auctions || []);
+        renderLeads(leads.leads || []);
+      } catch (e) {
+        showMessage('Could not load requests and leads: ' + e.message, true);
+      }
+    }
+
+    function outcomeOf(r) {
+      const leads = (r.leads || []).map(l =>
+        `<div>${esc(l.firm_name || 'Firm ' + l.firm_id)}: <strong>${esc(l.status)}</strong>${l.decline_reason ? ` (${esc(declineReasons[l.decline_reason] || l.decline_reason)})` : ''}</div>`);
+      const auctions = (r.auctions || []).map(a => `<div>Auction #${esc(a.id)}: ${esc(a.status)}</div>`);
+      if (leads.length || auctions.length) return auctions.concat(leads).join('');
+      return '<span class="badge b-inactive">Not placed</span>';
+    }
+
+    function renderRequests(requests) {
+      const tbody = document.getElementById('requestsBody');
+      if (!requests.length) { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:1.5rem">No contact requests yet.</td></tr>'; return; }
+      const firmOptions = allFirms.filter(f => f.approved_at && f.active)
+        .map(f => `<option value="${Number(f.id)}">${esc(f.name)}</option>`).join('');
+      tbody.innerHTML = requests.map(r => `
+        <tr>
+          <td style="white-space:nowrap;color:var(--muted)">${esc(when(r.contact_consent_at))}</td>
+          <td>${esc(MALP_LABELS[r.case_type] || r.case_type || '—')}${r.mode === 'estate' ? ' <span class="muted-note">estate</span>' : ''}</td>
+          <td>
+            <div style="font-weight:600">${esc(r.name || '—')}</div>
+            <div class="muted-note">${esc(r.phone || '')}${r.email ? ' · ' + esc(r.email) : ''}</div>
+            ${r.best_time ? `<div class="muted-note">Best time: ${esc(r.best_time)}</div>` : ''}
+          </td>
+          <td>${r.tier ? `${esc(r.score)} <span class="muted-note">${esc(r.tier)}</span>` : '<span class="muted-note">Not qualified</span>'}</td>
+          <td style="font-size:0.78rem">${outcomeOf(r)}</td>
+          <td>
+            <div class="stack">
+              <button class="action-btn" data-action="transcript" data-session="${esc(r.session_id)}">Conversation</button>
+              <button class="action-btn primary" data-action="deliver-form" data-session="${esc(r.session_id)}">Deliver to a firm…</button>
+              <div class="deliver-form" data-form="${esc(r.session_id)}" style="display:none">
+                ${firmOptions ? `<select aria-label="Firm">${firmOptions}</select>
+                <input type="number" min="0" max="5000" step="1" value="0" aria-label="Price in dollars">
+                <button class="action-btn primary" data-action="deliver" data-session="${esc(r.session_id)}">Deliver</button>` : '<span class="muted-note">No approved, active firm yet.</span>'}
+              </div>
+            </div>
+          </td>
+        </tr>`).join('');
+    }
+
+    function renderAuctions(auctions) {
+      const tbody = document.getElementById('auctionsBody');
+      if (!auctions.length) { tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:1.5rem">No auctions yet.</td></tr>'; return; }
+      tbody.innerHTML = auctions.map(a => `
+        <tr>
+          <td>${esc(a.id)}</td>
+          <td>${esc(MALP_LABELS[a.case_type] || a.case_type || '—')}</td>
+          <td>${esc(a.tier)}</td>
+          <td><span class="badge ${a.status === 'closed' ? 'b-active' : a.status === 'cancelled' ? 'b-inactive' : 'b-subscribed'}">${esc(a.status)}</span></td>
+          <td>${Number(a.bid_count || 0)}</td>
+          <td>${esc(money(a.winning_bid ?? a.current_bid))}</td>
+          <td style="white-space:nowrap;color:var(--muted)">${esc(when(a.closes_at))}</td>
+          <td>${esc(a.winner_name || '—')}</td>
+          <td>${a.status === 'open' || a.status === 'closing' ? `<button class="action-btn" data-action="cancel-auction" data-auction="${Number(a.id)}">Cancel</button>` : ''}</td>
+        </tr>`).join('');
+    }
+
+    function renderLeads(leads) {
+      const tbody = document.getElementById('leadsBody');
+      if (!leads.length) { tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:1.5rem">No leads yet.</td></tr>'; return; }
+      tbody.innerHTML = leads.map(l => `
+        <tr>
+          <td>${esc(l.id)}</td>
+          <td>${esc(l.firm_name || 'Firm ' + l.firm_id)}</td>
+          <td>${esc(MALP_LABELS[l.case_type] || l.case_type || '—')}</td>
+          <td>${esc(l.tier)}${l.auction_id ? ` <span class="muted-note">auction #${esc(l.auction_id)}</span>` : ''}</td>
+          <td>${esc(money(l.price_paid))}</td>
+          <td>${esc(l.status)}</td>
+          <td>${Number(l.refund_amount) > 0 ? esc(money(l.refund_amount)) : '—'}</td>
+          <td style="font-size:0.78rem">${l.decline_reason ? esc(l.decline_reason === 'expired' ? 'Not answered in 3 days' : (declineReasons[l.decline_reason] || l.decline_reason)) : '—'}</td>
+          <td style="white-space:nowrap;color:var(--muted)">${esc(when(l.created_at))}</td>
+        </tr>`).join('');
+    }
+
+    // Buttons carry the session in a data attribute, never in inline script: a session id comes from the browser.
+    document.getElementById('requestsBody').addEventListener('click', async event => {
+      const btn = event.target.closest('button[data-action]');
+      if (!btn) return;
+      const session = btn.dataset.session;
+      const form = [...document.querySelectorAll('.deliver-form')].find(el => el.dataset.form === session);
+      if (btn.dataset.action === 'transcript') return viewTranscript(session);
+      if (btn.dataset.action === 'deliver-form') { if (form) form.style.display = form.style.display === 'none' ? 'flex' : 'none'; return; }
+      if (btn.dataset.action === 'deliver' && form) {
+        const firmId = Number(form.querySelector('select').value);
+        const price = Number(form.querySelector('input').value || 0);
+        const firmName = allFirms.find(f => Number(f.id) === firmId)?.name || 'the firm';
+        if (!confirm(`Deliver this request to ${firmName}${price > 0 ? ` and charge $${price.toFixed(2)}` : ' as a free lead'}?`)) return;
+        btn.disabled = true;
+        try {
+          const res = await fetch(`/api/admin/requests/${encodeURIComponent(session)}/deliver`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-secret': adminSecret },
+            body: JSON.stringify({ firmId, price }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || 'Delivery failed');
+          showMessage(data.warning || `Lead #${data.leadId} delivered to ${firmName}`, !!data.warning);
+          loadOperations();
+        } catch (e) {
+          showMessage('Failed: ' + e.message, true);
+        } finally {
+          btn.disabled = false;
+        }
+      }
+    });
+
+    document.getElementById('auctionsBody').addEventListener('click', async event => {
+      const btn = event.target.closest('button[data-action="cancel-auction"]');
+      if (!btn) return;
+      const id = Number(btn.dataset.auction);
+      if (!confirm(`Cancel auction #${id}? Check Stripe first: a charge whose outcome was unknown may have gone through.`)) return;
+      try {
+        const res = await fetch(`/api/admin/auctions/${id}/cancel`, { method: 'POST', headers: { 'x-admin-secret': adminSecret } });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Cancel failed');
+        showMessage(`Auction #${id} cancelled`);
+        loadOperations();
+      } catch (e) {
+        showMessage('Failed: ' + e.message, true);
+      }
+    });
+
+    async function viewTranscript(session) {
+      try {
+        const { request } = await adminGet(`/api/admin/requests/${encodeURIComponent(session)}`);
+        document.getElementById('transcriptMeta').textContent =
+          `${request.name || '—'} · ${request.phone || ''}${request.email ? ' · ' + request.email : ''} · agreed to be contacted ${when(request.contact_consent_at)}`;
+        document.getElementById('transcriptBody').innerHTML = (Array.isArray(request.history) ? request.history : [])
+          .map(m => `<div class="transcript-msg ${m.role === 'user' ? 'user' : ''}"><strong>${m.role === 'user' ? 'Client' : 'AI'}:</strong> ${esc(m.content)}</div>`).join('')
+          || '<p class="muted-note">No messages kept.</p>';
+        document.getElementById('transcriptModal').style.display = 'flex';
+      } catch (e) {
+        showMessage('Could not load the conversation: ' + e.message, true);
+      }
+    }
+
+    function closeTranscript() { document.getElementById('transcriptModal').style.display = 'none'; }
 
     function esc(value) {
       return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');

@@ -4,6 +4,8 @@ export default defineConfig({
   testDir: './e2e',
   timeout: 30000,
   fullyParallel: true,
+  // Capped: with the default (half the CPU cores) busy machines timed out page loads; nycinjury.ai caps at 3.
+  workers: 2,
   use: {
     baseURL: 'http://127.0.0.1:4178',
     trace: 'on-first-retry',

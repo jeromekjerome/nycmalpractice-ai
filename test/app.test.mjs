@@ -2287,3 +2287,54 @@ test('checkout sends a paying firm back to the sign-up page at this site address
   assert.equal(params.get('success_url'), `${APP_URL}/register.html?subscribed=1`);
   assert.equal(params.get('cancel_url'), `${APP_URL}/register.html`);
 });
+
+// ─── Firm fields on the admin page ────────────────────────────────────────────
+
+test('firm sign-up and profile fields are checked and stored as plain text, and send-link does not return the link', async () => {
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(async () => jsonResponse(EMPTY_ROWS), async () => {
+      for (const [change, error] of [
+        [{ name: '<img src=x onerror=alert(1)>' }, /firm name/],
+        [{ email: 'not-an-email' }, /valid email/],
+        [{ email: 'x@y.z<img>' }, /valid email/],
+        [{ phone: '12345' }, /valid phone/],
+      ]) {
+        const { response, body } = await postJson(server.baseUrl, '/api/firms/register', { name: 'Roe & Partners', email: 'intake@roe.example', phone: '(555) 123-4567', ...change });
+        assert.equal(response.status, 400, JSON.stringify(change));
+        assert.match(body.error, error);
+      }
+    });
+
+    // The admin "send link" call emails the sign-in link; it no longer hands it back.
+    await withoutMail(() => withOutboundHttp(async (url, init) => {
+      const { query } = JSON.parse(init.body);
+      if (/FROM firms WHERE id/.test(query)) return rowsResponse([['id', INT], ['name', TEXT], ['email', TEXT]], [['7', 'Roe', 'intake@roe.example']]);
+      return jsonResponse(EMPTY_ROWS);
+    }, async () => {
+      const response = await fetch(`${server.baseUrl}/api/admin/firms/7/send-link`, { method: 'POST', headers: { 'x-admin-secret': process.env.ADMIN_SECRET } });
+      assert.equal(response.status, 200);
+      assert.deepEqual(await response.json(), { ok: true });
+    }));
+  } finally {
+    await server.close();
+  }
+
+  const { updateFirmProfile } = await import('../firms.js');
+  const calls = [];
+  await withOutboundHttp(async (url, init) => {
+    calls.push(JSON.parse(init.body));
+    return jsonResponse(EMPTY_ROWS);
+  }, () => updateFirmProfile(7, {
+    specializations: ['<img src=x onerror=alert(1)>', 'dental', 'dental'],
+    serviceArea: '<script>x</script> Brooklyn',
+    contactName: 'Pat\u0000 Lee',
+  }));
+  const [areas, serviceArea, contactName] = calls[0].params;
+  // The driver sends the list as a Postgres array literal.
+  const stored = Array.isArray(areas) ? areas : String(areas).replace(/^{|}$/g, '').split(',').filter(Boolean).map(item => item.replace(/^"|"$/g, ''));
+  assert.deepEqual(stored, ['dental']);
+  assert.doesNotMatch(serviceArea, /[<>]/);
+  assert.match(serviceArea, /Brooklyn/);
+  assert.equal(contactName, 'Pat Lee');
+});

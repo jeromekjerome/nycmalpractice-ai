@@ -197,9 +197,23 @@ app.post('/api/contact', limitContact, async (req, res) => {
 });
 
 // ─── Firm Registration ────────────────────────────────────────────────────────
+// Firm sign-up fields are later shown on the admin page: plain text of a sensible length. A firm name
+// never needs angle brackets, so they are refused outright.
+function signupProblem({ name, email, phone }) {
+  const cleanName = typeof name === 'string' ? name.trim() : '';
+  if (cleanName.length < 2 || cleanName.length > 120 || /[<>\u0000-\u001f\u007f]/.test(cleanName)) return 'Please enter the firm name (up to 120 characters).';
+  const cleanEmail = typeof email === 'string' ? email.trim() : '';
+  if (cleanEmail.length > 254 || !/^[^\s@<>"'()]+@[^\s@<>"'()]+\.[A-Za-z]{2,}$/.test(cleanEmail)) return 'Please enter a valid email address.';
+  const digits = typeof phone === 'string' ? phone.replace(/\D/g, '') : '';
+  if (digits.length < 10 || digits.length > 15) return 'Please enter a valid phone number.';
+  return null;
+}
+
 app.post('/api/firms/register', limitSignup, async (req, res) => {
   const { name, email, phone } = req.body;
   if (!name || !email || !phone) return res.status(400).json({ error: 'name, email, phone required' });
+  const problem = signupProblem({ name, email, phone });
+  if (problem) return res.status(400).json({ error: problem });
   try {
     const { firm, isNew } = await registerFirm({ name, email, phone });
     if (!isNew) {
@@ -426,7 +440,8 @@ app.post('/api/admin/firms/:id/send-link', async (req, res) => {
   const token = await createMagicLink(firm.id, { expiresInHours: 720 });
   const url   = `${APP_URL}/portal.html?token=${token}`;
   await sendPortalLinkEmail(firm, url);
-  res.json({ ok: true, url });
+  // The link goes only to the firm's own email; it is not handed back to the caller.
+  res.json({ ok: true });
 });
 
 // ─── Case Types ───────────────────────────────────────────────────────────────

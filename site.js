@@ -11,3 +11,6 @@ export const CONTACT_CONSENT_TEXT = "I agree that NYCMalpractice.ai may share my
 
 // The contact form is offered from the step where the AI offers a referral.
 export const CONTACT_FORM_FROM_STEP = 4;
+
+// The practice areas a firm can choose on the sign-up form and in the portal ('other' means every case type).
+export const PRACTICE_AREAS = Object.freeze(['surgical_error', 'misdiagnosis', 'medication_error', 'birth_injury', 'anesthesia_error', 'hospital_negligence', 'nursing_home', 'dental', 'other']);

@@ -153,18 +153,35 @@ export async function updateFirmSubscription(firmId, { stripeSubscriptionId, str
   `;
 }
 
-export async function recordDecline(firmId, isAuction) {
-  const firm = await getFirm(firmId);
-  if (!firm) return;
-  if (isAuction) {
-    const newCount = (firm.auction_decline_count || 0) + 1;
-    const suspendedUntil = newCount >= 3 ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) : null;
-    await sql`UPDATE firms SET auction_decline_count = ${newCount}, suspended_until = ${suspendedUntil} WHERE id = ${firmId}`;
-  } else {
-    await sql`UPDATE firms SET cold_decline_count = ${(firm.cold_decline_count || 0) + 1} WHERE id = ${firmId}`;
-  }
+// Declines in the last 30 days, which the refund and suspension rules count (Terms: "Declines are
+// counted over the preceding 30 days"). leads.declined_at is set on every decline, including the
+// automatic decline of a lead nobody answered.
+export async function recentDeclineCounts(firmId) {
+  const [row] = await sql`
+    SELECT count(*) FILTER (WHERE auction_id IS NOT NULL)::int AS auction,
+           count(*) FILTER (WHERE auction_id IS NULL)::int AS cold
+    FROM leads
+    WHERE firm_id = ${firmId} AND status = 'declined' AND declined_at > NOW() - INTERVAL '30 days'`;
+  return { auction: row?.auction || 0, cold: row?.cold || 0 };
 }
 
+// Called after a lead has been marked declined. The third auction decline within 30 days suspends the
+// firm for 30 days. An existing suspension is kept: a later decline used to lift it.
+export async function recordDecline(firmId, isAuction) {
+  const counts  = await recentDeclineCounts(firmId);
+  const suspend = isAuction && counts.auction >= 3;
+  await sql`
+    UPDATE firms
+    SET auction_decline_count = ${counts.auction}, cold_decline_count = ${counts.cold},
+        suspended_until = CASE WHEN ${suspend} THEN NOW() + INTERVAL '30 days' ELSE suspended_until END
+    WHERE id = ${firmId}`;
+}
+
+// Nightly: declines older than 30 days drop off the firm's counts. This used to set every firm's
+// counts to zero each night, so the escalating refund rules never escalated.
 export async function resetDeclineCounts() {
-  await sql`UPDATE firms SET auction_decline_count = 0, cold_decline_count = 0 WHERE created_at < NOW() - INTERVAL '30 days' OR auction_decline_count > 0 OR cold_decline_count > 0`;
+  await sql`
+    UPDATE firms SET
+      auction_decline_count = (SELECT count(*) FROM leads l WHERE l.firm_id = firms.id AND l.status = 'declined' AND l.auction_id IS NOT NULL AND l.declined_at > NOW() - INTERVAL '30 days'),
+      cold_decline_count    = (SELECT count(*) FROM leads l WHERE l.firm_id = firms.id AND l.status = 'declined' AND l.auction_id IS NULL AND l.declined_at > NOW() - INTERVAL '30 days')`;
 }

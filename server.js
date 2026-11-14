@@ -475,24 +475,19 @@ function verifyCron(req, res) {
 app.get('/api/cron', async (req, res) => {
   if (!verifyCron(req, res)) return;
   try {
-    const { closeAuction } = await import('./auction.js');
-    const { recordDecline, resetDeclineCounts } = await import('./firms.js');
+    const { closeAuction, declineOverdueLeads } = await import('./auction.js');
+    const { resetDeclineCounts } = await import('./firms.js');
 
     const expired = await sql`SELECT id FROM auctions WHERE status = 'open' AND closes_at < NOW()`;
     for (const row of expired) await closeAuction(row.id);
 
-    const overdue = await sql`SELECT id, firm_id, auction_id FROM leads WHERE status = 'pending' AND accept_deadline < NOW()`;
-    for (const lead of overdue) {
-      await sql`UPDATE leads SET status = 'declined' WHERE id = ${lead.id}`;
-      await recordDecline(lead.firm_id, !!lead.auction_id);
-    }
-
+    const declined = await declineOverdueLeads();
     await resetDeclineCounts();
 
     // Conversations past the privacy policy's 90 days are deleted (see retention.js).
     const { purgeExpiredConversations } = await import('./retention.js');
     const purged = await purgeExpiredConversations();
-    res.json({ ok: true, closed: expired.length, declined: overdue.length, purged });
+    res.json({ ok: true, closed: expired.length, declined, purged });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -511,13 +506,8 @@ app.get('/api/cron/close-auctions', async (req, res) => {
 app.get('/api/cron/overdue-leads', async (req, res) => {
   if (!verifyCron(req, res)) return;
   try {
-    const { recordDecline } = await import('./firms.js');
-    const overdue = await sql`SELECT id, firm_id, auction_id FROM leads WHERE status = 'pending' AND accept_deadline < NOW()`;
-    for (const lead of overdue) {
-      await sql`UPDATE leads SET status = 'declined' WHERE id = ${lead.id}`;
-      await recordDecline(lead.firm_id, !!lead.auction_id);
-    }
-    res.json({ declined: overdue.length });
+    const { declineOverdueLeads } = await import('./auction.js');
+    res.json({ declined: await declineOverdueLeads() });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

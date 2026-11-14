@@ -387,8 +387,8 @@ test('GET /api/cron with the cron secret closes auctions, declines overdue leads
     });
     const queries = world.calls.sql.map(call => call.query);
     assert.ok(queries.some(query => /FROM auctions WHERE status = 'open' AND closes_at < NOW\(\)/.test(query)), 'expired auctions were not looked up');
-    assert.ok(queries.some(query => /FROM leads WHERE status = 'pending' AND accept_deadline < NOW\(\)/.test(query)), 'overdue leads were not looked up');
-    assert.ok(queries.some(query => /UPDATE firms SET auction_decline_count = 0/.test(query)), 'decline counts were not reset');
+    assert.ok(queries.some(query => /^UPDATE leads SET status = 'declined', declined_at = NOW\(\) WHERE status = 'pending' AND accept_deadline < NOW\(\) RETURNING/.test(query)), 'overdue leads were not declined');
+    assert.ok(queries.some(query => /^UPDATE firms SET auction_decline_count = \(SELECT count\(\*\) FROM leads l WHERE l\.firm_id = firms\.id AND l\.status = 'declined' AND l\.auction_id IS NOT NULL AND l\.declined_at > NOW\(\) - INTERVAL '30 days'\)/.test(query)), 'decline counts were not brought up to date');
   } finally {
     await server.close();
   }
@@ -1228,4 +1228,113 @@ test('a firm that chose All Malpractice is offered every case type', async () =>
     return jsonResponse(EMPTY_ROWS);
   }, () => getActiveFirms('dental'));
   assert.match(calls[0], /'other' = ANY\(specializations\) OR \$1 = ANY\(specializations\)/);
+});
+
+// ─── Declines ─────────────────────────────────────────────────────────────────
+
+test('declines count over a rolling 30 days, and a suspension is never lifted by a later decline', async () => {
+  const { declineLead } = await import('../auction.js');
+  const { recordDecline } = await import('../firms.js');
+  const counts = [[1, 0], [3, 0]];   // before this decline, then after it
+  const calls = [];
+  const handler = async (url, init) => {
+    const { query, params } = JSON.parse(init.body);
+    const q = query.replace(/\s+/g, ' ').trim();
+    calls.push({ query: q, params });
+    if (/^SELECT \* FROM leads WHERE id/.test(q)) {
+      return rowsResponse([['id', INT], ['firm_id', INT], ['auction_id', INT], ['status', TEXT], ['price_paid', 1700], ['stripe_charge_id', TEXT]],
+        [['501', '7', '9', 'pending', '200.00', null]]);
+    }
+    if (/FROM leads WHERE firm_id = \$1 AND status = 'declined' AND declined_at > NOW\(\) - INTERVAL '30 days'/.test(q)) {
+      const [auction, cold] = counts.length > 1 ? counts.shift() : counts[0];
+      return rowsResponse([['auction', INT], ['cold', INT]], [[String(auction), String(cold)]]);
+    }
+    if (/^UPDATE leads SET status = 'declined', declined_at = NOW\(\) WHERE id = \$1 AND status = 'pending' RETURNING id/.test(q)) {
+      return rowsResponse([['id', INT]], [['501']]);
+    }
+    return jsonResponse(EMPTY_ROWS);
+  };
+
+  // One auction decline earlier this month, so this is the second: a 25% refund.
+  const result = await withOutboundHttp(handler, () => declineLead(501, 7));
+  assert.deepEqual(result, { ok: true, refundAmount: 50 });
+  const marked = calls.findIndex(call => /^UPDATE leads SET status = 'declined', declined_at = NOW\(\) WHERE id = \$1 AND status = 'pending'/.test(call.query));
+  const refunded = calls.findIndex(call => /^UPDATE leads SET refund_amount/.test(call.query));
+  assert.ok(marked >= 0, 'the decline was not dated');
+  assert.ok(refunded > marked, 'the refund was recorded before the lead was claimed');
+  // With three auction declines in 30 days the firm is suspended; the update keeps any earlier suspension.
+  const firmUpdate = calls.find(call => /^UPDATE firms SET auction_decline_count/.test(call.query));
+  assert.match(firmUpdate.query, /suspended_until = CASE WHEN \$3 THEN NOW\(\) \+ INTERVAL '30 days' ELSE suspended_until END/);
+  assert.deepEqual(firmUpdate.params.slice(0, 3).map(String), ['3', '0', 'true']);
+
+  // A cold decline never suspends, and leaves an existing suspension in place.
+  const coldCalls = [];
+  await withOutboundHttp(async (url, init) => {
+    const { query, params } = JSON.parse(init.body);
+    coldCalls.push({ query: query.replace(/\s+/g, ' ').trim(), params });
+    if (/FROM leads WHERE firm_id/.test(query)) return rowsResponse([['auction', INT], ['cold', INT]], [['3', '1']]);
+    return jsonResponse(EMPTY_ROWS);
+  }, () => recordDecline(7, false));
+  const coldUpdate = coldCalls.find(call => /^UPDATE firms SET auction_decline_count/.test(call.query));
+  assert.equal(String(coldUpdate.params[2]), 'false');
+});
+
+test('a lead nobody answers within 3 days is declined automatically and dated', async () => {
+  const calls = [];
+  const handler = async (url, init) => {
+    const { query, params } = JSON.parse(init.body);
+    const q = query.replace(/\s+/g, ' ').trim();
+    calls.push({ query: q, params });
+    if (/^UPDATE leads SET status = 'declined', declined_at = NOW\(\) WHERE status = 'pending' AND accept_deadline < NOW\(\) RETURNING id, firm_id, auction_id/.test(q)) {
+      return rowsResponse([['id', INT], ['firm_id', INT], ['auction_id', INT]], [['501', '7', null]]);
+    }
+    if (/FROM leads WHERE firm_id/.test(q)) return rowsResponse([['auction', INT], ['cold', INT]], [['0', '1']]);
+    return jsonResponse(EMPTY_ROWS);
+  };
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(handler, async () => {
+      const response = await fetch(`${server.baseUrl}/api/cron`, { headers: { authorization: `Bearer ${process.env.CRON_SECRET}` } });
+      assert.equal(response.status, 200);
+      assert.equal((await response.json()).declined, 1);
+    });
+  } finally {
+    await server.close();
+  }
+  assert.ok(calls.some(call => /^UPDATE firms SET auction_decline_count/.test(call.query)), 'the automatic decline was not counted against the firm');
+  assert.ok(!calls.some(call => /refund/i.test(call.query)), 'an unanswered lead was refunded');
+});
+
+test('the Terms state the decline rules the code applies, and the site describes its AI accurately', () => {
+  const plain = name => readFileSync(new URL(`../public/${name}`, import.meta.url), 'utf8').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+  const terms = plain('terms.html');
+  assert.match(terms, /Declines are counted over the preceding 30 days/);
+  assert.match(terms, /declined automatically, counts as a decline, and is not refunded/);
+  for (const name of ['about.html', 'disclaimer.html']) {
+    const text = plain(name);
+    assert.doesNotMatch(text, /GPT-4o|trained on New York|Every response is grounded/, `${name} overstates what the AI is`);
+  }
+});
+
+test('a lead is answered once: a second decline or a late accept changes nothing and refunds nothing', async () => {
+  const { declineLead, acceptLead } = await import('../auction.js');
+  const calls = [];
+  // The lead still reads as pending, but another request claims it first, so the conditional UPDATE finds no row.
+  const handler = async (url, init) => {
+    const { query, params } = JSON.parse(init.body);
+    const q = query.replace(/\s+/g, ' ').trim();
+    calls.push({ query: q, params });
+    if (/^SELECT \* FROM leads WHERE id/.test(q)) {
+      return rowsResponse([['id', INT], ['firm_id', INT], ['auction_id', INT], ['status', TEXT], ['price_paid', 1700], ['stripe_charge_id', TEXT]],
+        [['501', '7', '9', 'pending', '200.00', 'pi_test']]);
+    }
+    if (/FROM leads WHERE firm_id/.test(q)) return rowsResponse([['auction', INT], ['cold', INT]], [['0', '0']]);
+    return jsonResponse(EMPTY_ROWS);
+  };
+  await withOutboundHttp(handler, async () => {
+    assert.deepEqual(await declineLead(501, 7), { ok: false, error: 'Lead already answered' });
+    assert.deepEqual(await acceptLead(501, 7), { ok: false, error: 'Lead already answered' });
+  });
+  assert.ok(!calls.some(call => /refund_amount|UPDATE firms/.test(call.query)), 'a lead answered twice was refunded or counted twice');
+  assert.ok(calls.some(call => /^UPDATE leads SET status = 'accepted' WHERE id = \$1 AND status = 'pending' RETURNING id/.test(call.query)));
 });

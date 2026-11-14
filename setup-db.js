@@ -136,6 +136,7 @@ async function setup() {
   `;
   // A cold lead has no auction row, so the lead itself keeps what the firm bought.
   await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_data JSONB`;
+  await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS declined_at TIMESTAMPTZ`;  // decline counts look back 30 days from here
 
   console.log('Database setup complete.');
 }

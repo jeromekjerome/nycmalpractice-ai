@@ -16,7 +16,7 @@ import OpenAI from 'openai';
 import { buildModelList, probeAllModelChains } from './openaiModelFailover.js';
 import { APP_URL, CONTACT_CONSENT_TEXT, CONTACT_FORM_FROM_STEP } from './site.js';
 import { mentionsPublicHospital, deadlineNotices } from './deadlines.js';
-import { toPublicEvaluation, isHitlVerificationComplete, loadRubric, loadCurrentLawNotes } from './gatekeeper.js';
+import { toPublicEvaluation, isHitlVerificationComplete, HITL_ATTESTATION_KEYS, loadRubric, loadCurrentLawNotes } from './gatekeeper.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -241,7 +241,9 @@ app.post('/api/contact', limitContact, async (req, res) => {
         const leadData = {
           caseType: conv.case_type, mode: conv.mode, history: conv.history,
           preview: score.preview, score: score.score, dimensions: score.dimensions, scoredAt: score.scoredAt || null,
-          contact: { name: cleanName, phone: phoneNumber, bestTime: cleanTime || null, consentedAt: saved?.contact_consent_at || null },
+          // The exact consent travels with the lead, which is kept for 3 years: the conversation that also records
+          // it is deleted after 90 days.
+          contact: { name: cleanName, phone: phoneNumber, bestTime: cleanTime || null, consentedAt: saved?.contact_consent_at || null, consentText: CONTACT_CONSENT_TEXT },
           // The gate's full audit of the last reply — every attempt, the citation audit and the
           // checklist for the supervising attorney — for the reviewing firm (lead.html).
           evaluation: conv.gate_audit || null,
@@ -450,9 +452,12 @@ app.post('/api/leads/:id/accept', async (req, res) => {
   const tokenData = await validateToken(token);
   if (!tokenData) return res.status(401).json({ error: 'Invalid token' });
   if (!linkOpensLead(tokenData, req.params.id)) return res.status(403).json({ error: WRONG_LEAD });
-  const result = await acceptLead(req.params.id, tokenData.firm_id);
+  // The supervising attorney's checks are stored on the lead. They used to be only logged, and the host keeps
+  // logs for about an hour.
+  const attestation = { ...Object.fromEntries(HITL_ATTESTATION_KEYS.map(key => [key, true])), attestedAt: new Date().toISOString() };
+  const result = await acceptLead(req.params.id, tokenData.firm_id, attestation);
   if (result.ok) {
-    console.log(`[HITL] Lead ${req.params.id} accepted by firm ${tokenData.firm_id} with attorney attestation ${JSON.stringify(hitlVerification)} at ${new Date().toISOString()}`);
+    console.log(`[HITL] Lead ${req.params.id} accepted by firm ${tokenData.firm_id} with the supervising attorney's three checks`);
   }
   res.json(result);
 });
@@ -604,9 +609,9 @@ app.get('/api/cron', async (req, res) => {
     const declined = await declineOverdueLeads();
     await resetDeclineCounts();
 
-    // Conversations past the privacy policy's 90 days are deleted (see retention.js).
-    const { purgeExpiredConversations } = await import('./retention.js');
-    const purged = await purgeExpiredConversations();
+    // The privacy policy's retention periods: conversations after 90 days, lead records after 3 years (retention.js).
+    const { purgeExpiredConversations, purgeExpiredLeadRecords } = await import('./retention.js');
+    const purged = { ...(await purgeExpiredConversations()), ...(await purgeExpiredLeadRecords()) };
     res.json({ ok: true, closed, declined, purged });
   } catch (err) {
     res.status(500).json({ error: err.message });

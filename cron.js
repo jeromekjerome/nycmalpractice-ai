@@ -4,7 +4,7 @@ import cron from 'node-cron';
 import { neon } from '@neondatabase/serverless';
 import { closeExpiredAuctions, declineOverdueLeads, reportStuckAuctions } from './auction.js';
 import { resetDeclineCounts } from './firms.js';
-import { purgeExpiredConversations } from './retention.js';
+import { purgeExpiredConversations, purgeExpiredLeadRecords } from './retention.js';
 
 const sql = neon(process.env.DATABASE_URL);
 
@@ -28,6 +28,8 @@ export function startCronJobs() {
     catch (err) { console.error('Decline reset cron error:', err.message); }
     try { await purgeExpiredConversations(); }
     catch (err) { console.error('Conversation purge cron error:', err.message); }
+    try { await purgeExpiredLeadRecords(); }
+    catch (err) { console.error('Lead record purge cron error:', err.message); }
   });
 
   console.log('Cron jobs started');

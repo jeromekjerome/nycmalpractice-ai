@@ -75,7 +75,7 @@ const LEAD = {
       { role: 'user', content: 'My scan was misread. <img src=x onerror="window.__xss=1">' },
       { role: 'assistant', content: 'I am so sorry. When did you learn about it?' },
     ],
-    contact: { name: 'Jane Roe', phone: '5551234567', bestTime: 'mornings', consentedAt: '2026-11-14T10:00:00.000Z' },
+    contact: { name: 'Jane Roe', phone: '5551234567', bestTime: 'mornings', consentedAt: '2026-11-14T10:00:00.000Z', consentText: 'I agree to be contacted by phone.' },
     evaluation: {
       domain_id: 'nyc_malpractice_personal', gate_status: 'PASSED', evaluator: 'llm', first_pass_compliant: false, final_attempt_number: 2,
       initial_coaching: { gate_status: 'BLOCKED', summary: 'Attempt 1 was BLOCKED on PROH-MM-01 <b>bold</b>.' },
@@ -104,6 +104,7 @@ test('the lead page shows the contact details and the conversation, and accepts 
   await expect(page.locator('#contactPhone a')).toHaveAttribute('href', 'tel:+15551234567');
   await expect(page.locator('#contactTime')).toHaveText('mornings');
   await expect(page.locator('#consentNote')).toContainText('agreed to be contacted');
+  await expect(page.locator('#consentNote')).toContainText('The wording they agreed to: “I agree to be contacted by phone.”');
   await expect(page.locator('#preview')).toHaveText('Delayed cancer diagnosis after a misread scan.');
   // The client's own words are shown as text.
   await expect(page.locator('#transcript')).toContainText('<img src=x onerror="window.__xss=1">');

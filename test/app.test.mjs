@@ -1246,13 +1246,18 @@ test('declines count over a rolling 30 days, and a suspension is never lifted by
   const { recordDecline } = await import('../firms.js');
   const counts = [[1, 0], [3, 0]];   // before this decline, then after it
   const calls = [];
+  const refunds = [];
   const handler = async (url, init) => {
+    if (url.startsWith('https://api.stripe.com/')) {
+      refunds.push({ url, body: new URLSearchParams(String(init.body)), key: new Headers(init.headers).get('idempotency-key') });
+      return jsonResponse({ id: 're_1', object: 'refund', amount: 5000, status: 'succeeded' });
+    }
     const { query, params } = JSON.parse(init.body);
     const q = query.replace(/\s+/g, ' ').trim();
     calls.push({ query: q, params });
     if (/^SELECT \* FROM leads WHERE id/.test(q)) {
       return rowsResponse([['id', INT], ['firm_id', INT], ['auction_id', INT], ['status', TEXT], ['price_paid', 1700], ['stripe_charge_id', TEXT]],
-        [['501', '7', '9', 'pending', '200.00', null]]);
+        [['501', '7', '9', 'pending', '200.00', 'pi_test']]);
     }
     if (/FROM leads WHERE firm_id = \$1 AND status = 'declined' AND declined_at > NOW\(\) - INTERVAL '30 days'/.test(q)) {
       const [auction, cold] = counts.length > 1 ? counts.shift() : counts[0];
@@ -1267,6 +1272,12 @@ test('declines count over a rolling 30 days, and a suspension is never lifted by
   // One auction decline earlier this month, so this is the second: a 25% refund.
   const result = await withOutboundHttp(handler, () => declineLead(501, 7));
   assert.deepEqual(result, { ok: true, refundAmount: 50 });
+  // The refund was issued in Stripe, once, against the lead's payment.
+  assert.equal(refunds.length, 1);
+  assert.match(refunds[0].url, /\/v1\/refunds$/);
+  assert.equal(refunds[0].body.get('payment_intent'), 'pi_test');
+  assert.equal(refunds[0].body.get('amount'), '5000');
+  assert.equal(refunds[0].key, 'refund-lead-501');
   const marked = calls.findIndex(call => /^UPDATE leads SET status = 'declined', declined_at = NOW\(\) WHERE id = \$1 AND status = 'pending'/.test(call.query));
   const refunded = calls.findIndex(call => /^UPDATE leads SET refund_amount/.test(call.query));
   assert.ok(marked >= 0, 'the decline was not dated');
@@ -2178,4 +2189,101 @@ test('a lead is accepted only with all three supervising-attorney checks confirm
   } finally {
     await server.close();
   }
+});
+
+// ─── Stripe: webhook, refunds ─────────────────────────────────────────────────
+
+test('the Stripe webhook switches on a paid subscription, and refuses a forged call', async () => {
+  const { default: Stripe } = await import('stripe');
+  const payload = JSON.stringify({
+    id: 'evt_1', object: 'event', type: 'checkout.session.completed',
+    data: { object: { id: 'cs_1', object: 'checkout.session', subscription: 'sub_1', metadata: { firmId: '7' } } },
+  });
+  const signature = new Stripe('sk_test_123').webhooks.generateTestHeaderString({ payload, secret: process.env.STRIPE_WEBHOOK_SECRET });
+  const sqlCalls = [];
+  const stripeCalls = [];
+  const handler = async (url, init) => {
+    if (url.startsWith('https://api.stripe.com/')) {
+      stripeCalls.push(url);
+      return jsonResponse({ id: 'sub_1', object: 'subscription', default_payment_method: { id: 'pm_1', object: 'payment_method' } });
+    }
+    const { query, params } = JSON.parse(init.body);
+    sqlCalls.push({ query: query.replace(/\s+/g, ' ').trim(), params });
+    return jsonResponse(EMPTY_ROWS);
+  };
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(handler, async () => {
+      const post = signatureHeader => fetch(`${server.baseUrl}/api/webhooks/stripe`, {
+        method: 'POST', headers: { 'content-type': 'application/json', 'stripe-signature': signatureHeader }, body: payload,
+      });
+      const forged = await post('t=1,v1=forged');
+      assert.equal(forged.status, 400, 'a forged webhook call was accepted');
+      assert.equal(sqlCalls.length, 0, 'a forged webhook call changed a firm');
+      const real = await post(signature);
+      assert.equal(real.status, 200);
+    });
+  } finally {
+    await server.close();
+  }
+  assert.ok(stripeCalls.some(url => url.includes('/v1/subscriptions/sub_1')), 'the subscription card was not looked up');
+  const activation = sqlCalls.find(call => /^UPDATE firms/.test(call.query) && /subscription_active/.test(call.query));
+  assert.ok(activation, 'the firm was not switched on');
+  assert.ok(activation.params.includes('pm_1') && activation.params.includes('sub_1'));
+});
+
+test('a refund Stripe refuses is not recorded as paid, and a lead never charged gets no refund', async () => {
+  const { declineLead } = await import('../auction.js');
+  const run = async (chargeId, stripeStatus) => {
+    const calls = [];
+    const stripe = [];
+    const logs = [];
+    const saved = { log: console.log, warn: console.warn, error: console.error };
+    console.log = console.warn = console.error = (...parts) => logs.push(parts.join(' '));
+    try {
+      const result = await withoutMail(() => withOutboundHttp(async (url, init) => {
+        if (url.startsWith('https://api.stripe.com/')) {
+          stripe.push(url);
+          return jsonResponse({ error: { type: 'invalid_request_error', message: 'Charge has already been refunded.' } }, stripeStatus);
+        }
+        const { query, params } = JSON.parse(init.body);
+        const q = query.replace(/\s+/g, ' ').trim();
+        calls.push({ query: q, params });
+        if (/^SELECT \* FROM leads WHERE id/.test(q)) {
+          return rowsResponse([['id', INT], ['firm_id', INT], ['auction_id', INT], ['status', TEXT], ['price_paid', 1700], ['stripe_charge_id', TEXT]],
+            [['502', '7', null, 'pending', '25.00', chargeId]]);
+        }
+        if (/^UPDATE leads SET status = 'declined'/.test(q)) return rowsResponse([['id', INT]], [['502']]);
+        return jsonResponse(EMPTY_ROWS);
+      }, () => declineLead(502, 7)));
+      return { result, calls, stripe, logs };
+    } finally {
+      Object.assign(console, saved);
+    }
+  };
+
+  // Stripe refuses: nothing is recorded as refunded, the firm is told it is pending, and the operator is told.
+  const failed = await run('pi_test', 400);
+  assert.deepEqual(failed.result, { ok: true, refundAmount: 0, refundPending: 25 });
+  const recorded = failed.calls.find(call => /^UPDATE leads SET refund_amount/.test(call.query));
+  assert.equal(String(recorded.params[0]), '0');
+  assert.ok(failed.logs.some(line => /Refund failed for lead #502/.test(line)), 'the operator was not told about the failed refund');
+
+  // Never charged: no refund is due and Stripe is not asked.
+  const free = await run(null, 200);
+  assert.deepEqual(free.result, { ok: true, refundAmount: 0 });
+  assert.equal(free.stripe.length, 0);
+});
+
+test('checkout sends a paying firm back to the sign-up page at this site address', async () => {
+  const { createSubscriptionCheckout } = await import('../stripe.js');
+  const { APP_URL } = await import('../site.js');
+  let body = '';
+  await withOutboundHttp(async (url, init) => {
+    body = String(init.body);
+    return jsonResponse({ id: 'cs_1', object: 'checkout.session', url: 'https://checkout.stripe.com/c/cs_1' });
+  }, () => createSubscriptionCheckout({ stripeCustomerId: 'cus_1', firmId: 7 }));
+  const params = new URLSearchParams(body);
+  assert.equal(params.get('success_url'), `${APP_URL}/register.html?subscribed=1`);
+  assert.equal(params.get('cancel_url'), `${APP_URL}/register.html`);
 });

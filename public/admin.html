@@ -225,6 +225,9 @@
       return '<span class="badge b-inactive">Not placed</span>';
     }
 
+    // An auction still open or closing may yet place the request, so it is not delivered by hand meanwhile.
+    const runningAuction = r => (r.auctions || []).find(a => a.status === 'open' || a.status === 'closing');
+
     function renderRequests(requests) {
       const tbody = document.getElementById('requestsBody');
       if (!requests.length) { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:1.5rem">No contact requests yet.</td></tr>'; return; }
@@ -244,7 +247,8 @@
           <td>
             <div class="stack">
               <button class="action-btn" data-action="transcript" data-session="${esc(r.session_id)}">Conversation</button>
-              <button class="action-btn primary" data-action="deliver-form" data-session="${esc(r.session_id)}">Deliver to a firm…</button>
+              ${runningAuction(r) ? `<span class="muted-note">Auction #${esc(runningAuction(r).id)} is ${esc(runningAuction(r).status)}: cancel it below to deliver by hand.</span>` : `
+              <button class="action-btn primary" data-action="deliver-form" data-session="${esc(r.session_id)}">Deliver to a firm…</button>`}
               <div class="deliver-form" data-form="${esc(r.session_id)}" style="display:none">
                 ${firmOptions ? `<select aria-label="Firm">${firmOptions}</select>
                 <input type="number" min="0" max="5000" step="1" value="0" aria-label="Price in dollars">

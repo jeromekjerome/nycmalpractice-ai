@@ -102,6 +102,7 @@
       <div id="subscribeSetup" style="display:none">
         <p class="setup-note">Start your subscription ($199 a month) to receive auction invitations and leads. You are charged for each lead you receive.</p>
         <button class="save-btn" id="subscribeBtn" onclick="startSubscription()">Start Subscription →</button>
+        <p class="setup-note" id="subscribePending" style="display:none;margin-bottom:0">Thank you. Your payment is being confirmed: reload this page in a minute to see your subscription active.</p>
       </div>
       <p class="setup-note" id="paymentDueNote" style="display:none;margin-bottom:0">Your last subscription payment did not go through, so leads are paused. Update your card under Manage Billing.</p>
     </div>
@@ -228,8 +229,9 @@
       if (!phone) { showMessage('Enter your mobile number.', true); return; }
       return withButton('phoneBtn', async () => {
         const { res, data } = await postForFirm('/api/firms/phone', { phone });
+        // The number on file, even when no code could be sent yet (the reply says why).
+        if (data.phone) document.getElementById('phoneOnFile').textContent = data.phone;
         if (!res.ok) { showMessage(data.error || 'The number could not be changed.', true); return; }
-        document.getElementById('phoneOnFile').textContent = data.phone || phone;
         document.getElementById('phoneChange').style.display = 'none';
         showMessage('Number saved. We texted a code to it.');
       });
@@ -288,6 +290,10 @@
         document.getElementById('setupPanel').style.display     = needsPhone || needsSubscription || state.paymentDue ? 'block' : 'none';
         document.getElementById('phoneSetup').style.display     = needsPhone ? 'block' : 'none';
         document.getElementById('subscribeSetup').style.display = needsSubscription ? 'block' : 'none';
+        // Just back from paying: Stripe's confirmation may not have arrived yet, and a second checkout would bill twice.
+        const justPaid = !!params.get('subscribed');
+        document.getElementById('subscribeBtn').style.display     = justPaid ? 'none' : '';
+        document.getElementById('subscribePending').style.display = justPaid ? 'block' : 'none';
         document.getElementById('paymentDueNote').style.display = state.paymentDue ? 'block' : 'none';
         document.getElementById('phoneOnFile').textContent      = firm.phone || 'your phone';
         const cardNotice = document.getElementById('cardNotice');

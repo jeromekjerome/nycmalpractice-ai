@@ -72,7 +72,11 @@ test('the operator reads a contact request, delivers it by hand and cancels a st
     counts: { total: 1, active: 1 }, leadCounts: { total: 2 },
   })));
   await mockOperations(page, {
-    requests: [{ session_id: session, case_type: 'misdiagnosis', mode: 'estate', name: XSS, phone: '5551234567', email: null, contact_consent_at: '2026-11-14T10:00:00Z', tier: 'hot', score: '84', leads: [], auctions: [{ id: 5, status: 'closing' }] }],
+    requests: [
+      { session_id: session, case_type: 'misdiagnosis', mode: 'estate', name: XSS, phone: '5551234567', email: null, contact_consent_at: '2026-11-14T10:00:00Z', tier: 'hot', score: '84', leads: [], auctions: [{ id: 4, status: 'cancelled' }] },
+      // Its auction is still closing: not delivered by hand meanwhile.
+      { session_id: 'sess-running', case_type: 'dental', mode: 'personal', name: 'Sam Doe', phone: '5559876543', email: null, contact_consent_at: '2026-11-14T09:00:00Z', tier: 'hot', score: '81', leads: [], auctions: [{ id: 5, status: 'closing' }] },
+    ],
     auctions: [{ id: 5, case_type: 'misdiagnosis', tier: 'hot', status: 'closing', bid_count: 0, current_bid: '200.00', closes_at: '2026-11-14T12:00:00Z' }],
     leads: [{ id: 41, firm_id: 12, firm_name: 'Roe & Partners', case_type: 'dental', tier: 'cold', price_paid: '25.00', status: 'declined', refund_amount: '25.00', decline_reason: 'unreachable', created_at: '2026-11-13T10:00:00Z' }],
   });
@@ -89,18 +93,22 @@ test('the operator reads a contact request, delivers it by hand and cancels a st
 
   const requests = page.locator('#requestsBody');
   await expect(requests).toContainText(XSS);
-  await expect(requests).toContainText('Auction #5: closing');
+  await expect(requests).toContainText('Auction #4: cancelled');
+  const running = requests.locator('tr', { hasText: 'Sam Doe' });
+  await expect(running).toContainText('Auction #5 is closing: cancel it below to deliver by hand.');
+  await expect(running.getByRole('button', { name: 'Deliver to a firm…' })).toHaveCount(0);
   await expect(page.locator('#leadsBody')).toContainText('Could not reach the client');
   await expect(page.locator('#firmsBody')).toContainText('2 leads · $50.00 net');
   await expect(page.locator('#firmsBody')).toContainText('Stripe: past_due');
 
-  await requests.getByRole('button', { name: 'Conversation' }).click();
+  const hostile = requests.locator('tr').first();
+  await hostile.getByRole('button', { name: 'Conversation' }).click();
   await expect(page.locator('#transcriptBody')).toContainText(XSS + ' My mother was misdiagnosed.');
   await page.locator('#transcriptModal').getByRole('button', { name: 'Close' }).click();
 
-  await requests.getByRole('button', { name: 'Deliver to a firm…' }).click();
-  await requests.locator('.deliver-form input').fill('40');
-  await requests.getByRole('button', { name: 'Deliver', exact: true }).click();
+  await hostile.getByRole('button', { name: 'Deliver to a firm…' }).click();
+  await hostile.locator('.deliver-form input').fill('40');
+  await hostile.getByRole('button', { name: 'Deliver', exact: true }).click();
   await expect.poll(() => delivered.length).toBe(1);
   expect(delivered[0].body).toEqual({ firmId: 12, price: 40 });
   expect(decodeURIComponent(new URL(delivered[0].url).pathname)).toBe(`/api/admin/requests/${session}/deliver`);

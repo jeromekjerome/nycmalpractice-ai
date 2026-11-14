@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Jerome W. Dewald. All rights reserved.
 import Stripe from 'stripe';
-import { APP_URL } from './site.js';
+import { APP_URL, APP_ID } from './site.js';
 
 // Requests go through fetch, so the tests can answer them offline.
 let client = null;
@@ -31,9 +31,10 @@ export async function createSubscriptionCheckout({ stripeCustomerId, firmId, fro
     // The site address has a default (site.js); an unset APP_URL made Stripe refuse the checkout.
     success_url: `${APP_URL}${returns.success}`,
     cancel_url:  `${APP_URL}${returns.cancel}`,
-    metadata: { firmId: String(firmId) },
+    // The app is named too (APP_ID), so another app sharing the Stripe account ignores this checkout.
+    metadata: { firmId: String(firmId), app: APP_ID },
     client_reference_id: String(firmId),
-    subscription_data: { metadata: { firmId: String(firmId) } },
+    subscription_data: { metadata: { firmId: String(firmId), app: APP_ID } },
   });
 }
 
@@ -92,5 +93,13 @@ export async function createRefund({ paymentIntentId, amountDollars, idempotency
 // the firm id on the subscription as well as on the checkout session).
 export async function getSubscriptionDetails(subscriptionId) {
   const sub = await getStripe().subscriptions.retrieve(subscriptionId, { expand: ['default_payment_method'] });
-  return { paymentMethodId: sub.default_payment_method?.id || null, firmId: sub.metadata?.firmId || null, status: sub.status || null };
+  return { paymentMethodId: sub.default_payment_method?.id || null, firmId: sub.metadata?.firmId || null, status: sub.status || null, app: sub.metadata?.app || null };
+}
+
+// A subscription the customer already has that is not over: checkout is refused while one exists, so a firm back
+// from paying (before Stripe's event has switched it on) cannot start a second $199 subscription.
+const LIVE_SUBSCRIPTION = new Set(['active', 'trialing', 'past_due', 'unpaid', 'incomplete']);
+export async function liveSubscription(stripeCustomerId) {
+  const subs = await getStripe().subscriptions.list({ customer: stripeCustomerId, status: 'all', limit: 20 });
+  return (subs?.data || []).find(sub => LIVE_SUBSCRIPTION.has(sub.status)) || null;
 }

@@ -152,6 +152,8 @@ async function setup() {
   await sql`ALTER TABLE user_interactions ADD COLUMN IF NOT EXISTS outcome TEXT`;         // ok | slow | error
   await sql`ALTER TABLE user_interactions ADD COLUMN IF NOT EXISTS latency_ms INT`;
   await sql`ALTER TABLE user_interactions ADD COLUMN IF NOT EXISTS gate_status TEXT`;     // the gate's verdict on the reply
+  await sql`CREATE INDEX IF NOT EXISTS idx_interactions_created ON user_interactions(created_at)`;  // the failure checks and the daily summary
+  await sql`ALTER TABLE phone_codes ADD COLUMN IF NOT EXISTS phone TEXT`;                 // the number a code was sent to; it verifies only that number
   // Each run of the nightly job, which /health/deep reads.
   await sql`
     CREATE TABLE IF NOT EXISTS job_runs (

@@ -119,3 +119,24 @@ test('the portal shows a declined card and a payment due, and opens again on ret
   await expect(page.locator('#statStatus')).toHaveText('Payment due');
   expect(asked).toEqual(['portal-token', 'portal-token']);
 });
+
+test('back from paying, before Stripe confirms it, the portal does not offer a second subscription', async ({ page }) => {
+  await page.route(PORTAL_DATA, route => route.fulfill(json({ firm: portalFirm({ phone_verified: true, stripe_customer_id: 'cus_7' }), leads: [] })));
+  await page.goto('/portal.html?token=portal-token&subscribed=1');
+  await expect(page.locator('#statStatus')).toHaveText('Not subscribed');
+  await expect(page.locator('#subscribePending')).toBeVisible();
+  await expect(page.locator('#subscribeBtn')).toBeHidden();
+});
+
+test('a changed number is shown even when no code can be sent to it yet', async ({ page }) => {
+  await page.route('**/api/firms/register', route => route.fulfill(json({ firmId: 7, isNew: true, phoneVerified: false, registrationToken: 'reg-token' })));
+  await page.route('**/api/firms/phone', route => route.fulfill({ status: 429, contentType: 'application/json',
+    body: JSON.stringify({ error: 'Your number was saved. Please wait a minute before requesting another code.', phone: '+12125550199' }) }));
+  await page.goto('/register.html');
+  await fillStepOne(page);
+  await page.locator('#step2 .code-hint a', { hasText: 'Change it' }).click();
+  await page.locator('#newPhone').fill('212 555 0199');
+  await page.locator('#phoneBtn').click();
+  await expect(page.locator('#step2 .reg-sub')).toHaveText('Your number is now +12125550199. Send a new code when you can.');
+  await expect(page.locator('#step2Error')).toContainText('Please wait a minute');
+});

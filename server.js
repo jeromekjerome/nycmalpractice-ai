@@ -12,10 +12,10 @@ import { registerFirm, sendVerificationCode, verifyPhoneCode, validateToken, upd
 import { rateLimit } from './rate-limit.js';
 import { alertOperatorOnce, recordInteraction, deepHealth, runSteps, recordJobRun, reportFailedSteps, sendDailyDigest } from './operations.js';
 import nodemailer from 'nodemailer';
-import { createSubscriptionCheckout, createPortalSession, constructWebhookEvent, getSubscriptionDetails, getCustomerCard } from './stripe.js';
+import { createSubscriptionCheckout, createPortalSession, constructWebhookEvent, getSubscriptionDetails, getCustomerCard, liveSubscription } from './stripe.js';
 import OpenAI from 'openai';
 import { buildModelList, probeAllModelChains } from './openaiModelFailover.js';
-import { APP_URL, CONTACT_CONSENT_TEXT, CONTACT_FORM_FROM_STEP } from './site.js';
+import { APP_URL, APP_ID, CONTACT_CONSENT_TEXT, CONTACT_FORM_FROM_STEP } from './site.js';
 import { mentionsPublicHospital, deadlineNotices } from './deadlines.js';
 import { toPublicEvaluation, isHitlVerificationComplete, HITL_ATTESTATION_KEYS, loadRubric, loadCurrentLawNotes } from './gatekeeper.js';
 
@@ -432,15 +432,18 @@ app.post('/api/firms/phone', limitTexts, async (req, res) => {
   if (!(await ownsRegistration(token, firmId))) return res.status(401).json({ error: REGISTRATION_EXPIRED });
   const digits = typeof phone === 'string' ? phone.replace(/\D/g, '') : '';
   if (digits.length < 10 || digits.length > 15) return res.status(400).json({ error: 'Please enter a valid phone number.' });
+  let changed = null;
   try {
-    const changed = await changeUnverifiedPhone(firmId, phone);
+    changed = await changeUnverifiedPhone(firmId, phone);
     if (!changed) return res.status(409).json({ error: 'Your phone number is already verified.' });
     await sendVerificationCode(firmId);
     res.json({ ok: true, phone: changed.phone });
   } catch (err) {
-    if (err instanceof VerificationLimitError) return res.status(429).json({ error: err.message });
+    // The number may have changed even though no code went out; the page shows the number now on file.
+    const saved = changed ? { phone: changed.phone } : {};
+    if (err instanceof VerificationLimitError) return res.status(429).json({ error: `Your number was saved. ${err.message}`, ...saved });
     console.error('Error in /api/firms/phone:', err);
-    res.status(502).json({ error: 'The number was saved, but the code could not be sent. Check that it is a mobile number and try again.' });
+    res.status(502).json({ error: changed ? 'The number was saved, but the code could not be sent. Check that it is a mobile number and try again.' : 'The number could not be saved. Please try again.', ...saved });
   }
 });
 
@@ -461,6 +464,13 @@ app.post('/api/billing/checkout', async (req, res) => {
   }
   try {
     const stripeCustomerId = await ensureStripeCustomer(firm);
+    // Stripe may already hold a subscription that its event has not yet switched on (a firm back from paying).
+    const live = firm.stripe_customer_id ? await liveSubscription(stripeCustomerId) : null;
+    if (live) {
+      return res.status(409).json({ error: live.status === 'active' || live.status === 'trialing'
+        ? 'Your subscription is already in place. It will show as active here within a minute.'
+        : 'Your firm already has a subscription with a payment due. Update your card under Manage Billing.' });
+    }
     const session = await createSubscriptionCheckout({ stripeCustomerId, firmId: firm.id, from: from === 'portal' ? 'portal' : 'register' });
     res.json({ url: session.url });
   } catch (err) { serverError(req, res, err); }
@@ -491,8 +501,16 @@ app.post('/api/webhooks/stripe', async (req, res) => {
         // created before this change named it only on the subscription, which this event does not carry.
         const details = await getSubscriptionDetails(session.subscription);
         const firmId  = session.metadata?.firmId || session.client_reference_id || details.firmId;
-        if (firmId) {
+        // Another app's checkout, on a Stripe account the suite shares: its firm number means another firm here.
+        const app = session.metadata?.app || details.app;
+        if (app && app !== APP_ID) {
+          console.log(`Checkout session ${session.id} belongs to ${app}; ignored`);
+        } else if (firmId) {
           const stripeCustomerId = typeof session.customer === 'string' ? session.customer : (session.customer?.id || null);
+          const firm = await getFirm(firmId);
+          if (firm?.stripe_customer_id && stripeCustomerId && firm.stripe_customer_id !== stripeCustomerId) {
+            console.warn(`Checkout session ${session.id} paid as customer ${stripeCustomerId}, but firm ${firmId} is customer ${firm.stripe_customer_id}; the firm's customer is kept`);
+          }
           await updateFirmSubscription(firmId, { stripeSubscriptionId: session.subscription, stripePaymentMethodId: details.paymentMethodId, stripeCustomerId, status: details.status });
           console.log(`Firm ${firmId} subscription activated`);
         } else {
@@ -895,13 +913,14 @@ app.get('/api/cron', async (req, res) => {
     // The privacy policy's retention periods: conversations after 90 days, lead records after 3 years (retention.js).
     const { purgeExpiredConversations, purgeExpiredLeadRecords } = await import('./retention.js');
 
+    // The deletions the privacy policy promises go first: the steps that charge cards and send email take longest.
     const { results, failed } = await runSteps([
+      ['delete old conversations', purgeExpiredConversations],
+      ['delete old lead records', purgeExpiredLeadRecords],
       ['close expired auctions', closeExpiredAuctions],
       ['report stuck auctions', reportStuckAuctions],
       ['decline overdue leads', declineOverdueLeads],
       ['recount declines', resetDeclineCounts],
-      ['delete old conversations', purgeExpiredConversations],
-      ['delete old lead records', purgeExpiredLeadRecords],
     ]);
     await recordJobRun('nightly', failed).catch(err => console.error('Recording the nightly run failed:', err.message));
     await reportFailedSteps('nightly', failed);

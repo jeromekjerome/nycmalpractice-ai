@@ -101,7 +101,8 @@ export async function sendVerificationCode(firmId) {
   await sql`UPDATE phone_codes SET expires_at = NOW() WHERE firm_id = ${firmId} AND verified = FALSE AND expires_at > NOW()`;
   const code      = String(crypto.randomInt(100000, 1000000));
   const expiresAt = new Date(Date.now() + CODE_TTL_MS);
-  await sql`INSERT INTO phone_codes (firm_id, code, expires_at) VALUES (${firmId}, ${code}, ${expiresAt})`;
+  // The code is tied to the number it is sent to (verifyPhoneCode).
+  await sql`INSERT INTO phone_codes (firm_id, code, expires_at, phone) VALUES (${firmId}, ${code}, ${expiresAt}, ${firm.phone})`;
 
   const client  = twilioClient();
 
@@ -118,11 +119,12 @@ export async function sendVerificationCode(firmId) {
 }
 
 export async function verifyPhoneCode(firmId, code) {
-  // Only the newest unexpired code counts, and it stops working after a few wrong guesses.
+  // Only the newest unexpired code counts, and it stops working after a few wrong guesses. It must have been sent to
+  // the number now on file: a code texted to the first number used to verify a number changed to afterwards.
   const [current] = await sql`
-    SELECT id, code FROM phone_codes
-    WHERE firm_id = ${firmId} AND verified = FALSE AND expires_at > NOW()
-    ORDER BY created_at DESC LIMIT 1
+    SELECT pc.id, pc.code, pc.phone FROM phone_codes pc JOIN firms f ON f.id = pc.firm_id
+    WHERE pc.firm_id = ${firmId} AND pc.verified = FALSE AND pc.expires_at > NOW() AND pc.phone = f.phone
+    ORDER BY pc.created_at DESC LIMIT 1
   `;
   if (!current) return false;
   if (String(code) !== String(current.code)) {
@@ -134,8 +136,9 @@ export async function verifyPhoneCode(firmId, code) {
     return false;
   }
   await sql`UPDATE phone_codes SET verified = TRUE WHERE id = ${current.id}`;
-  await sql`UPDATE firms SET phone_verified = TRUE WHERE id = ${firmId}`;
-  return true;
+  // Still the number the code went to, even if it changed a moment ago.
+  const [verified] = await sql`UPDATE firms SET phone_verified = TRUE WHERE id = ${firmId} AND phone = ${current.phone} RETURNING id`;
+  return !!verified;
 }
 
 export async function createMagicLink(firmId, { auctionId = null, leadId = null, expiresInHours = 48 } = {}) {
@@ -200,13 +203,14 @@ export async function updateFirmProfile(firmId, { specializations, serviceArea, 
 
 // A completed checkout switches the firm on, unless Stripe already reports the subscription unpaid: a late
 // retry of this event used to switch back on a firm that a failed payment had switched off. The customer that
-// paid is saved with the card: the card belongs to that customer, and lead charges need both.
+// paid is saved for a firm that had none (Checkout used to make one of its own that was never saved); one
+// already on file is never replaced.
 export async function updateFirmSubscription(firmId, { stripeSubscriptionId, stripePaymentMethodId, stripeCustomerId = null, status = null }) {
   const paidUp = status ? PAID_UP_STATUSES.includes(status) : true;
   await sql`
     UPDATE firms SET subscription_active = ${paidUp}, subscription_status = ${status || 'active'},
       stripe_subscription_id = ${stripeSubscriptionId},
-      stripe_customer_id = COALESCE(${stripeCustomerId}, stripe_customer_id),
+      stripe_customer_id = COALESCE(stripe_customer_id, ${stripeCustomerId}),
       card_declined_at = CASE WHEN ${stripePaymentMethodId}::text IS NULL THEN card_declined_at ELSE NULL END,
       stripe_payment_method_id = COALESCE(${stripePaymentMethodId}, stripe_payment_method_id)
     WHERE id = ${firmId}

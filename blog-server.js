@@ -4,8 +4,10 @@ import 'dotenv/config';
 import express from 'express';
 import { getBlogPosts, getBlogPost, blogListHTML, blogPostHTML, notFoundHTML } from './blog.js';
 import { APP_URL } from './site.js';
+import { securityHeaders } from './security-headers.js';
 
 const app = express();
+app.use(securityHeaders);
 const BRAND    = process.env.BLOG_BRAND || process.env.APP_BRAND || 'NYCMalpractice.ai';
 const BASE_URL = APP_URL;
 

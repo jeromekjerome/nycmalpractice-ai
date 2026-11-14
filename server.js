@@ -2,7 +2,7 @@
 
 import 'dotenv/config';
 import express from 'express';
-import cors from 'cors';
+import { securityHeaders } from './security-headers.js';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { neon } from '@neondatabase/serverless';
@@ -43,7 +43,9 @@ const MODEL_HEALTH_TTL_MS = Number.parseInt(process.env.MODEL_HEALTH_TTL_MS || '
 let modelHealthLastCheckedAt = 0;
 let modelHealthRefreshPromise = null;
 
-app.use(cors());
+// Standard browser protections on every response (security-headers.js). The API no longer answers other
+// websites: the open CORS policy let any site call it, and the pages call it from this site.
+app.use(securityHeaders);
 app.use('/api/webhooks/stripe', express.raw({ type: 'application/json' }));
 app.use(express.json());
 app.use(express.static(join(__dirname, 'public')));
@@ -75,6 +77,18 @@ async function finishBeforeReply(label, work, deadline) {
     console.error(`[ask] ${label} was still running when the reply was due; replying without waiting for it`);
   }
   return outcome;
+}
+
+// A failure is logged in full; the caller gets a plain message, never the internal error text.
+function serverError(req, res, err) {
+  console.error(`Error in ${req.method} ${req.path}:`, err);
+  return res.status(500).json({ error: 'Something went wrong. Please try again.' });
+}
+
+// A webhook that fails Stripe's signature check is refused without saying why.
+function refuseWebhook(res, err) {
+  console.warn('Stripe webhook refused:', err.message);
+  return res.status(400).send('Webhook signature verification failed');
 }
 
 // ─── AI Chat ──────────────────────────────────────────────────────────────────
@@ -314,7 +328,7 @@ app.put('/api/firms/:id/profile', async (req, res) => {
   try {
     await updateFirmProfile(req.params.id, { specializations, serviceArea, contactName });
     res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { serverError(req, res, err); }
 });
 
 app.post('/api/firms/resend-code', limitTexts, async (req, res) => {
@@ -342,7 +356,7 @@ app.post('/api/billing/checkout', async (req, res) => {
   try {
     const session = await createSubscriptionCheckout({ stripeCustomerId: firm.stripe_customer_id, firmId });
     res.json({ url: session.url });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { serverError(req, res, err); }
 });
 
 app.get('/api/billing/portal', async (req, res) => {
@@ -352,13 +366,13 @@ app.get('/api/billing/portal', async (req, res) => {
   try {
     const portal = await createPortalSession({ stripeCustomerId: tokenData.stripe_customer_id });
     res.redirect(portal.url);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { serverError(req, res, err); }
 });
 
 app.post('/api/webhooks/stripe', async (req, res) => {
   let event;
   try { event = constructWebhookEvent(req.body, req.headers['stripe-signature']); }
-  catch (err) { return res.status(400).send(`Webhook error: ${err.message}`); }
+  catch (err) { return refuseWebhook(res, err); }
 
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
@@ -480,7 +494,7 @@ app.post('/api/firms/portal-link', limitEmails, async (req, res) => {
     const url   = `${APP_URL}/portal.html?token=${token}`;
     await sendPortalLinkEmail(firm, url);
     res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { serverError(req, res, err); }
 });
 
 app.get('/api/portal', async (req, res) => {
@@ -614,7 +628,7 @@ app.get('/api/cron', async (req, res) => {
     const purged = { ...(await purgeExpiredConversations()), ...(await purgeExpiredLeadRecords()) };
     res.json({ ok: true, closed, declined, purged });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    serverError(req, res, err);
   }
 });
 
@@ -622,7 +636,7 @@ app.get('/api/cron/close-auctions', async (req, res) => {
   if (!verifyCron(req, res)) return;
   try {
     res.json({ closed: await closeExpiredAuctions() });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { serverError(req, res, err); }
 });
 
 app.get('/api/cron/overdue-leads', async (req, res) => {
@@ -630,7 +644,7 @@ app.get('/api/cron/overdue-leads', async (req, res) => {
   try {
     const { declineOverdueLeads } = await import('./auction.js');
     res.json({ declined: await declineOverdueLeads() });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { serverError(req, res, err); }
 });
 
 // `gatekeeper` reports whether the compliance rubrics and current-law notes load in this deployment.
@@ -690,5 +704,15 @@ if (process.env.NODE_ENV !== 'test' && (process.env.NODE_ENV !== 'production' ||
       app.listen(PORT, () => console.log(`MalpracticeAI running on http://localhost:${PORT}`));
     });
 }
+
+// ─── Errors no route caught ───────────────────────────────────────────────────
+// Logged in full; the caller gets a plain message, never the internal error text or a stack trace. A request
+// body that is not valid JSON is a 400.
+app.use((err, req, res, _next) => {
+  const status = Number.isInteger(err?.status) && err.status >= 400 && err.status < 500 ? err.status : 500;
+  if (status === 500) console.error(`Unhandled error in ${req.method} ${req.path}:`, err);
+  if (res.headersSent) return;
+  res.status(status).json({ error: status === 500 ? 'Something went wrong. Please try again.' : 'The request could not be read.' });
+});
 
 export default app;

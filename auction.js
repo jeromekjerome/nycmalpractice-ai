@@ -445,7 +445,7 @@ async function sendLeadDeliveryEmail(firm, leadId, token, leadData, scoreData, t
   const tierConfig = TIER_CONFIG[tier] || TIER_CONFIG.cold;
   const data       = typeof leadData === 'string' ? JSON.parse(leadData) : leadData;
   const t          = getTransporter();
-  const html = `<div style="font-family:sans-serif;max-width:640px;margin:auto"><h2 style="color:#9e3a5a">✅ New Malpractice Lead — ${tierConfig.label}</h2><p>You have <strong>3 days</strong> to accept or decline.</p><p>Amount charged: $${Number(amountCharged ?? tierConfig.reserve).toFixed(2)}</p><p><strong>Preview:</strong><br>${scoreData.lead_preview || scoreData.preview || ''}</p><p><a href="${url}" style="background:#9e3a5a;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600">View Lead →</a></p></div>`;
+  const html = `<div style="font-family:sans-serif;max-width:640px;margin:auto"><h2 style="color:#9e3a5a">✅ New Malpractice Lead — ${tierConfig.label}</h2><p>You have <strong>3 days</strong> to accept or decline.</p><p>Amount charged: $${Number(amountCharged ?? tierConfig.reserve).toFixed(2)}</p><p><strong>Preview:</strong><br>${escapeHtml(scoreData.lead_preview || scoreData.preview || '')}</p><p><a href="${url}" style="background:#9e3a5a;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600">View Lead →</a></p></div>`;
   if (!t) { console.log(`[EMAIL MOCK] Lead delivery → ${firm.email}`); return; }
   await t.sendMail({ from: process.env.SMTP_USER, to: firm.email, subject: `✅ New Malpractice Lead: ${tierConfig.label} — ${data?.caseType || 'Medical Malpractice'}`, html });
 }
@@ -465,7 +465,7 @@ async function notifyAllFirms(auction) {
       const token    = await createMagicLink(firm.id, { auctionId: auction.id, expiresInHours: config.auctionHours + 1 });
       const url      = `${APP_URL}/auction.html?id=${auction.id}&token=${token}`;
       const closesAt = new Date(auction.closes_at).toLocaleString('en-US', { timeZone: 'America/New_York' });
-      const html = `<div style="font-family:sans-serif;max-width:640px;margin:auto"><h2 style="color:#9e3a5a">🔔 New Malpractice Lead Auction — ${config.label}</h2><p><strong>Preview:</strong><br>${auction.lead_preview}</p><p>Reserve: $${config.reserve} · Closes: ${closesAt} ET</p><p><a href="${url}" style="background:#9e3a5a;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600">Bid →</a></p></div>`;
+      const html = `<div style="font-family:sans-serif;max-width:640px;margin:auto"><h2 style="color:#9e3a5a">🔔 New Malpractice Lead Auction — ${config.label}</h2><p><strong>Preview:</strong><br>${escapeHtml(auction.lead_preview)}</p><p>Reserve: $${config.reserve} · Closes: ${closesAt} ET</p><p><a href="${url}" style="background:#9e3a5a;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600">Bid →</a></p></div>`;
       if (t) { await t.sendMail({ from: process.env.SMTP_USER, to: firm.email, subject: `🔔 Malpractice Lead Auction: ${config.label} — Closes in ${config.auctionHours}h`, html }); }
       else { console.log(`[EMAIL MOCK] Auction ${auction.id} → ${firm.email}`); }
     } catch (err) { console.error(`Notification failed for firm ${firm.id}:`, err.message); }

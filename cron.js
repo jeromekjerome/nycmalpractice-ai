@@ -2,7 +2,7 @@
 
 import cron from 'node-cron';
 import { neon } from '@neondatabase/serverless';
-import { closeAuction, declineOverdueLeads } from './auction.js';
+import { closeExpiredAuctions, declineOverdueLeads } from './auction.js';
 import { resetDeclineCounts } from './firms.js';
 import { purgeExpiredConversations } from './retention.js';
 
@@ -11,8 +11,7 @@ const sql = neon(process.env.DATABASE_URL);
 export function startCronJobs() {
   cron.schedule('*/5 * * * *', async () => {
     try {
-      const expired = await sql`SELECT id FROM auctions WHERE status = 'open' AND closes_at < NOW()`;
-      for (const row of expired) await closeAuction(row.id);
+      await closeExpiredAuctions();
     } catch (err) { console.error('Auction close cron error:', err.message); }
   });
 

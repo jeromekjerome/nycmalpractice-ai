@@ -81,23 +81,45 @@ Malpractice SOL in NY: 2.5 years from act/omission or the end of continuous trea
   }
 }
 
+// Charges a firm for a lead and returns the PaymentIntent id, or null when the firm cannot be charged: no card
+// on file, the card declined, or the bank asked for the cardholder (an off-session charge cannot ask). A lead
+// is delivered only after a charge goes through; leads used to go out unpaid when the charge failed.
+async function chargeFirm(firm, amountDollars, description, metadata, idempotencyKey) {
+  if (!firm?.stripe_customer_id || !firm?.stripe_payment_method_id) {
+    console.warn(`Firm ${firm?.id} has no card on file; not charged for: ${description}`);
+    return null;
+  }
+  try {
+    const charge = await chargeCustomer({
+      stripeCustomerId: firm.stripe_customer_id,
+      paymentMethodId:  firm.stripe_payment_method_id,
+      amountDollars, description, metadata, idempotencyKey,
+    });
+    if (charge?.status === 'succeeded' || charge?.status === 'processing') return charge.id;
+    console.error(`Charge to firm ${firm.id} not completed (${charge?.status}): ${description}`);
+    return null;
+  } catch (err) {
+    console.error(`Charge to firm ${firm.id} failed (${description}):`, err.message);
+    return null;
+  }
+}
+
 export async function deliverColdLead(sessionId, caseType, scoreData, leadData) {
   const firms = await getActiveFirms(caseType);
   if (firms.length === 0) {
-    await sendAdminLeadAlert('cold', caseType, scoreData, leadData);
-    return;
+    // Nobody to sell it to: the operator is told, so a consented request is not silently lost.
+    await sendAdminLeadAlert({ kind: 'cold', type: caseType, scoreData, sessionId, reason: 'no subscribed firm handles this case type' });
+    return 0;
   }
+
+  let delivered = 0;
   for (const firm of firms) {
     try {
-      let chargeId = null;
-      if (firm.stripe_customer_id && firm.stripe_payment_method_id) {
-        const charge = await chargeCustomer({
-          stripeCustomerId: firm.stripe_customer_id, paymentMethodId: firm.stripe_payment_method_id,
-          amountDollars: TIER_CONFIG.cold.reserve, description: `Cold malpractice lead — ${caseType}`,
-          metadata: { sessionId, firmId: String(firm.id) },
-        });
-        chargeId = charge.id;
-      }
+      // Charged first: a firm whose card is missing or declined does not get the lead.
+      const chargeId = await chargeFirm(firm, TIER_CONFIG.cold.reserve, `Cold malpractice lead — ${caseType}`,
+        { sessionId, firmId: String(firm.id) }, `cold-${sessionId}-${firm.id}`);
+      if (!chargeId) continue;
+
       const deadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
       const [lead] = await sql`
         INSERT INTO leads (firm_id, session_id, case_type, tier, price_paid, stripe_charge_id, accept_deadline, lead_data)
@@ -105,9 +127,16 @@ export async function deliverColdLead(sessionId, caseType, scoreData, leadData) 
         RETURNING id
       `;
       const token = await createMagicLink(firm.id, { leadId: lead.id, expiresInHours: 72 });
-      await sendLeadDeliveryEmail(firm, lead.id, token, leadData, scoreData, 'cold');
-    } catch (err) { console.error(`Cold lead delivery failed for firm ${firm.id}:`, err.message); }
+      await sendLeadDeliveryEmail(firm, lead.id, token, leadData, scoreData, 'cold', TIER_CONFIG.cold.reserve);
+      delivered += 1;
+    } catch (err) {
+      console.error(`Cold lead delivery failed for firm ${firm.id}:`, err.message);
+    }
   }
+  if (delivered === 0) {
+    await sendAdminLeadAlert({ kind: 'cold', type: caseType, scoreData, sessionId, reason: 'no matching firm could be charged' });
+  }
+  return delivered;
 }
 
 export async function createAuction(sessionId, caseType, scoreData, leadData) {
@@ -122,24 +151,23 @@ export async function createAuction(sessionId, caseType, scoreData, leadData) {
   return auction;
 }
 
-async function sendAdminLeadAlert(type, caseType, scoreData, leadData) {
-  const adminEmail = process.env.NOTIFICATION_EMAIL;
-  if (!adminEmail) return;
-  const t = getTransporter();
-  const html = `
+// A qualified lead the marketplace could not place: no matching firm, no bids, or no firm whose card could be
+// charged. The client asked to be contacted, so the operator is told and can follow up by hand.
+async function sendAdminLeadAlert({ kind, type, scoreData = {}, sessionId = null, reason }) {
+  const tier  = scoreData?.tier || kind;
+  const score = scoreData?.score ?? scoreData?.quality_score ?? '—';
+  await notifyOperator(`⚠️ Malpractice lead not placed (${tier} / ${type || 'other'}): ${reason}`, `
     <div style="font-family:sans-serif;max-width:640px;margin:auto">
-      <h2 style="color:#9e3a5a">⚠️ New Malpractice Lead — No Active Firms</h2>
-      <p>A qualified lead came in but there are <strong>no subscribed firms</strong> to receive it.</p>
+      <h2>⚠️ New Malpractice Lead Not Placed</h2>
+      <p>A visitor asked to be contacted and the lead qualified, but it was not delivered: ${escapeHtml(reason)}.</p>
       <table style="width:100%;border-collapse:collapse;margin:1rem 0">
-        <tr><td style="color:#666;padding:6px 0">Case Type</td><td>${caseType}</td></tr>
-        <tr><td style="color:#666;padding:6px 0">Quality Score</td><td>${scoreData.score || '—'}/100</td></tr>
-        <tr><td style="color:#666;padding:6px 0">Tier</td><td>${scoreData.tier || type}</td></tr>
+        <tr><td style="color:#666;padding:6px 0">Case Type</td><td>${escapeHtml(type || 'other')}</td></tr>
+        <tr><td style="color:#666;padding:6px 0">Quality Score</td><td>${escapeHtml(score)}/100</td></tr>
+        <tr><td style="color:#666;padding:6px 0">Tier</td><td>${escapeHtml(tier)}</td></tr>
+        ${sessionId ? `<tr><td style="color:#666;padding:6px 0">Session</td><td>${escapeHtml(sessionId)}</td></tr>` : ''}
       </table>
-      <p><strong>Preview:</strong><br>${scoreData.preview || ''}</p>
-    </div>
-  `;
-  if (!t) { console.log(`[EMAIL MOCK] Admin alert → ${adminEmail}`); return; }
-  await t.sendMail({ from: process.env.SMTP_USER, to: adminEmail, subject: `⚠️ Malpractice Lead Dropped — No Active Firms (${scoreData.tier} / ${caseType})`, html }).catch(console.error);
+      <p>The contact details are saved with the conversation.</p>
+    </div>`);
 }
 
 // A visitor asked to be contacted, but their conversation never produced a qualifying lead score, so
@@ -155,16 +183,33 @@ export async function notifyOperatorOfContactRequest(caseType, mode) {
   await t.sendMail({ from: process.env.SMTP_USER, to: adminEmail, subject: 'Consultation request: not a qualified lead', html }).catch(console.error);
 }
 
+// The highest bid accepted, in dollars: a typo or a forged amount (NaN, Infinity, a million) is refused.
+const MAX_BID_DOLLARS = 5000;
+
 export async function placeBid(auctionId, firmId, amount) {
-  const [auction] = await sql`SELECT * FROM auctions WHERE id = ${auctionId} LIMIT 1`;
+  const value = Math.round(Number(amount) * 100) / 100;
+  if (!Number.isFinite(value) || value <= 0) return { ok: false, error: 'Enter a bid in dollars.' };
+  if (value > MAX_BID_DOLLARS) return { ok: false, error: `Bids are limited to $${MAX_BID_DOLLARS.toLocaleString('en-US')}.` };
+
+  // One statement raises the bid only if it beats the current one by at least $1, and records it, so two bids
+  // at the same moment cannot leave the lower one in the lead.
+  const [placed] = await sql`
+    WITH raised AS (
+      UPDATE auctions SET current_bid = ${value}, current_leader_id = ${firmId}
+      WHERE id = ${auctionId} AND status = 'open' AND closes_at > NOW() AND current_bid + 1 <= ${value}
+      RETURNING id
+    )
+    INSERT INTO bids (auction_id, firm_id, amount)
+    SELECT id, ${firmId}::int, ${value}::numeric FROM raised
+    RETURNING id`;
+  if (placed) return { ok: true, currentBid: value, leaderId: firmId };
+
+  // Refused: say why.
+  const [auction] = await sql`SELECT status, closes_at, current_bid FROM auctions WHERE id = ${auctionId} LIMIT 1`;
   if (!auction) return { ok: false, error: 'Auction not found' };
   if (auction.status !== 'open') return { ok: false, error: 'Auction is closed' };
-  if (new Date(auction.closes_at) < new Date()) return { ok: false, error: 'Auction has expired' };
-  const minBid = parseFloat(auction.current_bid) + 1;
-  if (amount < minBid) return { ok: false, error: `Minimum bid is $${minBid.toFixed(2)}` };
-  await sql`INSERT INTO bids (auction_id, firm_id, amount) VALUES (${auctionId}, ${firmId}, ${amount})`;
-  await sql`UPDATE auctions SET current_bid = ${amount}, current_leader_id = ${firmId} WHERE id = ${auctionId}`;
-  return { ok: true, currentBid: amount };
+  if (new Date(auction.closes_at) <= new Date()) return { ok: false, error: 'Auction has expired' };
+  return { ok: false, error: `Minimum bid is $${(parseFloat(auction.current_bid) + 1).toFixed(2)}` };
 }
 
 export async function getAuctionStatus(auctionId) {
@@ -183,28 +228,62 @@ export async function getAuctionStatus(auctionId) {
   };
 }
 
+// Closes an auction once its time is up. The highest bidder whose card can be charged wins and pays its own
+// bid; a bidder whose card is missing or declined does not get the lead, and the next bidder is tried. With
+// no bids, or no bidder that could be charged, the operator is told: the client asked to be contacted.
 export async function closeAuction(auctionId) {
-  const [auction] = await sql`SELECT * FROM auctions WHERE id = ${auctionId} AND status = 'open' LIMIT 1`;
-  if (!auction) return;
-  if (!auction.current_leader_id) { await sql`UPDATE auctions SET status = 'cancelled' WHERE id = ${auctionId}`; return; }
+  // Claimed first, so two runs at once (the nightly job and a page visit) close it once.
+  const [auction] = await sql`
+    UPDATE auctions SET status = 'closing'
+    WHERE id = ${auctionId} AND status = 'open' AND closes_at <= NOW()
+    RETURNING *`;
+  if (!auction) return null;
 
-  const winner = await getFirm(auction.current_leader_id);
-  const winBid = parseFloat(auction.current_bid);
-  let chargeId = null;
-  try {
-    if (winner.stripe_customer_id && winner.stripe_payment_method_id) {
-      const charge = await chargeCustomer({ stripeCustomerId: winner.stripe_customer_id, paymentMethodId: winner.stripe_payment_method_id, amountDollars: winBid, description: `Malpractice lead auction — ${auction.tier} / ${auction.case_type}`, metadata: { auctionId: String(auctionId), firmId: String(winner.id) } });
-      chargeId = charge.id;
+  const bids = await sql`
+    SELECT firm_id, MAX(amount) AS amount FROM bids WHERE auction_id = ${auctionId}
+    GROUP BY firm_id ORDER BY MAX(amount) DESC, MIN(created_at) ASC`;
+  for (const bid of bids) {
+    const firm = await getFirm(bid.firm_id);
+    if (!firm || firm.active === false || !firm.subscription_active) continue;
+    if (firm.suspended_until && new Date(firm.suspended_until) > new Date()) continue;
+    const amount = parseFloat(bid.amount);
+    const chargeId = await chargeFirm(firm, amount, `Malpractice lead auction — ${auction.tier} / ${auction.case_type}`,
+      { auctionId: String(auctionId), firmId: String(firm.id) }, `auction-${auctionId}-${firm.id}`);
+    if (!chargeId) continue;
+
+    await sql`UPDATE auctions SET status = 'closed', winner_firm_id = ${firm.id}, winning_bid = ${amount} WHERE id = ${auctionId}`;
+    const deadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+    const [lead] = await sql`
+      INSERT INTO leads (auction_id, firm_id, session_id, case_type, tier, price_paid, stripe_charge_id, accept_deadline)
+      VALUES (${auctionId}, ${firm.id}, ${auction.session_id}, ${auction.case_type}, ${auction.tier}, ${amount}, ${chargeId}, ${deadline})
+      RETURNING id`;
+    const token = await createMagicLink(firm.id, { leadId: lead.id, expiresInHours: 72 });
+    await sendLeadDeliveryEmail(firm, lead.id, token, auction.lead_data, auction, auction.tier, amount);
+    for (const other of bids.filter(b => String(b.firm_id) !== String(firm.id))) {
+      const loser = await getFirm(other.firm_id);
+      if (loser) await sendLoserEmail(loser, auction, amount);
     }
-  } catch (err) { console.error(`Charge failed for auction ${auctionId}:`, err.message); }
+    console.log(`Auction ${auctionId} closed — winner: firm ${firm.id}, charged $${amount}`);
+    return { winnerFirmId: firm.id, amount };
+  }
 
-  await sql`UPDATE auctions SET status = 'closed', winner_firm_id = ${winner.id}, winning_bid = ${winBid} WHERE id = ${auctionId}`;
-  const deadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
-  const [lead] = await sql`INSERT INTO leads (auction_id, firm_id, session_id, case_type, tier, price_paid, stripe_charge_id, accept_deadline) VALUES (${auctionId}, ${winner.id}, ${auction.session_id}, ${auction.case_type}, ${auction.tier}, ${winBid}, ${chargeId}, ${deadline}) RETURNING id`;
-  const token = await createMagicLink(winner.id, { leadId: lead.id, expiresInHours: 72 });
-  await sendLeadDeliveryEmail(winner, lead.id, token, auction.lead_data, auction, auction.tier);
-  const losers = await sql`SELECT DISTINCT f.* FROM bids b JOIN firms f ON f.id = b.firm_id WHERE b.auction_id = ${auctionId} AND b.firm_id != ${winner.id}`;
-  for (const loser of losers) await sendLoserEmail(loser, auction, winBid);
+  await sql`UPDATE auctions SET status = 'cancelled' WHERE id = ${auctionId}`;
+  await sendAdminLeadAlert({
+    kind: 'auction', type: auction.case_type, scoreData: auction, sessionId: auction.session_id,
+    reason: bids.length ? 'no bidder could be charged' : 'the auction closed with no bids',
+  });
+  return null;
+}
+
+// Closes every auction past its time. Run by the nightly job and, since that job runs only once a day on this
+// hosting plan, also by requests from firms and visitors (sweepExpiredAuctions in server.js).
+export async function closeExpiredAuctions() {
+  const expired = await sql`SELECT id FROM auctions WHERE status = 'open' AND closes_at <= NOW() ORDER BY closes_at`;
+  for (const row of expired) {
+    try { await closeAuction(row.id); }
+    catch (err) { console.error(`Closing auction ${row.id} failed:`, err.message); }
+  }
+  return expired.length;
 }
 
 export async function acceptLead(leadId, firmId) {
@@ -286,19 +365,24 @@ function getTransporter() {
   return nodemailer.createTransport({ host: process.env.SMTP_HOST || 'mail.jwd.nyc', port: 465, secure: true, auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } });
 }
 
-async function sendLeadDeliveryEmail(firm, leadId, token, leadData, scoreData, tier) {
+async function sendLeadDeliveryEmail(firm, leadId, token, leadData, scoreData, tier, amountCharged) {
   const url        = `${APP_URL}/lead.html?id=${leadId}&token=${token}`;
   const tierConfig = TIER_CONFIG[tier] || TIER_CONFIG.cold;
   const data       = typeof leadData === 'string' ? JSON.parse(leadData) : leadData;
   const t          = getTransporter();
-  const html = `<div style="font-family:sans-serif;max-width:640px;margin:auto"><h2 style="color:#9e3a5a">✅ New Malpractice Lead — ${tierConfig.label}</h2><p>You have <strong>3 days</strong> to accept or decline.</p><p><strong>Preview:</strong><br>${scoreData.lead_preview || scoreData.preview || ''}</p><p><a href="${url}" style="background:#9e3a5a;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600">View Lead →</a></p></div>`;
+  const html = `<div style="font-family:sans-serif;max-width:640px;margin:auto"><h2 style="color:#9e3a5a">✅ New Malpractice Lead — ${tierConfig.label}</h2><p>You have <strong>3 days</strong> to accept or decline.</p><p>Amount charged: $${Number(amountCharged ?? tierConfig.reserve).toFixed(2)}</p><p><strong>Preview:</strong><br>${scoreData.lead_preview || scoreData.preview || ''}</p><p><a href="${url}" style="background:#9e3a5a;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600">View Lead →</a></p></div>`;
   if (!t) { console.log(`[EMAIL MOCK] Lead delivery → ${firm.email}`); return; }
   await t.sendMail({ from: process.env.SMTP_USER, to: firm.email, subject: `✅ New Malpractice Lead: ${tierConfig.label} — ${data?.caseType || 'Medical Malpractice'}`, html });
 }
 
 async function notifyAllFirms(auction) {
   const firms  = await getActiveFirms(auction.case_type);
-  if (firms.length === 0) { await sendAdminLeadAlert('auction', auction.case_type, auction, auction.lead_data); return; }
+  if (firms.length === 0) {
+    // Nobody to offer it to: cancelled at once, and the operator is told.
+    await sql`UPDATE auctions SET status = 'cancelled' WHERE id = ${auction.id} AND status = 'open'`;
+    await sendAdminLeadAlert({ kind: 'auction', type: auction.case_type, scoreData: auction, sessionId: auction.session_id, reason: 'no subscribed firm handles this case type' });
+    return;
+  }
   const config = TIER_CONFIG[auction.tier];
   const t      = getTransporter();
   for (const firm of firms) {

@@ -386,7 +386,7 @@ test('GET /api/cron with the cron secret closes auctions, declines overdue leads
       assert.deepEqual(await response.json(), { ok: true, closed: 0, declined: 0, purged: { conversations: 0, messages: 0 } });
     });
     const queries = world.calls.sql.map(call => call.query);
-    assert.ok(queries.some(query => /FROM auctions WHERE status = 'open' AND closes_at < NOW\(\)/.test(query)), 'expired auctions were not looked up');
+    assert.ok(queries.some(query => /FROM auctions WHERE status = 'open' AND closes_at <= NOW\(\)/.test(query)), 'expired auctions were not looked up');
     assert.ok(queries.some(query => /^UPDATE leads SET status = 'declined', declined_at = NOW\(\) WHERE status = 'pending' AND accept_deadline < NOW\(\) RETURNING/.test(query)), 'overdue leads were not declined');
     assert.ok(queries.some(query => /^UPDATE firms SET auction_decline_count = \(SELECT count\(\*\) FROM leads l WHERE l\.firm_id = firms\.id AND l\.status = 'declined' AND l\.auction_id IS NOT NULL AND l\.declined_at > NOW\(\) - INTERVAL '30 days'\)/.test(query)), 'decline counts were not brought up to date');
   } finally {
@@ -508,6 +508,8 @@ const GATE_AUDIT = {
 function contactWorld({ leadScore = null, alreadyHandedOff = false, firms = [], conversation = true } = {}) {
   const world = fakeWorld();
   const handler = async (url, init) => {
+    // A firm's card is charged before it gets a cold lead.
+    if (url.startsWith('https://api.stripe.com/')) return jsonResponse({ id: 'pi_contact', object: 'payment_intent', status: 'succeeded' });
     if (url.endsWith('/sql')) {
       const { query, params } = JSON.parse(init.body);
       const q = query.replace(/\s+/g, ' ').trim();
@@ -530,7 +532,7 @@ function contactWorld({ leadScore = null, alreadyHandedOff = false, firms = [], 
       if (/FROM firms WHERE active/.test(q)) {
         record();
         return rowsResponse([['id', INT], ['name', TEXT], ['email', TEXT], ['stripe_customer_id', TEXT], ['stripe_payment_method_id', TEXT]],
-          firms.map(firm => [String(firm.id), firm.name, firm.email, null, null]));
+          firms.map(firm => [String(firm.id), firm.name, firm.email, firm.customer ?? null, firm.card ?? null]));
       }
       if (/^INSERT INTO leads/.test(q)) {
         record();
@@ -607,7 +609,7 @@ test('POST /api/contact with consent hands the lead off with the contact details
     assert.match(readFileSync(new URL('../public/privacy.html', import.meta.url), 'utf8'), /the firm receives our automated check of the AI's last reply/);
 
     // A cold lead goes to each matching firm, and the lead row keeps what the firm bought.
-    const cold = contactWorld({ leadScore: { ...leadScoreOf(60), tier: 'cold', reserve: 25 }, firms: [{ id: 7, name: 'Test Firm', email: 'firm@example.test' }] });
+    const cold = contactWorld({ leadScore: { ...leadScoreOf(60), tier: 'cold', reserve: 25 }, firms: [{ id: 7, name: 'Test Firm', email: 'firm@example.test', customer: 'cus_7', card: 'pm_7' }] });
     server = await startServer(app);
     try {
       await withOutboundHttp(cold.handler, async () => {
@@ -2337,4 +2339,196 @@ test('firm sign-up and profile fields are checked and stored as plain text, and 
   assert.doesNotMatch(serviceArea, /[<>]/);
   assert.match(serviceArea, /Brooklyn/);
   assert.equal(contactName, 'Pat Lee');
+});
+
+// ─── Auctions: on time, paid, and fair ────────────────────────────────────────
+
+const BOOL = 16;
+
+/** The database and Stripe for closing auction 9: bids, the bidding firms and which cards are declined. */
+function auctionWorld({ bids = [], firms = {}, declined = [] } = {}) {
+  const sql = [];
+  const stripe = [];
+  const handler = async (url, init) => {
+    if (url.startsWith('https://api.stripe.com/')) {
+      const body = new URLSearchParams(String(init.body));
+      stripe.push({ customer: body.get('customer'), amount: body.get('amount'), key: new Headers(init.headers).get('idempotency-key') });
+      if (declined.includes(body.get('customer'))) {
+        return jsonResponse({ error: { type: 'card_error', code: 'card_declined', message: 'Your card was declined.' } }, 402);
+      }
+      return jsonResponse({ id: 'pi_' + body.get('customer'), object: 'payment_intent', status: 'succeeded' });
+    }
+    const { query, params } = JSON.parse(init.body);
+    const q = query.replace(/\s+/g, ' ').trim();
+    sql.push({ query: q, params });
+    if (/^UPDATE auctions SET status = 'closing'/.test(q)) {
+      return rowsResponse([['id', INT], ['session_id', TEXT], ['case_type', TEXT], ['tier', TEXT], ['quality_score', INT], ['lead_preview', TEXT], ['lead_data', JSONB]],
+        [['9', 'sess-auction', '__TYPE__', 'hot', '84', 'A preview.', JSON.stringify({ preview: 'A preview.' })]]);
+    }
+    if (/^SELECT firm_id, MAX\(amount\) AS amount FROM bids/.test(q)) {
+      return rowsResponse([['firm_id', INT], ['amount', 1700]], bids.map(([id, amount]) => [String(id), amount]));
+    }
+    if (/FROM firms WHERE id = \$1/.test(q)) {
+      const firm = firms[String(params[0])];
+      return firm
+        ? rowsResponse([['id', INT], ['name', TEXT], ['email', TEXT], ['active', BOOL], ['subscription_active', BOOL], ['suspended_until', TIMESTAMPTZ], ['stripe_customer_id', TEXT], ['stripe_payment_method_id', TEXT]],
+          [[String(params[0]), 'Firm ' + params[0], 'firm' + params[0] + '@example.test', 't', 't', null, firm.customer ?? null, firm.card ?? null]])
+        : rowsResponse([], []);
+    }
+    if (/^INSERT INTO leads/.test(q)) return rowsResponse([['id', INT]], [['601']], 'INSERT');
+    return jsonResponse(EMPTY_ROWS);
+  };
+  return { sql, stripe, handler };
+}
+
+async function capturingLogs(fn) {
+  const logs = [];
+  const saved = { log: console.log, warn: console.warn, error: console.error };
+  console.log = console.warn = console.error = (...parts) => logs.push(parts.join(' '));
+  try {
+    return { result: await fn(), logs };
+  } finally {
+    Object.assign(console, saved);
+  }
+}
+
+test('the highest bidder whose card can be charged wins and pays its own bid, and each charge is made once', async () => {
+  const { closeAuction } = await import('../auction.js');
+  const world = auctionWorld({
+    bids: [[11, '300.00'], [12, '250.00']],
+    firms: { 11: { customer: 'cus_11', card: 'pm_11' }, 12: { customer: 'cus_12', card: 'pm_12' } },
+    declined: ['cus_11'],
+  });
+  const result = await withoutMail(() => withOutboundHttp(world.handler, () => closeAuction(9)));
+  assert.deepEqual(result, { winnerFirmId: 12, amount: 250 });
+  // Claimed first, so two runs at once close it once.
+  assert.match(world.sql[0].query, /^UPDATE auctions SET status = 'closing' WHERE id = \$1 AND status = 'open' AND closes_at <= NOW\(\) RETURNING \*/);
+  // The declined top bidder does not get the lead; the next bidder is charged its own bid; each with its key.
+  assert.deepEqual(world.stripe.map(call => [call.customer, call.amount, call.key]), [['cus_11', '30000', 'auction-9-11'], ['cus_12', '25000', 'auction-9-12']]);
+  const lead = world.sql.find(call => /^INSERT INTO leads/.test(call.query));
+  assert.deepEqual(lead.params.slice(0, 2).map(String), ['9', '12']);
+  assert.ok(lead.params.map(String).includes('250') && lead.params.includes('pi_cus_12'), 'the lead does not record the charge');
+  const closed = world.sql.find(call => /^UPDATE auctions SET status = 'closed'/.test(call.query));
+  assert.deepEqual(closed.params.slice(0, 2).map(String), ['12', '250']);
+});
+
+test('an auction with no bids, or no bidder that can be charged, is cancelled and the operator is told', async () => {
+  const { closeAuction } = await import('../auction.js');
+  for (const [label, options, reason] of [
+    ['no bids', { bids: [] }, /the auction closed with no bids/],
+    ['no chargeable bidder', {
+      bids: [[11, '300.00'], [12, '250.00']],
+      firms: { 11: { customer: 'cus_11', card: 'pm_11' }, 12: { customer: 'cus_12' } },
+      declined: ['cus_11'],
+    }, /no bidder could be charged/],
+  ]) {
+    const world = auctionWorld(options);
+    const { result, logs } = await capturingLogs(() => withoutMail(() => withOutboundHttp(world.handler, () => closeAuction(9))));
+    assert.equal(result, null, label);
+    assert.ok(world.sql.some(call => /^UPDATE auctions SET status = 'cancelled'/.test(call.query)), label + ': not cancelled');
+    assert.ok(!world.sql.some(call => /^INSERT INTO leads/.test(call.query)), label + ': a lead went out unpaid');
+    assert.ok(logs.some(line => reason.test(line)), label + ': the operator was not told');
+  }
+});
+
+test('a cold lead goes only to firms whose card is charged, and the operator is told when none could be', async () => {
+  const { deliverColdLead } = await import('../auction.js');
+  const run = (firms, declined) => {
+    const sql = [];
+    const stripe = [];
+    const handler = async (url, init) => {
+      if (url.startsWith('https://api.stripe.com/')) {
+        const body = new URLSearchParams(String(init.body));
+        stripe.push([body.get('customer'), new Headers(init.headers).get('idempotency-key')]);
+        if (declined.includes(body.get('customer'))) {
+          return jsonResponse({ error: { type: 'card_error', code: 'card_declined', message: 'Your card was declined.' } }, 402);
+        }
+        return jsonResponse({ id: 'pi_' + body.get('customer'), object: 'payment_intent', status: 'succeeded' });
+      }
+      const { query, params } = JSON.parse(init.body);
+      const q = query.replace(/\s+/g, ' ').trim();
+      sql.push({ query: q, params });
+      if (/FROM firms WHERE active/.test(q)) {
+        return rowsResponse([['id', INT], ['name', TEXT], ['email', TEXT], ['stripe_customer_id', TEXT], ['stripe_payment_method_id', TEXT]],
+          firms.map(firm => [String(firm.id), 'Firm ' + firm.id, 'firm' + firm.id + '@example.test', firm.customer ?? null, firm.card ?? null]));
+      }
+      if (/^INSERT INTO leads/.test(q)) return rowsResponse([['id', INT]], [['701']], 'INSERT');
+      return jsonResponse(EMPTY_ROWS);
+    };
+    return capturingLogs(() => withoutMail(() => withOutboundHttp(handler,
+      () => deliverColdLead('sess-cold', '__TYPE__', { score: 60, tier: 'cold' }, { preview: 'A preview.' }))))
+      .then(({ result, logs }) => ({ delivered: result, sql, stripe, logs }));
+  };
+
+  // No card, a declined card, a good card: only the last firm gets the lead.
+  const mixed = await run([{ id: 1 }, { id: 2, customer: 'cus_2', card: 'pm_2' }, { id: 3, customer: 'cus_3', card: 'pm_3' }], ['cus_2']);
+  assert.equal(mixed.delivered, 1);
+  const leads = mixed.sql.filter(call => /^INSERT INTO leads/.test(call.query));
+  assert.equal(leads.length, 1);
+  assert.equal(String(leads[0].params[0]), '3');
+  assert.deepEqual(mixed.stripe, [['cus_2', 'cold-sess-cold-2'], ['cus_3', 'cold-sess-cold-3']]);
+
+  const none = await run([{ id: 1 }], []);
+  assert.equal(none.delivered, 0);
+  assert.ok(none.logs.some(line => /no matching firm could be charged/.test(line)), 'the operator was not told');
+});
+
+test('bids must be sensible amounts, and a bid that loses a race is refused instead of taking the lead', async () => {
+  const { placeBid } = await import('../auction.js');
+  const sql = [];
+  let raceLost = false;
+  const handler = async (url, init) => {
+    const { query, params } = JSON.parse(init.body);
+    const q = query.replace(/\s+/g, ' ').trim();
+    sql.push({ query: q, params });
+    if (/^WITH raised AS \( ?UPDATE auctions SET current_bid/.test(q)) {
+      return raceLost ? rowsResponse([['id', INT]], [], 'INSERT') : rowsResponse([['id', INT]], [['1']], 'INSERT');
+    }
+    if (/^SELECT status, closes_at, current_bid FROM auctions/.test(q)) {
+      return rowsResponse([['status', TEXT], ['closes_at', TIMESTAMPTZ], ['current_bid', 1700]], [['open', '2030-01-01 00:00:00+00', '320.00']]);
+    }
+    return jsonResponse(EMPTY_ROWS);
+  };
+  await withOutboundHttp(handler, async () => {
+    for (const amount of [NaN, Infinity, -5, 0, 5001, 'abc']) {
+      assert.equal((await placeBid(9, 7, amount)).ok, false, String(amount));
+    }
+    assert.equal(sql.length, 0, 'an invalid bid reached the database');
+    assert.deepEqual(await placeBid(9, 7, 310), { ok: true, currentBid: 310, leaderId: 7 });
+    assert.match(sql[0].query, /current_bid \+ 1 <= \$\d+ RETURNING id \) INSERT INTO bids/);
+    raceLost = true;
+    assert.deepEqual(await placeBid(9, 8, 315), { ok: false, error: 'Minimum bid is $321.00' });
+  });
+});
+
+test('an auction past its time is closed when a firm opens an auction page, without waiting for the nightly job', async () => {
+  const previous = process.env.AUCTION_SWEEP_IN_TESTS;
+  process.env.AUCTION_SWEEP_IN_TESTS = '1';
+  const sql = [];
+  const handler = async (url, init) => {
+    const { query } = JSON.parse(init.body);
+    const q = query.replace(/\s+/g, ' ').trim();
+    sql.push(q);
+    if (/FROM firm_tokens/.test(q)) {
+      return rowsResponse([['firm_id', INT], ['name', TEXT], ['auction_id', INT], ['lead_id', INT]], [['7', 'Test Firm', '9', null]]);
+    }
+    if (/^SELECT id FROM auctions WHERE status = 'open' AND closes_at <= NOW\(\)/.test(q)) return rowsResponse([['id', INT]], [['9']]);
+    return jsonResponse(EMPTY_ROWS);
+  };
+  const server = await startServer(app);
+  try {
+    await withoutMail(() => withOutboundHttp(handler, async () => {
+      const response = await fetch(`${server.baseUrl}/api/auctions/9?token=firm-token`);
+      assert.equal(response.status, 404);   // this fake database has no auction row to show
+    }));
+  } finally {
+    await server.close();
+    if (previous === undefined) delete process.env.AUCTION_SWEEP_IN_TESTS;
+    else process.env.AUCTION_SWEEP_IN_TESTS = previous;
+  }
+  const sweep = sql.findIndex(q => /^SELECT id FROM auctions WHERE status = 'open' AND closes_at <= NOW\(\)/.test(q));
+  const claim = sql.findIndex(q => /^UPDATE auctions SET status = 'closing' WHERE id = \$1/.test(q));
+  const shown = sql.findIndex(q => /^SELECT a\.\*, f\.name as leader_name FROM auctions a/.test(q));
+  assert.ok(sweep >= 0 && claim > sweep, 'the expired auction was not closed');
+  assert.ok(shown > claim, 'the page was answered before the auction was closed');
 });

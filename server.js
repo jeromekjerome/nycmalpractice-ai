@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { neon } from '@neondatabase/serverless';
 import { answerUserQuestion } from './ask.js';
-import { createAuction, deliverColdLead, getAuctionStatus, placeBid, acceptLead, declineLead, notifyOperatorOfContactRequest, TIER_CONFIG } from './auction.js';
+import { closeExpiredAuctions, createAuction, deliverColdLead, getAuctionStatus, placeBid, acceptLead, declineLead, notifyOperatorOfContactRequest, TIER_CONFIG } from './auction.js';
 import { registerFirm, sendVerificationCode, verifyPhoneCode, validateToken, updateFirmSubscription, getFirm, updateFirmProfile, createMagicLink, VerificationLimitError, recentDeclineCounts } from './firms.js';
 import { rateLimit } from './rate-limit.js';
 import nodemailer from 'nodemailer';
@@ -97,9 +97,22 @@ async function ownsRegistration(token, firmId) {
 }
 const REGISTRATION_EXPIRED = 'This registration session has expired. Use Firm Login to get a sign-in link by email.';
 
+// Auctions last 2 to 6 hours, but scheduled jobs run only once a day on this hosting plan. So requests from
+// firms and visitors also close any auction past its time, at most once a minute per server instance, and
+// the winner is charged and gets the lead soon after the auction ends.
+let lastAuctionSweep = 0;
+function sweepExpiredAuctions() {
+  const inTests = process.env.NODE_ENV === 'test';
+  if (inTests && process.env.AUCTION_SWEEP_IN_TESTS !== '1') return Promise.resolve(0);
+  if (!inTests && Date.now() - lastAuctionSweep < 60_000) return Promise.resolve(0);
+  lastAuctionSweep = Date.now();
+  return closeExpiredAuctions().catch(err => { console.error('Closing expired auctions failed:', err.message); return 0; });
+}
+
 app.post('/api/ask', limitChat, async (req, res) => {
   const { question, mode = 'personal', sessionId, history = [] } = req.body;
   if (!question?.trim() || !sessionId) return res.status(400).json({ error: 'question and sessionId required' });
+  const closingAuctions = sweepExpiredAuctions();
 
   try {
     const result = await answerUserQuestion({ question, mode, sessionId, history });
@@ -114,6 +127,7 @@ app.post('/api/ask', limitChat, async (req, res) => {
     const leadScore = result.leadScore ? { ...result.leadScore, scoredAt: new Date().toISOString() } : null;
     await finishBeforeReply('saving the conversation', upsertConversation(sessionId, mode, result.caseType, updatedHistory, leadScore, result.evaluation || null), followUpDeadline());
 
+    await finishBeforeReply('closing expired auctions', closingAuctions, followUpDeadline());
     res.json({
       answer: result.answer, cases: result.cases || [], caseType: result.caseType || null,
       caseAnalysis: result.caseAnalysis || null, leadTier: result.leadScore?.tier || null,
@@ -310,6 +324,7 @@ app.post('/api/webhooks/stripe', async (req, res) => {
 app.get('/api/auctions/:id', async (req, res) => {
   const tokenData = await validateToken(req.query.token);
   if (!tokenData) return res.status(401).json({ error: 'Invalid or expired link' });
+  await sweepExpiredAuctions();   // a finished auction shows as closed, and its winner is charged
   const status = await getAuctionStatus(req.params.id);
   if (!status) return res.status(404).json({ error: 'Auction not found' });
   const [myBid] = await sql`SELECT amount FROM bids WHERE auction_id = ${req.params.id} AND firm_id = ${tokenData.firm_id} ORDER BY amount DESC LIMIT 1`;
@@ -394,6 +409,7 @@ app.post('/api/firms/portal-link', limitEmails, async (req, res) => {
 app.get('/api/portal', async (req, res) => {
   const tokenData = await validateToken(req.query.token);
   if (!tokenData) return res.status(401).json({ error: 'Invalid or expired link' });
+  await sweepExpiredAuctions();
   const firm  = await getFirm(tokenData.firm_id);
   const leads = await sql`SELECT id, case_type, tier, price_paid, status, created_at FROM leads WHERE firm_id = ${tokenData.firm_id} ORDER BY created_at DESC LIMIT 20`;
   res.json({ firm, leads });
@@ -505,11 +521,16 @@ function verifyCron(req, res) {
 app.get('/api/cron', async (req, res) => {
   if (!verifyCron(req, res)) return;
   try {
-    const { closeAuction, declineOverdueLeads } = await import('./auction.js');
+    const { declineOverdueLeads, notifyOperator } = await import('./auction.js');
     const { resetDeclineCounts } = await import('./firms.js');
 
-    const expired = await sql`SELECT id FROM auctions WHERE status = 'open' AND closes_at < NOW()`;
-    for (const row of expired) await closeAuction(row.id);
+    const closed = await closeExpiredAuctions();
+    // An auction left 'closing' for over an hour stopped part-way through: the operator checks it by hand.
+    const stuck = await sql`SELECT id FROM auctions WHERE status = 'closing' AND closes_at < NOW() - INTERVAL '1 hour'`;
+    if (stuck.length) {
+      const ids = stuck.map(row => `#${row.id}`).join(', ');
+      await notifyOperator(`Auctions stuck while closing: ${ids}`, `<p>These auctions began closing but did not finish: ${ids}. Check Stripe for a charge and the leads table before closing them by hand.</p>`);
+    }
 
     const declined = await declineOverdueLeads();
     await resetDeclineCounts();
@@ -517,7 +538,7 @@ app.get('/api/cron', async (req, res) => {
     // Conversations past the privacy policy's 90 days are deleted (see retention.js).
     const { purgeExpiredConversations } = await import('./retention.js');
     const purged = await purgeExpiredConversations();
-    res.json({ ok: true, closed: expired.length, declined, purged });
+    res.json({ ok: true, closed, declined, purged });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -526,10 +547,7 @@ app.get('/api/cron', async (req, res) => {
 app.get('/api/cron/close-auctions', async (req, res) => {
   if (!verifyCron(req, res)) return;
   try {
-    const { closeAuction } = await import('./auction.js');
-    const expired = await sql`SELECT id FROM auctions WHERE status = 'open' AND closes_at < NOW()`;
-    for (const row of expired) await closeAuction(row.id);
-    res.json({ closed: expired.length });
+    res.json({ closed: await closeExpiredAuctions() });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

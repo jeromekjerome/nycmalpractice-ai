@@ -165,8 +165,9 @@
         document.getElementById('statTotal').textContent    = total;
         document.getElementById('statAccepted').textContent = accepted;
         document.getElementById('statPending').textContent  = pending;
-        document.getElementById('statStatus').textContent   = data.firm?.subscription_active ? '✓ Active' : 'Inactive';
-        document.getElementById('statStatus').style.color   = data.firm?.subscription_active ? 'var(--success)' : '#f87171';
+        // No leads until the operator has checked the supervising attorney's New York registration.
+        document.getElementById('statStatus').textContent   = !data.firm?.approved_at ? 'Awaiting approval' : data.firm?.subscription_active ? '✓ Active' : 'Inactive';
+        document.getElementById('statStatus').style.color   = data.firm?.approved_at && data.firm?.subscription_active ? 'var(--success)' : '#f87171';
 
         if (data.firm?.specializations?.length) {
           document.querySelectorAll('#specGrid input').forEach(cb => {

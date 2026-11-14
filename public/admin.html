@@ -110,13 +110,14 @@
       // Everything a firm typed is escaped before it goes into the page.
       tbody.innerHTML = (data.firms || []).map(f => `
         <tr>
-          <td>${esc(f.name)}</td>
+          <td>${esc(f.name)}<div style="color:var(--muted);font-size:0.75rem">${f.attorney_registration ? `Attorney: ${esc(f.attorney_name || '—')} · NY reg. ${esc(f.attorney_registration)}` : 'No attorney registration on file'}</div></td>
           <td style="color:var(--muted)">${esc(f.email)}</td>
           <td style="color:var(--muted)">${esc(f.phone || '—')}</td>
-          <td><span class="badge ${f.active ? 'b-active' : 'b-inactive'}">${f.active ? 'Active' : 'Inactive'}</span></td>
+          <td><span class="badge ${f.active ? 'b-active' : 'b-inactive'}">${f.active ? 'Active' : 'Inactive'}</span> <span class="badge ${f.approved_at ? 'b-active' : 'b-inactive'}">${f.approved_at ? 'Approved' : 'Awaiting approval'}</span></td>
           <td>${f.subscription_active ? '<span class="badge b-subscribed">Subscribed</span>' : '<span style="color:var(--muted);font-size:0.78rem">None</span>'}</td>
           <td style="color:var(--muted);font-size:0.78rem">${esc((f.specializations || []).map(s => MALP_LABELS[s] || s).join(', ') || 'All')}</td>
           <td style="display:flex;gap:0.35rem;flex-wrap:wrap">
+            <button class="action-btn" onclick="setApproved(${Number(f.id)}, ${!f.approved_at})">${f.approved_at ? 'Revoke Approval' : 'Approve'}</button>
             <button class="action-btn" onclick="toggleFirm(${Number(f.id)}, ${!f.active})">${f.active ? 'Deactivate' : 'Activate'}</button>
             <button class="action-btn" onclick="sendPortalLink(${Number(f.id)})">Send Link</button>
           </td>
@@ -130,6 +131,13 @@
 
     async function toggleFirm(id, active) {
       await fetch(`/api/admin/firms/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', 'x-admin-secret': adminSecret }, body: JSON.stringify({ active }) });
+      loadAdmin();
+    }
+
+    // A firm gets leads only once approved: check the attorney's registration in the NY search first
+    // (https://iapps.courts.state.ny.us/attorneyservices/search?0).
+    async function setApproved(id, approved) {
+      await fetch(`/api/admin/firms/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', 'x-admin-secret': adminSecret }, body: JSON.stringify({ approved }) });
       loadAdmin();
     }
 

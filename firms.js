@@ -13,7 +13,7 @@ function twilioClient() {
   return twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 }
 
-export async function registerFirm({ name, email, phone }) {
+export async function registerFirm({ name, email, phone, attorneyName = null, attorneyRegistration = null }) {
   const existing = await sql`SELECT id FROM firms WHERE email = ${email} LIMIT 1`;
   if (existing.length > 0) return { firm: existing[0], isNew: false };
 
@@ -24,8 +24,8 @@ export async function registerFirm({ name, email, phone }) {
   } catch (err) { console.warn('Stripe customer creation failed:', err.message); }
 
   const [firm] = await sql`
-    INSERT INTO firms (name, email, phone, stripe_customer_id)
-    VALUES (${name}, ${email}, ${phone}, ${stripeCustomerId})
+    INSERT INTO firms (name, email, phone, stripe_customer_id, attorney_name, attorney_registration)
+    VALUES (${name}, ${email}, ${phone}, ${stripeCustomerId}, ${attorneyName}, ${attorneyRegistration})
     RETURNING *
   `;
   return { firm, isNew: true };
@@ -110,7 +110,7 @@ export async function validateToken(token) {
   const rows = await sql`
     SELECT ft.*, f.id as firm_id, f.name, f.email, f.phone_verified,
            f.subscription_active, f.suspended_until, f.stripe_customer_id,
-           f.stripe_payment_method_id, f.auction_decline_count, f.cold_decline_count
+           f.stripe_payment_method_id, f.auction_decline_count, f.cold_decline_count, f.approved_at
     FROM firm_tokens ft
     JOIN firms f ON f.id = ft.firm_id
     WHERE ft.token = ${token} AND ft.expires_at > NOW()
@@ -128,7 +128,7 @@ export async function getActiveFirms(caseType = null) {
   if (caseType) {
     return sql`
       SELECT * FROM firms
-      WHERE active = TRUE AND phone_verified = TRUE AND subscription_active = TRUE
+      WHERE active = TRUE AND phone_verified = TRUE AND subscription_active = TRUE AND approved_at IS NOT NULL
         AND (suspended_until IS NULL OR suspended_until < NOW())
         -- "All Malpractice" on the registration form is stored as 'other' and means every case type.
         AND (specializations IS NULL OR array_length(specializations, 1) IS NULL OR 'other' = ANY(specializations) OR ${caseType} = ANY(specializations))
@@ -136,7 +136,7 @@ export async function getActiveFirms(caseType = null) {
   }
   return sql`
     SELECT * FROM firms
-    WHERE active = TRUE AND phone_verified = TRUE AND subscription_active = TRUE
+    WHERE active = TRUE AND phone_verified = TRUE AND subscription_active = TRUE AND approved_at IS NOT NULL
       AND (suspended_until IS NULL OR suspended_until < NOW())
   `;
 }
@@ -161,7 +161,7 @@ export async function updateFirmProfile(firmId, { specializations, serviceArea, 
 
 export async function updateFirmSubscription(firmId, { stripeSubscriptionId, stripePaymentMethodId }) {
   await sql`
-    UPDATE firms SET subscription_active = TRUE,
+    UPDATE firms SET subscription_active = TRUE, subscription_status = 'active',
       stripe_subscription_id = ${stripeSubscriptionId},
       stripe_payment_method_id = ${stripePaymentMethodId}
     WHERE id = ${firmId}
@@ -215,4 +215,29 @@ export function linkOpensLead(tokenData, leadId) {
 
 export function linkOpensAccount(tokenData) {
   return !!tokenData && tokenData.auction_id == null && tokenData.lead_id == null;
+}
+
+// ── Approval and paid-up subscriptions ────────────────────────────────────────
+// A firm gets leads only once the operator has checked its supervising attorney's New York registration (the
+// consent text promises licensed New York attorneys, and sign-up checked nothing), and only while its
+// subscription is paid up.
+export async function approveFirm(firmId, approved) {
+  const [firm] = await sql`
+    UPDATE firms SET approved_at = CASE WHEN ${approved} THEN COALESCE(approved_at, NOW()) ELSE NULL END
+    WHERE id = ${firmId}
+    RETURNING id, approved_at`;
+  return firm || null;
+}
+
+// Stripe's statuses that count as paid up. Past due, unpaid, canceled, incomplete and paused subscriptions
+// switch the firm off until Stripe reports it paid again; a failed payment used to leave the leads coming.
+export const PAID_UP_STATUSES = Object.freeze(['active', 'trialing']);
+
+export async function setSubscriptionStatus(subscriptionId, status) {
+  const paidUp = PAID_UP_STATUSES.includes(status);
+  const rows = await sql`
+    UPDATE firms SET subscription_active = ${paidUp}, subscription_status = ${status || null}
+    WHERE stripe_subscription_id = ${subscriptionId}
+    RETURNING id`;
+  return rows.length;
 }

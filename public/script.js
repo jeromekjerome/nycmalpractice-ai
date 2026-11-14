@@ -200,6 +200,7 @@ async function submitContactForm(event) {
     sessionId,
     name: form.elements.name.value,
     phone: form.elements.phone.value,
+    email: form.elements.email.value,
     bestTime: form.elements.bestTime.value,
     consent: true,
   };

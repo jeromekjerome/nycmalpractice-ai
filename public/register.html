@@ -93,6 +93,15 @@
           <label class="form-label">Mobile Phone (for verification)</label>
           <input type="tel" id="firmPhone" placeholder="+1 (212) 555-0100">
         </div>
+        <div class="form-group">
+          <label class="form-label" for="attorneyName">Supervising Attorney</label>
+          <input type="text" id="attorneyName" maxlength="100" placeholder="Jane Smith, Esq.">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="attorneyRegistration">NY Attorney Registration Number</label>
+          <input type="text" id="attorneyRegistration" inputmode="numeric" maxlength="12" placeholder="7 digits">
+          <p style="color:var(--muted);font-size:0.78rem;margin-top:0.35rem">We check it in the New York court system's attorney directory before your firm receives leads.</p>
+        </div>
         <div class="error-msg" id="step1Error"></div>
         <button class="next-btn" onclick="registerFirm()">Continue →</button>
       </div>
@@ -160,7 +169,7 @@
       <div id="step5" style="display:none">
         <div class="success-icon">✅</div>
         <div class="reg-title" style="text-align:center">You're All Set</div>
-        <div class="reg-sub" style="text-align:center">Your firm is registered. You'll receive an email with your portal link when new leads match your practice.</div>
+        <div class="reg-sub" style="text-align:center">Your firm is registered. Once we have checked your supervising attorney's New York registration, you'll receive an email with your portal link when new leads match your practice.</div>
         <a href="portal.html" class="next-btn" style="text-decoration:none;display:flex">Go to Firm Portal →</a>
       </div>
 
@@ -192,11 +201,13 @@
       const email   = document.getElementById('firmEmail').value.trim();
       const phone   = document.getElementById('firmPhone').value.trim();
       const contact = document.getElementById('contactName').value.trim();
+      const attorneyName = document.getElementById('attorneyName').value.trim();
+      const attorneyRegistration = document.getElementById('attorneyRegistration').value.trim();
       const errEl   = document.getElementById('step1Error');
-      if (!name || !email || !phone) { showErr(errEl, 'Please fill in all required fields.'); return; }
+      if (!name || !email || !phone || !attorneyName || !attorneyRegistration) { showErr(errEl, 'Please fill in all required fields.'); return; }
 
       try {
-        const res  = await fetch('/api/firms/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, email, phone }) });
+        const res  = await fetch('/api/firms/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, email, phone, attorneyName, attorneyRegistration }) });
         const data = await res.json();
         if (data.error) { showErr(errEl, data.error); return; }
         firmId = data.firmId;

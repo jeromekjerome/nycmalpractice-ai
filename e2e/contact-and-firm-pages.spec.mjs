@@ -76,6 +76,16 @@ const LEAD = {
       { role: 'assistant', content: 'I am so sorry. When did you learn about it?' },
     ],
     contact: { name: 'Jane Roe', phone: '5551234567', bestTime: 'mornings', consentedAt: '2026-11-14T10:00:00.000Z' },
+    evaluation: {
+      domain_id: 'nyc_malpractice_personal', gate_status: 'PASSED', evaluator: 'llm', first_pass_compliant: false, final_attempt_number: 2,
+      initial_coaching: { gate_status: 'BLOCKED', summary: 'Attempt 1 was BLOCKED on PROH-MM-01 <b>bold</b>.' },
+      citation_audit: [
+        { citation_text: 'Patient v. General Hospital, 200 A.D.3d 100', status: 'ANCHORED', courtlistener_status: 'UNCHECKED', matched_case: 'Patient v. General Hospital', matched_case_url: 'javascript:alert(1)' },
+      ],
+      required_checks: [{ id: 'REQ-MM-03', name: 'Mandatory Non-Advice Disclaimer', passed: true, evidence_or_gap: 'Required phrase present' }],
+      prohibited_checks: [{ id: 'PROH-MM-01', name: 'Unanchored Case Citations (Hallucination Gate)', violated: false, offending_quote: 'None' }],
+      human_verification_checklist: ['Verify the filing deadline against the treatment dates', 'Confirm conflict-of-interest check', 'Confirm physician review'],
+    },
   },
   declinePolicy: { refundPct: 50, message: '50% refund' },
 };
@@ -100,9 +110,30 @@ test('the lead page shows the contact details and the conversation, and accepts 
   await expect(page.locator('#transcript img')).toHaveCount(0);
   expect(await page.evaluate(() => window.__xss)).toBeUndefined();
 
-  await page.locator('#acceptButton').click();
+  // The gate's audit of the AI's last reply, with the first draft's problem shown, never run as HTML.
+  const audit = page.locator('#gatekeeperCard');
+  await expect(page.locator('#gateStatusBadge')).toHaveText('Gate status: PASSED');
+  await expect(audit).toContainText('The first draft was blocked and rewritten (2 attempts)');
+  await expect(audit).toContainText('Attempt 1 was BLOCKED on PROH-MM-01 <b>bold</b>.');
+  await expect(audit.locator('.cite-row')).toContainText('ANCHORED');
+  await expect(audit.locator('a')).toHaveCount(0);
+  await expect(audit.locator('b')).toHaveCount(0);
+  await expect(page.locator('#hitlSolHelp')).toHaveText('Verify the filing deadline against the treatment dates');
+
+  // Accept stays locked until all three supervising-attorney checks are confirmed.
+  const accept = page.locator('#acceptButton');
+  await expect(accept).toBeDisabled();
+  await page.locator('#hitlSol').check();
+  await page.locator('#hitlConflict').check();
+  await expect(accept).toBeDisabled();
+  await page.locator('#hitlQuality').check();
+  await expect(accept).toBeEnabled();
+  await page.locator('#hitlConflict').uncheck();
+  await expect(accept).toBeDisabled();
+  await page.locator('#hitlConflict').check();
+  await accept.click();
   await expect(page.locator('#actionMessage')).toContainText('Lead accepted');
-  expect(accepted).toEqual({ token: 'abc' });
+  expect(accepted).toEqual({ token: 'abc', hitlVerification: { sol_and_notice_verified: true, conflict_check_completed: true, case_quality_reviewed: true } });
 });
 
 test('declining a lead shows the refund policy before it is sent', async ({ page }) => {
@@ -206,4 +237,13 @@ test('naming a public hospital shows its 90-day deadline once, in the words for 
   await page.locator('#submitBtn').click();
   await expect(notice).toHaveCount(1);
   await expect(notice).toContainText("after the estate's representative is appointed");
+});
+
+test('a lead with no audit on file says so, and its checks still gate Accept', async ({ page }) => {
+  const { evaluation, ...leadData } = LEAD.leadData;
+  await page.route(url => url.pathname === '/api/leads/501', route => route.fulfill(json({ ...LEAD, leadData })));
+  await page.goto('/lead.html?id=501&token=abc');
+  await expect(page.locator('#gateStatusBadge')).toHaveText('Gate status: NOT ON FILE');
+  await expect(page.locator('#gateSummary')).toContainText('No compliance audit is stored');
+  await expect(page.locator('#acceptButton')).toBeDisabled();
 });

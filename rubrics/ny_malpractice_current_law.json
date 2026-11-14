@@ -1,0 +1,18 @@
+{
+  "id": "ny_malpractice_current_law",
+  "jurisdiction": "New York",
+  "as_of": "2026-11-13",
+  "purpose": "New York law that the models this app calls may state wrongly: changes after their training data, and bills they may mistake for law. The notes are injected into the drafting prompt, the Gatekeeper evaluator and the case-analysis prompt so replies state current law. Review and update this file whenever New York medical malpractice or wrongful death law changes.",
+  "notes": [
+    {
+      "id": "NY-WD-GRIEVING-FAMILIES-ACT",
+      "topic": "Wrongful death deadline and damages — EPTL §5-4.1 and §5-4.3",
+      "rule": "The Grieving Families Act is not law: the Governor has vetoed it four times, most recently on December 5, 2025. A wrongful death action must still be started within 2 years of the death (EPTL §5-4.1), and damages are still limited to the family's pecuniary losses (EPTL §5-4.3) — such as lost financial support and services and, for a child, the loss of a parent's guidance — plus medical and funeral expenses. Survivors cannot recover for their grief or loss of companionship. The patient's own conscious pain and suffering is recovered through the survival claim (EPTL §11-3.2)."
+    },
+    {
+      "id": "NY-2026-EE-NOT-MALPRACTICE",
+      "topic": "The 2026 motor-vehicle tort reform does not reach medical malpractice",
+      "rule": "Part EE of Chapter 58 of the Laws of 2026, in effect May 26, 2026, changed rules for motor vehicle (no-fault) cases only: the serious injury threshold of Insurance Law §5102(d), Insurance Law §5104, and a new CPLR §1411(b) that bars a motor-vehicle claimant who is more at fault than the defendants. It did not change medical malpractice law. CPLR §1411(a) pure comparative negligence still applies to malpractice: a patient's own fault reduces damages in proportion but does not bar recovery. CPLR §214-a, EPTL §5-4.1 and the 90-day notice of claim (GML §50-e) are unchanged."
+    }
+  ]
+}

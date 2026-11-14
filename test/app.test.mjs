@@ -498,6 +498,12 @@ const CONTACT_HISTORY = [
   { role: 'assistant', content: 'You can use the contact form below this reply.' },
 ];
 
+// The gate's audit of the last reply, as saved with the conversation.
+const GATE_AUDIT = {
+  domain_id: 'nyc_malpractice_personal', gate_status: 'PASSED', first_pass_compliant: true, final_attempt_number: 1,
+  attempts: [], citation_audit: [], human_verification_checklist: ['Verify the filing deadline', 'Confirm the conflict check', 'Confirm physician review'],
+};
+
 /** The outside world for /api/contact: a saved conversation, optional firms, and the lead tables. */
 function contactWorld({ leadScore = null, alreadyHandedOff = false, firms = [], conversation = true } = {}) {
   const world = fakeWorld();
@@ -506,11 +512,11 @@ function contactWorld({ leadScore = null, alreadyHandedOff = false, firms = [], 
       const { query, params } = JSON.parse(init.body);
       const q = query.replace(/\s+/g, ' ').trim();
       const record = () => world.calls.sql.push({ query: q, params });
-      if (/^SELECT mode, case_type, history, lead_score FROM conversations/.test(q)) {
+      if (/^SELECT mode, case_type, history, lead_score, gate_audit FROM conversations/.test(q)) {
         record();
         return conversation
-          ? rowsResponse([['mode', TEXT], ['case_type', TEXT], ['history', JSONB], ['lead_score', JSONB]],
-            [['personal', 'misdiagnosis', JSON.stringify(CONTACT_HISTORY), leadScore ? JSON.stringify(leadScore) : null]])
+          ? rowsResponse([['mode', TEXT], ['case_type', TEXT], ['history', JSONB], ['lead_score', JSONB], ['gate_audit', JSONB]],
+            [['personal', 'misdiagnosis', JSON.stringify(CONTACT_HISTORY), leadScore ? JSON.stringify(leadScore) : null, JSON.stringify(GATE_AUDIT)]])
           : rowsResponse([], []);
       }
       if (/^UPDATE conversations SET name/.test(q)) {
@@ -596,6 +602,9 @@ test('POST /api/contact with consent hands the lead off with the contact details
     assert.deepEqual(auction.contact, { name: 'Jane Roe', phone: '5551234567', bestTime: 'weekday mornings', consentedAt: '2026-11-14T10:00:00.000Z' });
     assert.equal(auction.history.length, CONTACT_HISTORY.length);
     assert.equal(auction.preview, 'Delayed cancer diagnosis after a misread scan.');
+    // The firm also gets the gate's audit of the last reply, for its supervising attorney, as the privacy policy says.
+    assert.deepEqual(auction.evaluation, GATE_AUDIT);
+    assert.match(readFileSync(new URL('../public/privacy.html', import.meta.url), 'utf8'), /the firm receives our automated check of the AI's last reply/);
 
     // A cold lead goes to each matching firm, and the lead row keeps what the firm bought.
     const cold = contactWorld({ leadScore: { ...leadScoreOf(60), tier: 'cold', reserve: 25 }, firms: [{ id: 7, name: 'Test Firm', email: 'firm@example.test' }] });
@@ -1460,6 +1469,711 @@ test("a restored conversation brings back the public hospital deadline, and not 
       assert.equal(body.deadlineNotice, 'public_hospital');
       assert.equal(body.history.length, 2);
       assert.ok(!('name' in body) && !('phone' in body));
+    });
+  } finally {
+    await server.close();
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Compliance gate (Gatekeeper & Coach). citator.js and gatekeeper.js are the same files as
+// nycinjury.ai's; the citator tests below are its tests, unchanged.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const {
+  extractDraftCitations,
+  auditDraftCitations,
+  flagUnanchoredCitations,
+  mapCitationLookupResponse,
+  VERIFY_PLACEHOLDER,
+} = await import('../citator.js');
+const {
+  loadRubric,
+  loadCurrentLawNotes,
+  renderCurrentLawForPrompt,
+  renderRubricForPrompt,
+  enforceDeterministicGate,
+  evaluateAndRemediateDraft,
+  toPublicEvaluation,
+} = await import('../gatekeeper.js');
+
+// The CourtListener "context packet" a turn retrieved.
+const RETRIEVED_CASES = [
+  {
+    caseName: 'Driver v. Carrier',
+    citation: '210 A.D.3d 456',
+    citations: ['210 A.D.3d 456', '2022 NY Slip Op 06543'],
+    court: 'Appellate Division',
+    dateFiled: '2022-11-17',
+    snippet: 'Signal violations supported liability (see Alvarez v Prospect Hosp., 68 NY2d 320).',
+    url: 'https://www.courtlistener.com/opinion/1/driver-v-carrier/',
+  },
+  {
+    caseName: 'Rodriguez v. City of New York',
+    citation: '31 N.Y.3d 312',
+    url: 'https://www.courtlistener.com/opinion/7173717/rodriguez-v-city-of-ny/',
+  },
+  { caseName: 'Mejia v. 2959 Fulton St. Realty, Inc.', citations: ['2025 NY Slip Op 04470'] },
+];
+
+// ─── B2: deterministic citation verifier ──────────────────────────────────────
+
+test('citator classifies anchored, placeholder-flagged and fabricated citations', async () => {
+  const draft = [
+    'In Driver v. Carrier, 210 A.D.3d 456, the court found liability.',
+    'A contrary view appears in Roe v. Acme Corp. [VERIFY CITATION Needed].',
+    'But Smith v. FakeCorp, 999 N.Y.3d 111 held otherwise.',
+  ].join(' ');
+
+  const audit = await auditDraftCitations(draft, RETRIEVED_CASES);
+  assert.equal(audit.length, 3);
+
+  const [anchored, flagged, fabricated] = audit;
+  assert.equal(anchored.citation_text, 'Driver v. Carrier, 210 A.D.3d 456');
+  assert.equal(anchored.status, 'ANCHORED');
+  assert.equal(anchored.matched_case, 'Driver v. Carrier');
+  assert.equal(anchored.matched_case_url, 'https://www.courtlistener.com/opinion/1/driver-v-carrier/');
+
+  assert.equal(flagged.citation_text, 'Roe v. Acme Corp.');
+  assert.equal(flagged.status, 'PLACEHOLDER_FLAGGED');
+
+  assert.equal(fabricated.citation_text, 'Smith v. FakeCorp, 999 N.Y.3d 111');
+  assert.equal(fabricated.status, 'UNANCHORED');
+
+  // No lookup was requested, so nothing claims to have been checked against CourtListener.
+  for (const item of audit) {
+    assert.equal(item.courtlistener_status, 'UNCHECKED');
+    assert.equal(item.courtlistener_url, null);
+  }
+});
+
+test('citator anchors the citation forms a model actually writes', async () => {
+  const anchoredForms = [
+    'In Driver v. Carrier, the court found liability.',                       // lead-in word
+    'Driver v Carrier, 210 AD3d 456, controls.',                              // NY Official Reports style
+    'Driver v. Carrier, 2022 NY Slip Op 6543.',                               // parallel slip-op cite, no leading zero
+    'The rule is settled (31 N.Y.3d 312).',                                   // bare reporter citation
+    'Under Rodriguez v. City of New York, you need not disprove your fault.', // lowercase connector
+    'Rodriguez v. City is the key case.',                                     // short form
+    'As in Mejia v. 2959 Fulton St. Realty, a landlord can be liable.',       // defendant starts with a number
+    'In *Driver v. Carrier*, 210 A.D.3d 456, the court agreed.',              // markdown emphasis
+    'Alvarez v Prospect Hosp. sets the standard.',                            // authority quoted in a retrieved excerpt
+    "Driver v. Carrier's reasoning applies.",                                 // possessive
+  ];
+  for (const text of anchoredForms) {
+    const audit = await auditDraftCitations(text, RETRIEVED_CASES);
+    assert.deepEqual(audit.map(item => item.status), ['ANCHORED'], `expected ANCHORED for: ${text}`);
+  }
+
+  const unanchoredForms = [
+    'A well-known case, Jones v. Acme Transit, shows this.',   // fabricated name
+    'Courts agree (142 A.D.3d 101).',                          // fabricated bare reporter citation
+    'Driver v. Carrier, 999 N.Y.3d 111, says so.',             // real name, invented reporter citation
+    'Bogus v. Whoever, 210 A.D.3d 456, says so.',              // real reporter citation, invented name
+    'As Palsgraf v. Long Island Railroad Co., 248 N.Y. 339, teaches.', // real and famous, but not retrieved
+    'Muñoz v. Peña Realty Corp. held the landlord liable.',    // non-ASCII party names
+    'Rodriguez v. Jones is different.',                        // shares only the plaintiff with a retrieved case
+  ];
+  for (const text of unanchoredForms) {
+    const audit = await auditDraftCitations(text, RETRIEVED_CASES);
+    assert.deepEqual(audit.map(item => item.status), ['UNANCHORED'], `expected UNANCHORED for: ${text}`);
+  }
+
+  // Two citations in adjacent sentences are both found.
+  const adjacent = await auditDraftCitations('It follows Driver v. Carrier. Smith v. FakeCorp held the opposite.', RETRIEVED_CASES);
+  assert.deepEqual(adjacent.map(item => [item.citation_text, item.status]), [
+    ['Driver v. Carrier', 'ANCHORED'],
+    ['Smith v. FakeCorp', 'UNANCHORED'],
+  ]);
+});
+
+test('citator does not mistake ordinary prose or statutes for case citations', () => {
+  const notCitations = [
+    'All 50 U.S. states and 3 U.S. territories have rules like this.',
+    'It is you v. the insurance company, and New York law protects you.',
+    'Our office is at 100 Main St., Brooklyn NY 11201.',
+    'CPLR § 214(5) gives you three years; GML § 50-e requires notice within 90 days.',
+    'In 2019 N.Y. courts decided 300 such cases.',
+    'Suppose A v. B were the caption.',
+    '## Actual vs. Constructive Notice: What Each One Means',   // "vs." is a comparison, not a caption
+    '**Liability vs. Damages** are separate questions.',
+    '',
+  ];
+  for (const text of notCitations) {
+    assert.deepEqual(extractDraftCitations(text), [], `expected no citations in: ${text}`);
+  }
+  assert.deepEqual(extractDraftCitations(undefined), []);
+});
+
+test('citator extraction reports one item per citation with its span', () => {
+  const draft = 'In Smith v. FakeCorp, 999 N.Y.3d 111, and again Smith v. FakeCorp, 999 N.Y.3d 111.';
+  const found = extractDraftCitations(draft);
+  assert.equal(found.length, 1, 'repeated citation is reported once');
+  assert.deepEqual(found[0], {
+    citation_text: 'Smith v. FakeCorp, 999 N.Y.3d 111',
+    kind: 'full',
+    caption: 'Smith v. FakeCorp',
+    reporters: ['999 N.Y.3d 111'],
+    start: 3,
+    end: 36,
+  });
+  assert.equal(draft.slice(found[0].start, found[0].end), 'Smith v. FakeCorp, 999 N.Y.3d 111');
+
+  const parallel = extractDraftCitations('Toure v. Avis Rent A Car Sys., 98 N.Y.2d 345, 746 N.Y.S.2d 865, 774 N.E.2d 1197 (2002).');
+  assert.equal(parallel.length, 1);
+  assert.deepEqual(parallel[0].reporters, ['98 N.Y.2d 345', '746 N.Y.S.2d 865', '774 N.E.2d 1197']);
+});
+
+test('citator: a placeholder only excuses a citation if every occurrence carries it', async () => {
+  const filler = 'x'.repeat(120);
+  const draft = `Roe v. Acme Corp. ${VERIFY_PLACEHOLDER} matters. ${filler} Later, Roe v. Acme Corp. is cited again with no flag at all in a sentence that runs on for a good while longer.`;
+  const audit = await auditDraftCitations(draft, RETRIEVED_CASES);
+  assert.deepEqual(audit.map(item => item.status), ['UNANCHORED']);
+
+  // One placeholder covers one citation: it does not excuse the unflagged citation next to it.
+  const neighbours = await auditDraftCitations(
+    `See Roe v. Acme Corp. ${VERIFY_PLACEHOLDER}. Smith v. FakeCorp, 999 N.Y.3d 111 agrees.`,
+    RETRIEVED_CASES
+  );
+  assert.deepEqual(neighbours.map(item => [item.citation_text, item.status]), [
+    ['Roe v. Acme Corp.', 'PLACEHOLDER_FLAGGED'],
+    ['Smith v. FakeCorp, 999 N.Y.3d 111', 'UNANCHORED'],
+  ]);
+  const stringCite = await auditDraftCitations(
+    `See Smith v. FakeCorp, 999 N.Y.3d 111; Jones v. Acme Transit ${VERIFY_PLACEHOLDER}.`,
+    RETRIEVED_CASES
+  );
+  assert.deepEqual(stringCite.map(item => item.status), ['UNANCHORED', 'PLACEHOLDER_FLAGGED']);
+
+  // A placeholder written just before its citation still counts.
+  const leading = await auditDraftCitations(`${VERIFY_PLACEHOLDER} Roe v. Acme Corp. may also apply.`, RETRIEVED_CASES);
+  assert.deepEqual(leading.map(item => item.status), ['PLACEHOLDER_FLAGGED']);
+});
+
+test('citator flags unanchored citations in place', async () => {
+  const draft = 'In Smith v. FakeCorp, 999 N.Y.3d 111, the court ruled. Driver v. Carrier agrees. Jones v. Acme Transit differs.';
+  const { text, flagged } = flagUnanchoredCitations(draft, RETRIEVED_CASES);
+  assert.equal(
+    text,
+    `In Smith v. FakeCorp, 999 N.Y.3d 111 ${VERIFY_PLACEHOLDER}, the court ruled. Driver v. Carrier agrees. Jones v. Acme Transit ${VERIFY_PLACEHOLDER} differs.`
+  );
+  assert.deepEqual(flagged, ['Smith v. FakeCorp, 999 N.Y.3d 111', 'Jones v. Acme Transit']);
+
+  const reaudit = await auditDraftCitations(text, RETRIEVED_CASES);
+  assert.deepEqual(reaudit.map(item => item.status), ['PLACEHOLDER_FLAGGED', 'ANCHORED', 'PLACEHOLDER_FLAGGED']);
+
+  const clean = 'Driver v. Carrier agrees.';
+  assert.deepEqual(flagUnanchoredCitations(clean, RETRIEVED_CASES), { text: clean, flagged: [] });
+});
+
+// A packet built to tempt the citator: common surnames, defendants that start alike, and an
+// excerpt that quotes another case.
+const LOOKALIKE_PACKET = [
+  { caseName: 'Rodriguez v. New York City Transit Authority', citations: ['151 A.D.3d 529'] },
+  { caseName: 'Smith v. City of New York', citations: ['160 A.D.3d 400'] },
+  {
+    caseName: 'Garcia v. Jones',
+    citations: ['150 A.D.3d 300'],
+    snippet: 'As we held in Perez v. Brown, 140 A.D.3d 100, the emergency doctrine applies.',
+  },
+  { caseName: 'Pena v. Long Is. R.R. Co.', citations: ['2020 NY Slip Op 01234'] },
+];
+
+test('citator: a name that only resembles a retrieved case is not anchored', async () => {
+  const statuses = async text => (await auditDraftCitations(text, LOOKALIKE_PACKET)).map(item => item.status);
+
+  for (const text of [
+    'In Rodriguez v. New York City Housing Authority, the landlord was liable.',   // Housing, not Transit
+    'As Smith v. City of Yonkers shows, prior written notice is required.',        // Yonkers, not New York
+    'In Rodriguez v. New York Presbyterian Hospital the court found malpractice.',
+    'Garcia v. Jones Lang LaSalle Americas held otherwise.',                       // longer than the retrieved name
+  ]) {
+    assert.deepEqual(await statuses(text), ['UNANCHORED'], `expected UNANCHORED for: ${text}`);
+  }
+
+  // Shortened, abbreviated and suffixed forms of a retrieved name still anchor.
+  for (const text of [
+    'Rodriguez v. New York controls.',
+    'Rodriguez v. New York City Transit Auth. controls.',
+    'Garcia v. Jones Co. is similar.',
+    'Peña v. Long Island Railroad Co. controls.',                                  // "Is." ~ Island, "R.R." ~ Railroad
+    'Key Cases\nSmith v. City of New York\nHeld: the City must have prior written notice.',   // a name stops at the line break
+  ]) {
+    assert.deepEqual(await statuses(text), ['ANCHORED'], `expected ANCHORED for: ${text}`);
+  }
+});
+
+test('citator: a reporter citation only anchors under the name of the case it belongs to', async () => {
+  const audit = async text => (await auditDraftCitations(text, LOOKALIKE_PACKET))[0];
+
+  // Two retrieved cases, the name of one with the citation of the other.
+  const borrowed = await audit('See Garcia v. Jones, 160 A.D.3d 400.');
+  assert.equal(borrowed.status, 'UNANCHORED');
+  assert.match(borrowed.reason, /belongs to Smith v\. City of New York/);
+  assert.equal((await audit('See Totally v. Fabricated, 160 A.D.3d 400.')).status, 'UNANCHORED');
+  assert.equal((await audit('See Smith v. City of New York, 160 A.D.3d 400.')).status, 'ANCHORED');
+
+  // An authority quoted in a retrieved excerpt anchors under the name the excerpt gives it…
+  const quoted = await audit('See Perez v. Brown, 140 A.D.3d 100.');
+  assert.equal(quoted.status, 'ANCHORED');
+  assert.match(quoted.reason, /Quoted in the retrieved excerpt of Garcia v\. Jones/);
+  // …not under the name of the case whose excerpt quotes it.
+  const misquoted = await audit('See Garcia v. Jones, 150 A.D.3d 300, 140 A.D.3d 100.');
+  assert.equal(misquoted.status, 'UNANCHORED');
+  assert.match(misquoted.reason, /belongs to Perez v\. Brown/);
+
+  // A fabricated subsequent-history citation is caught even behind a real one.
+  const history = await auditDraftCitations(
+    'See Smith v. City of New York, 160 A.D.3d 400 (1st Dept 2018), affd 999 N.Y.3d 111.', LOOKALIKE_PACKET);
+  assert.deepEqual(history.map(item => [item.citation_text, item.status]), [
+    ['Smith v. City of New York, 160 A.D.3d 400', 'ANCHORED'],
+    ['999 N.Y.3d 111', 'UNANCHORED'],
+  ]);
+
+  // Pin cites: anchored to a retrieved volume, unanchored otherwise.
+  assert.equal((await audit('See Rodriguez, 151 A.D.3d at 531.')).status, 'ANCHORED');
+  assert.equal((await audit('See Fakecase, 999 N.Y.3d at 115.')).status, 'UNANCHORED');
+});
+
+test('citator finds citation forms that are easy to miss, and a flag covers only its own sentence', async () => {
+  const found = text => extractDraftCitations(text).map(item => item.citation_text);
+
+  assert.deepEqual(found('In Smith et al. v. FakeCorp the court dismissed.'), ['Smith et al. v. FakeCorp']);
+  assert.deepEqual(found('In Smith v. eBay Inc. the court dismissed.'), ['Smith v. eBay Inc.']);
+  assert.deepEqual(found('**Smith** v. **FakeCorp** is instructive.'), ['Smith v. FakeCorp']);
+  // Surnames that are also ordinary sentence openers.
+  assert.deepEqual(
+    found('In An v. FakeCorp Holdings the court dismissed. So v. Wing Tat Realty is similar. Do v. Acme Inc. too.'),
+    ['An v. FakeCorp Holdings', 'So v. Wing Tat Realty', 'Do v. Acme Inc.']
+  );
+  // Regional reporters, which a national fallback search can put in front of the model.
+  assert.deepEqual(found('Courts agree (123 P.3d 456; 45 Cal.4th 123; 88 A.3d 9).'), ['123 P.3d 456', '45 Cal.4th 123', '88 A.3d 9']);
+
+  // A flag excuses the citation it is attached to, not one in the sentence before it…
+  const nextSentence = await auditDraftCitations(
+    `Smith v. FakeCorp, 999 N.Y.3d 111, held that owners are liable. Other courts agree ${VERIFY_PLACEHOLDER}.`, RETRIEVED_CASES);
+  assert.deepEqual(nextSentence.map(item => item.status), ['UNANCHORED']);
+  // …while a court-and-year parenthetical between the two is part of the citation.
+  const parenthetical = await auditDraftCitations(
+    `Smith v. FakeCorp, 999 N.Y.3d 111 (N.Y. App. Div. 2019) ${VERIFY_PLACEHOLDER} held otherwise.`, RETRIEVED_CASES);
+  assert.deepEqual(parenthetical.map(item => item.status), ['PLACEHOLDER_FLAGGED']);
+});
+
+test('citator stays fast on input built to make a pattern matcher backtrack', async () => {
+  const started = Date.now();
+  for (const hostile of ['A.'.repeat(49000), 'Aa-'.repeat(32000), 'Ab v. Cd '.repeat(11000)]) {
+    await auditDraftCitations(hostile, RETRIEVED_CASES);
+  }
+  const elapsed = Date.now() - started;
+  assert.ok(elapsed < 3000, `citation audit took ${elapsed} ms`);
+});
+
+// Case names as New York's official reports abbreviate them, which is how CourtListener returns them.
+const OFFICIAL_STYLE_PACKET = [
+  { caseName: "O'Brien v. Port Auth. of N.Y. & N.J.", citations: ['29 N.Y.3d 27'] },
+  { caseName: 'Khan v. City Univ. of N.Y.', citations: ['302 A.D.3d 3'] },
+  { caseName: 'Doe v. Board of Educ. of City of N.Y.', citations: ['202 A.D.3d 3'] },
+  { caseName: "Smith v. Macy's, Inc.", citations: ['123 A.D.3d 456'] },
+  { caseName: 'Doe v. Metro. Transp. Auth.', citations: ['101 A.D.3d 2'] },
+  { caseName: 'Smith v. Johnson', citations: ['100 A.D.3d 1'] },
+  { caseName: 'Adams v. Baker', citations: ['150 A.D.3d 1234'] },
+  { caseName: 'Clark v. Davis', citations: ['150 A.D.3d 1234'] },   // two decisions can start on the same page
+];
+
+test('citator ties a citation to the case name before it in every layout a model uses', async () => {
+  const audit = async (text, packet) => (await auditDraftCitations(text, packet)).map(item => [item.citation_text, item.status]);
+
+  // New York official style puts the citation in parentheses after the name.
+  assert.deepEqual(
+    await audit('In Driver v Carrier (210 AD3d 456 [1st Dept 2022]), the court agreed.', RETRIEVED_CASES),
+    [['Driver v Carrier (210 AD3d 456 [1st Dept 2022])', 'ANCHORED']]);
+
+  // The name of one retrieved case with the citation of another is caught in each layout.
+  for (const text of [
+    'In Garcia v Jones (160 AD3d 400 [1st Dept 2018]), the court applied the emergency doctrine.',
+    '1. **Garcia v. Jones** (160 A.D.3d 400): the emergency doctrine applied.',
+    'Garcia v. Jones — 160 A.D.3d 400 — controls.',
+    '| Garcia v. Jones | 160 A.D.3d 400 |',
+    'See Garcia v. Jones et al., 160 A.D.3d 400.',
+    'Garcia v. Jones, supra, 160 A.D.3d at 402, is clear.',
+  ]) {
+    const items = await auditDraftCitations(text, LOOKALIKE_PACKET);
+    assert.deepEqual(items.map(item => item.status), ['UNANCHORED'], text);
+    assert.match(items[0].reason, /belongs to Smith v\. City of New York/, text);
+  }
+  // A semicolon separates two authorities; it does not join them.
+  assert.deepEqual(
+    await audit('See Driver v. Carrier; 31 N.Y.3d 312.', RETRIEVED_CASES),
+    [['Driver v. Carrier', 'ANCHORED'], ['31 N.Y.3d 312', 'ANCHORED']]);
+
+  // A retrieved case's citation is that case's, even when an earlier case's excerpt mentions it.
+  const shadowing = [
+    { caseName: 'Garcia v. Jones', citations: ['150 A.D.3d 300'], snippet: 'York, 160 AD3d 400, 401 [1st Dept 2018]; see also Lifson v City of Syracuse, 17 NY3d 492).' },
+    LOOKALIKE_PACKET[1],
+    LOOKALIKE_PACKET[0],
+  ];
+  const [shadowed] = await auditDraftCitations('See Rodriguez v. New York City Transit Authority, 160 A.D.3d 400.', shadowing);
+  assert.equal(shadowed.status, 'UNANCHORED');
+  assert.match(shadowed.reason, /belongs to Smith v\. City of New York/);
+
+  // Two retrieved decisions that start on the same page: the citation fits either name, not a third.
+  assert.deepEqual(await audit('See Clark v. Davis, 150 A.D.3d 1234.', OFFICIAL_STYLE_PACKET), [['Clark v. Davis, 150 A.D.3d 1234', 'ANCHORED']]);
+  assert.deepEqual(await audit('See Smith v. Johnson, 150 A.D.3d 1234.', OFFICIAL_STYLE_PACKET), [['Smith v. Johnson, 150 A.D.3d 1234', 'UNANCHORED']]);
+});
+
+test('citator recognises reporters beyond New York, and a flag on another line excuses nothing', async () => {
+  const statuses = async text => (await auditDraftCitations(text, RETRIEVED_CASES)).map(item => item.status);
+
+  // A retrieved name with an invented citation is not anchored, whatever reporter it invents.
+  for (const text of [
+    'Driver v. Carrier, 999 N.J. 111, says so.',
+    'Driver v. Carrier, 489 Mass. 1 (2022), says so.',
+    "Driver v. Carrier, 456 F. App'x 12 (2d Cir. 2012), says so.",
+    'Driver v. Carrier, 2019 N.Y. Misc. LEXIS 1234, says so.',
+    'Driver v Carrier (477 US 317 [1986]) says so.',
+    'Driver v Carrier (123 F3d 456 [2d Cir 1997]) says so.',
+    'Driver v. Carrier, NY Slip Op 99999, says so.',
+  ]) {
+    assert.deepEqual(await statuses(text), ['UNANCHORED'], text);
+  }
+  // …while its own citation anchors however it is written.
+  for (const text of [
+    'Driver v. Carrier, 210 A.D.3rd 456, says so.',
+    'Driver v. Carrier, NY Slip Op 06543, says so.',
+  ]) {
+    assert.deepEqual(await statuses(text), ['ANCHORED'], text);
+  }
+  assert.deepEqual(
+    extractDraftCitations("Courts agree (999 N.J. 111; 456 F. App'x 12; 2019 U.S. Dist. LEXIS 12345; 489 Mass. 1).").map(item => item.citation_text),
+    ['999 N.J. 111', "456 F. App'x 12", '2019 U.S. Dist. LEXIS 12345', '489 Mass. 1']);
+  // Years, ZIP codes, regulations and statutes are still not reporter citations.
+  assert.deepEqual(extractDraftCitations('In 2020 US 9 was closed near Albany NY 12207. See 22 NYCRR 202.5 and 42 U.S.C. 1983.'), []);
+
+  // A flag on the next line, or after a sentence that opens with a quotation mark, belongs to
+  // that line or sentence — not to the citation before it.
+  assert.deepEqual(
+    await statuses(`Key cases:\n\n- Smith v. FakeCorp (landlord liable for icy steps)\n- Tenants must report hazards promptly ${VERIFY_PLACEHOLDER}`),
+    ['UNANCHORED']);
+  assert.deepEqual(
+    await statuses(`Smith v. FakeCorp held that owners are liable. "Other courts agree." ${VERIFY_PLACEHOLDER}`),
+    ['UNANCHORED']);
+  const swapped = await auditDraftCitations(`- Smith v. FakeCorp, 999 N.Y.3d 111\n- ${VERIFY_PLACEHOLDER} Jones v. Acme Transit`, RETRIEVED_CASES);
+  assert.deepEqual(swapped.map(item => [item.citation_text, item.status]), [
+    ['Smith v. FakeCorp, 999 N.Y.3d 111', 'UNANCHORED'],
+    ['Jones v. Acme Transit', 'PLACEHOLDER_FLAGGED'],
+  ]);
+  // An official-style citation is flagged as a whole.
+  const official = await auditDraftCitations(`Smith v FakeCorp (999 NY3d 111 [2019]) ${VERIFY_PLACEHOLDER} held otherwise.`, RETRIEVED_CASES);
+  assert.deepEqual(official.map(item => [item.citation_text, item.status]), [['Smith v FakeCorp (999 NY3d 111 [2019])', 'PLACEHOLDER_FLAGGED']]);
+});
+
+test('citator reads the party names New York captions actually have', async () => {
+  const found = text => extractDraftCitations(text).map(item => item.citation_text);
+  const audit = async (text, packet) => (await auditDraftCitations(text, packet)).map(item => [item.citation_text, item.status]);
+
+  // A defendant that opens with one letter or digit, an ampersand, a numbered plaintiff, a street ordinal.
+  assert.deepEqual(found('Santiago v. K Mart Corp. is the leading case.'), ['Santiago v. K Mart Corp.']);
+  assert.deepEqual(found('Lopez v. L & M Bus Corp. is similar.'), ['Lopez v. L & M Bus Corp.']);
+  assert.deepEqual(found('In Lewis v. A & P Food Stores, the floor was wet.'), ['Lewis v. A & P Food Stores']);
+  assert.deepEqual(found('Smith v. 2 Broadway Assocs. is similar.'), ['Smith v. 2 Broadway Assocs.']);
+  assert.deepEqual(found('Jane Doe 3 v. Archdiocese of N.Y. was dismissed.'), ['Jane Doe 3 v. Archdiocese of N.Y.']);
+  assert.deepEqual(found('Wilinski v. 334 E. 92nd Hous. Dev. Fund Corp. is on point.'), ['Wilinski v. 334 E. 92nd Hous. Dev. Fund Corp.']);
+
+  // A longer, different defendant is read whole, so it is not mistaken for the retrieved one.
+  assert.deepEqual(await audit('Garcia v. Jones & Laughlin Steel Corp. held otherwise.', LOOKALIKE_PACKET), [['Garcia v. Jones & Laughlin Steel Corp.', 'UNANCHORED']]);
+  assert.deepEqual(await audit('Smith v. Johnson & Johnson is the leading case.', OFFICIAL_STYLE_PACKET), [['Smith v. Johnson & Johnson', 'UNANCHORED']]);
+  assert.deepEqual(await audit('Doe v. Metro. Life Ins. Co. is the leading case.', OFFICIAL_STYLE_PACKET), [['Doe v. Metro. Life Ins. Co.', 'UNANCHORED']]);
+  assert.deepEqual(await audit('Garcia v. Jones (Bronx) Realty held otherwise.', LOOKALIKE_PACKET), [['Garcia v. Jones', 'UNANCHORED']]);
+
+  // A retrieved name spelled out in full still anchors: "N.Y." is New York, "&" is "and".
+  for (const text of [
+    "O'Brien v. Port Authority of New York and New Jersey controls.",
+    'Khan v. City University of New York controls.',
+    'Doe v. Board of Education of the City of New York controls.',
+    "In Smith v. Macy's, the court found constructive notice.",           // not a possessive
+    "In Smith v. Macy's, 123 A.D.3d 456, the court found notice.",
+  ]) {
+    assert.deepEqual((await auditDraftCitations(text, OFFICIAL_STYLE_PACKET)).map(item => item.status), ['ANCHORED'], text);
+  }
+  assert.deepEqual(await audit('Pena v. Long Island Rail Road Co. controls.', LOOKALIKE_PACKET), [['Pena v. Long Island Rail Road Co.', 'ANCHORED']]);
+  // The same for an authority a retrieved excerpt quotes in abbreviated form.
+  assert.deepEqual(
+    await audit('Alvarez v. Prospect Hospital, 68 N.Y.2d 320 (1986), sets the standard.', RETRIEVED_CASES),
+    [['Alvarez v. Prospect Hospital, 68 N.Y.2d 320', 'ANCHORED']]);
+  assert.deepEqual(await audit('Alvarez v. Prospect Hospital sets the standard.', RETRIEVED_CASES), [['Alvarez v. Prospect Hospital', 'ANCHORED']]);
+});
+
+test('citator ends a case name where the name ends', async () => {
+  const audit = async text => (await auditDraftCitations(text, RETRIEVED_CASES)).map(item => [item.citation_text, item.status]);
+
+  // The next sentence, or the text after a bold label, is not part of the name.
+  assert.deepEqual(await audit('The standard comes from Alvarez v. Prospect Hosp. Courts apply it strictly.'), [['Alvarez v. Prospect Hosp.', 'ANCHORED']]);
+  assert.deepEqual(await audit('**Driver v. Carrier** Signal violations supported liability.'), [['Driver v. Carrier', 'ANCHORED']]);
+  assert.deepEqual(
+    await audit('**Case:** Driver v. Carrier **Citation:** 210 A.D.3d 456'),
+    [['Driver v. Carrier', 'ANCHORED'], ['210 A.D.3d 456', 'ANCHORED']]);
+  // Two names in adjacent sentences are two citations that do not overlap.
+  assert.deepEqual(
+    await audit('It follows Alvarez v. Prospect Hosp. Driver v. Carrier held the opposite.'),
+    [['Alvarez v. Prospect Hosp.', 'ANCHORED'], ['Driver v. Carrier', 'ANCHORED']]);
+  // A heading is title case, so the words after the name in it do not count against the name.
+  for (const heading of ['### Why Driver v. Carrier Matters', '## How Rodriguez v. City of New York Changed Summary Judgment']) {
+    assert.deepEqual((await auditDraftCitations(heading, RETRIEVED_CASES)).map(item => item.status), ['ANCHORED'], heading);
+  }
+  // A name that opens with an abbreviation is not cut after it.
+  assert.deepEqual(
+    (await auditDraftCitations("Smith v. St. Luke's Hospital was liable.", [{ caseName: "Smith v. St. Luke's Hospital" }])).map(item => [item.citation_text, item.status]),
+    [["Smith v. St. Luke's Hospital", 'ANCHORED']]);
+});
+
+test('citator flag repair lands after the citation and everything that belongs to it', async () => {
+  const flag = VERIFY_PLACEHOLDER;
+  const repairs = [
+    ["Jones v. Acme Transit's holding is instructive.", `Jones v. Acme Transit's ${flag} holding is instructive.`],
+    ['See [Smith v. FakeCorp](https://example.com/smith) for more.', `See [Smith v. FakeCorp](https://example.com/smith) ${flag} for more.`],
+    ['**Smith v. FakeCorp** and *Jones v. Acme Transit* support you.', `**Smith v. FakeCorp** ${flag} and *Jones v. Acme Transit* ${flag} support you.`],
+    ['Smith v. FakeCorp, 999 N.Y.3d 111 (2019), supports you.', `Smith v. FakeCorp, 999 N.Y.3d 111 (2019) ${flag}, supports you.`],
+    ['Smith v FakeCorp (999 NY3d 111 [2019]) supports you.', `Smith v FakeCorp (999 NY3d 111 [2019]) ${flag} supports you.`],
+    ['Negri v. Stop & Shop is on point.', `Negri v. Stop & Shop ${flag} is on point.`],
+    // An occurrence that already carries the flag is not given a second one.
+    [`Smith v. FakeCorp ${flag} supports you. Later, Smith v. FakeCorp was followed.`, `Smith v. FakeCorp ${flag} supports you. Later, Smith v. FakeCorp ${flag} was followed.`],
+  ];
+  for (const [draft, expected] of repairs) {
+    const { text } = flagUnanchoredCitations(draft, RETRIEVED_CASES);
+    assert.equal(text, expected);
+    // …and the repaired text audits as flagged, so one pass is enough.
+    const audit = await auditDraftCitations(text, RETRIEVED_CASES);
+    assert.ok(audit.length > 0 && audit.every(item => item.status === 'PLACEHOLDER_FLAGGED'), `re-audit of: ${text}`);
+    assert.deepEqual(flagUnanchoredCitations(text, RETRIEVED_CASES), { text, flagged: [] });
+  }
+});
+
+test('citator CourtListener lookup: one batched request for non-anchored reporter citations only', async () => {
+  const draft = 'Licari v. Elliott, 57 N.Y.2d 230 and Smith v. FakeCorp, 999 N.Y.3d 111 and Driver v. Carrier, 210 A.D.3d 456 and Jones v. Nobody.';
+  const requests = [];
+  const fetchImpl = async (url, init) => {
+    requests.push({ url, init });
+    return jsonResponse([
+      { citation: '57 N.Y.2d 230', normalized_citations: ['57 N.Y.2d 230'], status: 200, clusters: [{ absolute_url: '/opinion/5685956/licari-v-elliott/', case_name: 'Licari v. Elliott' }] },
+      { citation: '999 N.Y.3d 111', normalized_citations: ['999 N.Y.3d 111'], status: 404, clusters: [] },
+    ]);
+  };
+
+  const audit = await auditDraftCitations(draft, RETRIEVED_CASES, { enableCourtListener: true, fetchImpl });
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, 'https://www.courtlistener.com/api/rest/v4/citation-lookup/');
+  assert.equal(requests[0].init.method, 'POST');
+  assert.equal(requests[0].init.headers.Authorization, `Token ${process.env.COURTLISTENER_TOKEN}`);
+  // The anchored citation (210 A.D.3d 456) and the name-only caption are not sent.
+  assert.equal(new URLSearchParams(requests[0].init.body).get('text'), '57 N.Y.2d 230\n999 N.Y.3d 111');
+
+  const byText = Object.fromEntries(audit.map(item => [item.citation_text, item]));
+  // A real case that was not in the packet is still UNANCHORED — the lookup only records that it exists.
+  assert.equal(byText['Licari v. Elliott, 57 N.Y.2d 230'].status, 'UNANCHORED');
+  assert.equal(byText['Licari v. Elliott, 57 N.Y.2d 230'].courtlistener_status, 'VERIFIED');
+  assert.equal(byText['Licari v. Elliott, 57 N.Y.2d 230'].courtlistener_url, 'https://www.courtlistener.com/opinion/5685956/licari-v-elliott/');
+  assert.equal(byText['Licari v. Elliott, 57 N.Y.2d 230'].courtlistener_case_name, 'Licari v. Elliott');
+  assert.equal(byText['Smith v. FakeCorp, 999 N.Y.3d 111'].courtlistener_status, 'NOT_FOUND_404');
+  assert.equal(byText['Smith v. FakeCorp, 999 N.Y.3d 111'].courtlistener_url, null);
+  assert.equal(byText['Driver v. Carrier, 210 A.D.3d 456'].status, 'ANCHORED');
+  assert.equal(byText['Driver v. Carrier, 210 A.D.3d 456'].courtlistener_status, 'UNCHECKED');
+  assert.equal(byText['Jones v. Nobody'].courtlistener_status, 'UNCHECKED');
+});
+
+test('citator CourtListener lookup: throttling or an outage leaves citations UNCHECKED, never "not found"', async () => {
+  const draft = 'Smith v. FakeCorp, 999 N.Y.3d 111 held otherwise.';
+  for (const fetchImpl of [
+    async () => jsonResponse({ detail: 'Request was throttled. Rate limit exceeded: 5/min.' }, 429),
+    async () => jsonResponse({ detail: 'Not found.' }, 404),
+    async () => { throw new Error('network down'); },
+  ]) {
+    const [item] = await auditDraftCitations(draft, RETRIEVED_CASES, { enableCourtListener: true, fetchImpl });
+    assert.equal(item.status, 'UNANCHORED');
+    assert.equal(item.courtlistener_status, 'UNCHECKED');
+  }
+
+  // A caption with no reporter citation makes the lookup API answer [] — that is not a 404.
+  assert.equal(mapCitationLookupResponse([]).size, 0);
+  assert.equal(mapCitationLookupResponse({ detail: 'error' }).size, 0);
+});
+
+test('citator makes no network call under NODE_ENV=test unless a fetch is injected', async () => {
+  let outbound = 0;
+  await withOutboundHttp(async () => { outbound += 1; return jsonResponse([]); }, async () => {
+    const audit = await auditDraftCitations('Smith v. FakeCorp, 999 N.Y.3d 111 held otherwise.', RETRIEVED_CASES, { enableCourtListener: true });
+    assert.equal(audit[0].courtlistener_status, 'UNCHECKED');
+  });
+  assert.equal(outbound, 0);
+});
+
+// ─── The Malpractice rubrics and the deterministic gate ─────────────────────────
+
+// The case a turn retrieved, in the shape courtlistener.js returns.
+const MM_CASES = [{
+  caseName: 'Patient v. General Hospital',
+  citation: '200 A.D.3d 100',
+  citations: ['200 A.D.3d 100', '2022 NY Slip Op 01234'],
+  court: 'Appellate Division of the Supreme Court of the State of New York',
+  dateFiled: '2022-03-01',
+  snippet: 'The failure to diagnose was a departure from accepted practice.',
+  url: 'https://www.courtlistener.com/opinion/1/patient-v-general-hospital/',
+}];
+
+test('the personal and estate rubrics load, each with its disclaimer, citation gate and attorney checklist', () => {
+  for (const [mode, prefix] of [['personal', 'MM'], ['estate', 'MME']]) {
+    const rubric = loadRubric(mode);
+    assert.equal(rubric.mode, mode);
+    assert.deepEqual([...rubric.required_criteria, ...rubric.prohibited_criteria].map(c => c.id),
+      [1, 2, 3].map(n => `REQ-${prefix}-0${n}`).concat([1, 2, 3].map(n => `PROH-${prefix}-0${n}`)));
+    assert.equal(rubric.required_criteria[2].deterministic_check.phrase, 'This is general information, not legal advice');
+    assert.equal(rubric.prohibited_criteria[0].deterministic_check.type, 'citation_anchoring');
+    assert.equal(rubric.prohibited_criteria[1].deterministic_check.type, 'forbidden_patterns');
+    assert.equal(rubric.human_verification_checklist.length, 3);
+  }
+  assert.match(loadRubric('estate').human_verification_checklist[0], /EPTL §5-4\.1/);
+  // Any other mode is graded as a patient's own claim.
+  assert.equal(loadRubric('professor').mode, 'personal');
+  assert.equal(loadRubric(undefined).mode, 'personal');
+});
+
+test('the drafting prompt carries the rules for the step and current New York law', () => {
+  assert.equal(loadCurrentLawNotes().jurisdiction, 'New York');
+  const law = renderCurrentLawForPrompt();
+  assert.match(law, /The Grieving Families Act is not law/);
+  assert.match(law, /CPLR §1411\(a\) pure comparative negligence still applies to malpractice/);
+  const personal = renderRubricForPrompt('personal', 3);
+  assert.match(personal, /This is turn 3/);
+  assert.match(personal, /CPLR §214-a/);
+  assert.match(personal, /Contact Details Requested in the Chat/);
+  assert.ok(personal.includes(law), 'the current-law notes are not in the prompt');
+  assert.match(renderRubricForPrompt('estate', 3), /EPTL §5-4\.1/);
+});
+
+test('the gate blocks a case the search did not return and a missing disclaimer, and passes a compliant reply', async () => {
+  const invented = await enforceDeterministicGate({}, `In Smith v. Mercy Hospital, 999 A.D.3d 111, the court ruled for the patient. ${DISCLAIMER}`, 3, 'personal', MM_CASES);
+  assert.equal(invented.gate_status, 'BLOCKED');
+  const citation = invented.prohibited_checks.find(check => check.id === 'PROH-MM-01');
+  assert.equal(citation.violated, true);
+  assert.match(citation.offending_quote, /999 A\.D\.3d 111/);
+
+  const bare = await enforceDeterministicGate({}, 'I am so sorry for your loss. When did your father pass away?', 1, 'estate', MM_CASES);
+  assert.equal(bare.gate_status, 'BLOCKED');
+  assert.equal(bare.required_checks.find(check => check.id === 'REQ-MME-03').passed, false);
+
+  const good = await enforceDeterministicGate({}, `Patient v. General Hospital, 200 A.D.3d 100, shows how courts treat a missed diagnosis. ${DISCLAIMER}`, 3, 'personal', MM_CASES);
+  assert.equal(good.gate_status, 'PASSED');
+  assert.deepEqual(good.citation_audit.map(item => item.status), ['ANCHORED']);
+  assert.match(good.human_verification_checklist[0], /CPLR §214-a/);
+});
+
+test('the gate blocks a guaranteed recovery but not a sentence that rules one out', async () => {
+  const promise = await enforceDeterministicGate({}, `Your family is guaranteed to receive $1,000,000. ${DISCLAIMER}`, 3, 'estate', MM_CASES);
+  assert.equal(promise.gate_status, 'BLOCKED');
+  assert.equal(promise.prohibited_checks.find(check => check.id === 'PROH-MME-02').violated, true);
+  const honest = await enforceDeterministicGate({}, `No one can guarantee that you will receive $1,000,000. ${DISCLAIMER}`, 3, 'estate', MM_CASES);
+  assert.equal(honest.prohibited_checks.find(check => check.id === 'PROH-MME-02').violated, false);
+  assert.equal(honest.gate_status, 'PASSED');
+});
+
+test('a blocked draft is repaired in code and the first attempt is kept, with no AI or CourtListener calls in tests', async () => {
+  const draft = 'A missed diagnosis can be malpractice. In Smith v. Mercy Hospital, 999 A.D.3d 111, a court agreed, and Patient v. General Hospital is similar.';
+  let outbound = 0;
+  const { finalText, evaluation } = await withOutboundHttp(async () => { outbound += 1; return jsonResponse([]); }, () =>
+    evaluateAndRemediateDraft({ openai: null, messages: [], draftText: draft, turn: 3, mode: 'personal', retrievedCases: MM_CASES }));
+  assert.equal(outbound, 0);
+  assert.equal(finalText, `A missed diagnosis can be malpractice. In Smith v. Mercy Hospital, 999 A.D.3d 111 ${VERIFY_PLACEHOLDER}, a court agreed, and Patient v. General Hospital is similar.\n\n${DISCLAIMER}`);
+  assert.equal(evaluation.domain_id, 'nyc_malpractice_personal');
+  assert.equal(evaluation.gate_status, 'PASSED');
+  assert.equal(evaluation.first_pass_compliant, false);
+  assert.deepEqual(evaluation.attempts.map(attempt => attempt.gate_status), ['BLOCKED', 'PASSED']);
+  assert.equal(evaluation.attempts[0].draft_text, draft);
+  assert.deepEqual(evaluation.initial_coaching.failed_required.map(check => check.id), ['REQ-MM-03']);
+  assert.deepEqual(evaluation.initial_coaching.violated_prohibited.map(check => check.id), ['PROH-MM-01']);
+  // The browser gets the verdict, never the blocked draft.
+  const shown = toPublicEvaluation(evaluation);
+  assert.ok(!JSON.stringify(shown).includes('draft_text'));
+  assert.equal(shown.gate_status, 'PASSED');
+});
+
+// ─── The gate in the app ──────────────────────────────────────────────────────
+
+test('POST /api/ask grades the reply, sends the verdict, and saves the full audit with the conversation', async () => {
+  clearSearchCache();
+  const server = await startServer(app);
+  try {
+    for (const [mode, domain] of [['personal', 'nyc_malpractice_personal'], ['estate', 'nyc_malpractice_estate']]) {
+      const world = fakeWorld({ answer: 'In Smith v. Mercy Hospital, 999 A.D.3d 111, a court ruled for the family. When did this happen?' });
+      await withOutboundHttp(world.handler, async () => {
+        const { response, body } = await postJson(server.baseUrl, '/api/ask', {
+          question: 'My name is Jane Roe, call me at 555-123-4567. The hospital missed my cancer.', mode, sessionId: `sess-gate-${mode}`, history: [],
+        });
+        assert.equal(response.status, 200);
+        // The invented case is flagged and the disclaimer added before the visitor sees the reply.
+        assert.ok(body.answer.includes(`999 A.D.3d 111 ${VERIFY_PLACEHOLDER}`), body.answer);
+        assert.ok(body.answer.endsWith(DISCLAIMER));
+        assert.equal(body.evaluation.domain_id, domain);
+        assert.equal(body.evaluation.gate_status, 'PASSED');
+        assert.equal(body.evaluation.first_pass_compliant, false);
+        assert.ok(!JSON.stringify(body.evaluation).includes('draft_text'), 'a blocked draft reached the browser');
+      });
+      // The drafting model was told the rules it is graded on, and current law.
+      const system = world.calls.openai.find(call => call.kind === 'answer').request.messages[0].content;
+      assert.match(system, /COMPLIANCE GATE/);
+      assert.match(system, /Grieving Families Act is not law/);
+      // The case analysis is told current law too.
+      const analysis = world.calls.openai.filter(call => call.kind === 'caseAnalysis');
+      for (const call of analysis) assert.match(call.request.messages[0].content, /Grieving Families Act is not law/);
+      // The full audit, with the blocked first draft, is saved with the conversation for the firm;
+      // the chat text is not mined for a name or phone number.
+      const saved = world.calls.sql.find(call => /^INSERT INTO conversations/.test(call.query));
+      assert.doesNotMatch(saved.query, /\bname\b|\bphone\b|best_time/);
+      const audit = JSON.parse(saved.params.find(param => typeof param === 'string' && param.includes('"gate_status"')));
+      assert.equal(audit.domain_id, domain);
+      assert.equal(audit.attempts[0].draft_text, 'In Smith v. Mercy Hospital, 999 A.D.3d 111, a court ruled for the family. When did this happen?');
+    }
+  } finally {
+    await server.close();
+  }
+});
+
+test('health reports that the gate rubrics load', async () => {
+  const server = await startServer(app);
+  try {
+    const body = await (await fetch(`${server.baseUrl}/health`)).json();
+    assert.equal(body.gatekeeper, 'ok');
+  } finally {
+    await server.close();
+  }
+});
+
+test('a lead is accepted only with all three supervising-attorney checks confirmed', async () => {
+  const calls = [];
+  const handler = async (url, init) => {
+    const { query, params } = JSON.parse(init.body);
+    const q = query.replace(/\s+/g, ' ').trim();
+    calls.push(q);
+    if (/FROM firm_tokens ft JOIN firms f/.test(q)) {
+      return params.includes('firm-token') ? rowsResponse([['firm_id', INT], ['name', TEXT]], [['7', 'Test Firm']]) : rowsResponse([], []);
+    }
+    if (/^SELECT \* FROM leads WHERE id = \$1 AND firm_id = \$2/.test(q)) return rowsResponse([['id', INT], ['status', TEXT]], [['501', 'pending']]);
+    if (/^UPDATE leads SET status = 'accepted'/.test(q)) return rowsResponse([['id', INT]], [['501']], 'UPDATE');
+    return jsonResponse(EMPTY_ROWS);
+  };
+  const all = { sol_and_notice_verified: true, conflict_check_completed: true, case_quality_reviewed: true };
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(handler, async () => {
+      for (const hitlVerification of [undefined, {}, { ...all, case_quality_reviewed: false }, { ...all, conflict_check_completed: 'true' }]) {
+        const { response, body } = await postJson(server.baseUrl, '/api/leads/501/accept', { token: 'firm-token', hitlVerification });
+        assert.equal(response.status, 400, JSON.stringify(hitlVerification));
+        assert.match(body.error, /three supervising-attorney checks/);
+      }
+      assert.ok(!calls.some(q => /UPDATE leads/.test(q)), 'a lead was accepted without the checks');
+      assert.equal((await postJson(server.baseUrl, '/api/leads/501/accept', { token: 'wrong', hitlVerification: all })).response.status, 401);
+      const { response, body } = await postJson(server.baseUrl, '/api/leads/501/accept', { token: 'firm-token', hitlVerification: all });
+      assert.equal(response.status, 200);
+      assert.deepEqual(body, { ok: true });
     });
   } finally {
     await server.close();

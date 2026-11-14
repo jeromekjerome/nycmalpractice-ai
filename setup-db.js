@@ -73,6 +73,7 @@ async function setup() {
   await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS lead_score JSONB`;               // latest qualifying lead score
   await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS contact_consent_at TIMESTAMPTZ`; // when the visitor agreed to be contacted
   await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS contact_consent_text TEXT`;      // the exact wording agreed to
+  await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS gate_audit JSONB`;               // the gate's audit of the latest reply
 
   await sql`
     CREATE TABLE IF NOT EXISTS user_interactions (

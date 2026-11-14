@@ -38,6 +38,53 @@
     .notice.error { background: rgba(229,92,92,0.1); border: 1px solid rgba(229,92,92,0.3); color: #e55c5c; }
     .notice.success { background: rgba(58,158,104,0.1); border: 1px solid rgba(58,158,104,0.3); color: var(--success); }
     .status-banner { padding: 1rem 1.25rem; margin-bottom: 1rem; font-size: 0.92rem; }
+
+    /* Compliance audit of the AI's last reply (gatekeeper.js) */
+    .gate-card [hidden] { display: none; }
+    .gate-badge { display: inline-flex; align-items: center; gap: 0.45rem; padding: 4px 12px; border-radius: 99px; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.03em; margin-bottom: 0.75rem; }
+    .gate-badge::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+    .gate-passed  { background: rgba(58,158,104,0.15); color: #5cc98f; border: 1px solid rgba(58,158,104,0.4); }
+    .gate-blocked { background: rgba(229,92,92,0.13); color: #e55c5c; border: 1px solid rgba(229,92,92,0.4); }
+    .gate-none    { background: rgba(107,122,148,0.15); color: var(--muted); border: 1px solid var(--border); }
+    .gate-summary { font-size: 0.85rem; line-height: 1.6; }
+    .gate-summary p + p { margin-top: 0.3rem; }
+    .gate-meta { font-size: 0.76rem; color: var(--muted); }
+    .gate-empty { font-size: 0.82rem; color: var(--muted); }
+    .gate-alert { color: #e55c5c; font-weight: 600; }
+    .gate-coaching { padding-left: 0.7rem; border-left: 3px solid #c9a84c; color: var(--muted); overflow-wrap: anywhere; }
+    .gate-section { margin-top: 1.1rem; }
+    .gate-section-title { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 0.35rem; }
+    .cite-list, .check-list { list-style: none; padding: 0; margin: 0; }
+    .cite-row { padding: 0.55rem 0; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
+    .cite-row:last-child { border-bottom: none; }
+    .cite-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; }
+    .cite-text { font-weight: 600; overflow-wrap: anywhere; }
+    .cite-chip { flex-shrink: 0; padding: 2px 9px; border-radius: 99px; font-size: 0.66rem; font-weight: 700; letter-spacing: 0.05em; }
+    .chip-anchored    { background: rgba(58,158,104,0.15); color: #5cc98f; border: 1px solid rgba(58,158,104,0.4); }
+    .chip-placeholder { background: rgba(201,168,76,0.15); color: #c9a84c; border: 1px solid rgba(201,168,76,0.35); }
+    .chip-unanchored  { background: rgba(229,92,92,0.13); color: #e55c5c; border: 1px solid rgba(229,92,92,0.4); }
+    .chip-unknown     { background: rgba(107,122,148,0.15); color: var(--muted); border: 1px solid var(--border); }
+    .cite-detail { margin-top: 0.25rem; font-size: 0.78rem; color: var(--muted); overflow-wrap: anywhere; }
+    .cite-detail a { color: var(--accent); }
+    .cl-verified, .cl-verified a { color: #5cc98f; }
+    .cl-notfound { color: #e55c5c; font-weight: 600; }
+    .check-group { margin-top: 0.5rem; font-size: 0.74rem; color: var(--muted); }
+    .check-row { display: flex; gap: 0.55rem; padding: 0.3rem 0; font-size: 0.82rem; line-height: 1.5; }
+    .check-mark { flex-shrink: 0; width: 1rem; font-weight: 700; }
+    .check-pass .check-mark { color: #5cc98f; }
+    .check-fail .check-mark { color: #e55c5c; }
+    .check-id { font-size: 0.74rem; font-weight: 600; letter-spacing: 0.02em; color: var(--muted); margin-right: 0.35rem; }
+    .check-detail { display: block; font-size: 0.76rem; color: var(--muted); overflow-wrap: anywhere; }
+
+    /* Supervising attorney checks: all three unlock Accept */
+    .hitl-panel { margin-bottom: 1rem; padding: 0.9rem 1rem 0.6rem; border: 1px solid var(--border); border-radius: 10px; background: rgba(255,255,255,0.02); }
+    .hitl-title { font-size: 0.9rem; font-weight: 700; margin-bottom: 0.25rem; }
+    .hitl-intro { font-size: 0.78rem; color: var(--muted); margin-bottom: 0.35rem; }
+    .hitl-label { display: flex; align-items: flex-start; gap: 0.7rem; min-height: 44px; padding: 0.65rem 0.5rem; margin: 0 -0.5rem; border-radius: 8px; font-size: 0.88rem; line-height: 1.5; cursor: pointer; }
+    .hitl-label:hover { background: rgba(255,255,255,0.04); }
+    .hitl-check { flex-shrink: 0; width: 1.15rem; height: 1.15rem; margin-top: 0.12rem; accent-color: var(--accent); cursor: pointer; }
+    .hitl-check:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .hitl-help { margin: -0.35rem 0 0.5rem 1.85rem; font-size: 0.76rem; line-height: 1.5; color: var(--muted); }
   </style>
 </head>
 <body>
@@ -81,10 +128,39 @@
           <div id="transcript"></div>
         </section>
 
+        <!-- The gate's audit of the AI's last reply in this conversation (gatekeeper.js). -->
+        <section class="glass-panel panel gate-card" id="gatekeeperCard">
+          <h2 class="panel-title">Compliance audit of the AI's last reply</h2>
+          <div id="gateStatusBadge" class="gate-badge gate-none"></div>
+          <div id="gateSummary" class="gate-summary"></div>
+          <div class="gate-section">
+            <h3 class="gate-section-title">Citation audit</h3>
+            <div id="citationAudit"></div>
+          </div>
+          <div class="gate-section" id="gateChecks" hidden></div>
+        </section>
+
         <section class="glass-panel panel" id="actionsPanel">
           <h2 class="panel-title">Your decision</h2>
+          <!-- Static on purpose: the checks exist before any data loads and always start unchecked. -->
+          <div class="hitl-panel" id="hitlChecklist" role="group" aria-labelledby="hitlHeading">
+            <h3 class="hitl-title" id="hitlHeading">Supervising attorney checks</h3>
+            <p class="hitl-intro">Confirm all three to accept this lead. They are not saved: they start unchecked each time this page opens.</p>
+            <div class="hitl-item">
+              <label class="hitl-label"><input type="checkbox" class="hitl-check" id="hitlSol" autocomplete="off" aria-describedby="hitlSolHelp"> I verified the filing deadline myself (CPLR §214-a, or EPTL §5-4.1 for a death) and any 90-day notice of claim for a public hospital.</label>
+              <p class="hitl-help" id="hitlSolHelp" hidden></p>
+            </div>
+            <div class="hitl-item">
+              <label class="hitl-label"><input type="checkbox" class="hitl-check" id="hitlConflict" autocomplete="off" aria-describedby="hitlConflictHelp"> Our conflict-of-interest check is complete, before anyone contacts the client.</label>
+              <p class="hitl-help" id="hitlConflictHelp" hidden></p>
+            </div>
+            <div class="hitl-item">
+              <label class="hitl-label"><input type="checkbox" class="hitl-check" id="hitlQuality" autocomplete="off" aria-describedby="hitlQualityHelp"> I reviewed the case quality, the prospects for physician review (CPLR §3012-a) and the cases the AI cited.</label>
+              <p class="hitl-help" id="hitlQualityHelp" hidden></p>
+            </div>
+          </div>
           <div class="actions">
-            <button class="action-btn primary" id="acceptButton" type="button">Accept lead</button>
+            <button class="action-btn primary" id="acceptButton" type="button" disabled>Complete the three checks to accept</button>
             <button class="action-btn secondary" id="declineButton" type="button">Decline lead</button>
           </div>
           <div id="declineConfirm" style="display:none;margin-top:0.75rem">
@@ -120,6 +196,12 @@
     const token  = params.get('token');
     const $ = id => document.getElementById(id);
     let lead;
+    let acceptInFlight = false;
+    const ACCEPT_LOCKED_LABEL = 'Complete the three checks to accept';
+    const ACCEPT_READY_LABEL  = 'Accept lead';
+    // Audit links may only ever point at CourtListener over HTTPS.
+    const SAFE_LINK_PREFIX = 'https://www.courtlistener.com/';
+    const CITATION_CHIPS = new Map([['ANCHORED', 'chip-anchored'], ['PLACEHOLDER_FLAGGED', 'chip-placeholder'], ['UNANCHORED', 'chip-unanchored']]);
 
     const formatPhone = digits => (/^\d{10}$/.test(digits || '') ? `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}` : digits || '—');
     const formatDate = value => (value ? new Date(value).toLocaleString('en-US', { timeZone: 'America/New_York', dateStyle: 'medium', timeStyle: 'short' }) + ' ET' : '');
@@ -194,6 +276,10 @@
       });
       $('transcript').replaceChildren(...turns);
 
+      renderGatekeeper(info.evaluation);
+      renderHitlHelp(info.evaluation);
+      updateAcceptGate();
+
       if (data.status !== 'pending') {
         $('actionsPanel').style.display = 'none';
         const banner = $('statusBanner');
@@ -204,15 +290,22 @@
     }
 
     async function respond(action) {
+      // Accept is sent only with all three checks confirmed right now, even if the button was re-enabled by hand.
+      if (action === 'accept' && (acceptInFlight || !hitlComplete())) { updateAcceptGate(); return; }
       const buttons = document.querySelectorAll('#actionsPanel button');
       buttons.forEach(button => { button.disabled = true; });
+      if (action === 'accept') acceptInFlight = true;
       try {
+        const payload = action === 'accept' ? { token, hitlVerification: hitlVerification() } : { token };
         const res  = await fetch(`/api/leads/${encodeURIComponent(leadId)}/${action}`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }),
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
         });
         const data = await res.json();
         if (!res.ok || !data.ok) { notice(data.error || 'That did not work. Please try again.', 'error'); return; }
         $('declineConfirm').style.display = 'none';
+        // Answered: the checks can no longer change, and Accept stays locked.
+        lead.status = action === 'accept' ? 'accepted' : 'declined';
+        hitlChecks().forEach(box => { box.disabled = true; });
         if (action === 'accept') {
           notice('Lead accepted. Please contact the client promptly.', 'success');
         } else {
@@ -222,11 +315,181 @@
       } catch {
         notice('Network error — try again.', 'error');
       } finally {
+        acceptInFlight = false;
         buttons.forEach(button => { button.disabled = false; });
+        updateAcceptGate();
       }
     }
 
+    // ── Supervising attorney checks ──────────────────────────────────────────────
+    function hitlChecks() {
+      return Array.from(document.querySelectorAll('.hitl-check'));
+    }
+
+    function hitlVerification() {
+      const checked = id => $(id)?.checked === true;
+      return {
+        sol_and_notice_verified:  checked('hitlSol'),
+        conflict_check_completed: checked('hitlConflict'),
+        case_quality_reviewed:    checked('hitlQuality'),
+      };
+    }
+
+    function hitlComplete() {
+      return hitlChecks().length === 3 && Object.values(hitlVerification()).every(value => value === true);
+    }
+
+    // The only place the accept button is enabled, disabled or relabelled.
+    function updateAcceptGate() {
+      const button = $('acceptButton');
+      const ready = !acceptInFlight && lead?.status === 'pending' && hitlComplete();
+      button.disabled = !ready;
+      button.textContent = acceptInFlight ? 'Accepting…' : (hitlComplete() ? ACCEPT_READY_LABEL : ACCEPT_LOCKED_LABEL);
+    }
+
+    function resetHitlChecks() {
+      hitlChecks().forEach(box => { box.checked = false; });
+      updateAcceptGate();
+    }
+
+    // The gate's own prompts for the reviewer, under the matching check.
+    function renderHitlHelp(evaluation) {
+      const prompts = isObj(evaluation) && Array.isArray(evaluation.human_verification_checklist) ? evaluation.human_verification_checklist : [];
+      ['hitlSolHelp', 'hitlConflictHelp', 'hitlQualityHelp'].forEach((id, i) => {
+        $(id).textContent = plain(prompts[i]);
+        $(id).hidden = !$(id).textContent;
+      });
+    }
+
+    // ── Compliance audit ─────────────────────────────────────────────────────────
+    // `evaluation` is written by gatekeeper.js; any field may be missing, so nothing here assumes a shape.
+    function escHtml(value) {
+      return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+    function isObj(value) { return value !== null && typeof value === 'object' && !Array.isArray(value); }
+    function asObjects(list) { return Array.isArray(list) ? list.filter(isObj) : []; }
+    function plain(value) { return typeof value === 'string' || typeof value === 'number' ? String(value).trim() : ''; }
+
+    // Only CourtListener HTTPS URLs become links; anything else stays plain text.
+    function linkOrText(label, url) {
+      return typeof url === 'string' && url.startsWith(SAFE_LINK_PREFIX)
+        ? `<a href="${escHtml(url)}" target="_blank" rel="noopener noreferrer">${escHtml(label)}</a>`
+        : escHtml(label);
+    }
+
+    function renderGatekeeper(evaluation) {
+      const ev = isObj(evaluation) ? evaluation : null;
+      const state = gateState(ev);
+      // No evaluation, or one without a recognisable status, reads NOT ON FILE; it is never shown as passed.
+      const badge = { PASSED: ['gate-passed', 'Gate status: PASSED'], BLOCKED: ['gate-blocked', 'Gate status: BLOCKED'] }[state] || ['gate-none', 'Gate status: NOT ON FILE'];
+      $('gateStatusBadge').className = `gate-badge ${badge[0]}`;
+      $('gateStatusBadge').textContent = badge[1];
+      $('gateSummary').innerHTML = gateSummaryHtml(ev, state);
+      $('citationAudit').innerHTML = citationAuditHtml(ev);
+      $('gateChecks').innerHTML = ev ? gateChecksHtml(ev) : '';
+      $('gateChecks').hidden = !ev;
+    }
+
+    function gateState(ev) {
+      if (!ev) return 'NONE';
+      const status = plain(ev.gate_status).toUpperCase();
+      return status === 'PASSED' || status === 'BLOCKED' ? status : 'UNKNOWN';
+    }
+
+    function attemptCount(ev) {
+      const counts = [Number(ev.final_attempt_number), Array.isArray(ev.attempts) ? ev.attempts.length : NaN,
+        typeof ev.auto_retries_used === 'number' ? ev.auto_retries_used + 1 : NaN].filter(Number.isFinite);
+      return counts.length ? Math.max(...counts) : 0;
+    }
+
+    function checkLabel(check) {
+      const id = plain(check.id);
+      const name = plain(check.name);
+      return id && name ? `${id} — ${name}` : (id || name || 'Unnamed check');
+    }
+
+    // A required check passes only on an explicit passed: true; a prohibited one is clean only on violated: false.
+    function failingChecks(ev) {
+      return [...asObjects(ev.required_checks).filter(check => check.passed !== true), ...asObjects(ev.prohibited_checks).filter(check => check.violated !== false)];
+    }
+
+    function gateSummaryHtml(ev, state) {
+      if (!ev) return '<p class="gate-empty">No compliance audit is stored for this lead.</p>';
+      const evaluator = plain(ev.evaluator) || 'not recorded';
+      const lines = [`<p class="gate-meta">Rubric: ${escHtml(plain(ev.domain_id) || plain(ev.domain_name) || 'not recorded')} · Evaluator: ${escHtml(evaluator)}</p>`];
+      const attempts = attemptCount(ev);
+      const attemptsNote = attempts > 1 ? ` (${attempts} attempts)` : '';
+      if (state === 'PASSED') {
+        const coaching = isObj(ev.initial_coaching) ? ev.initial_coaching : {};
+        if (ev.first_pass_compliant === false || attempts > 1 || plain(coaching.gate_status).toUpperCase() === 'BLOCKED') {
+          // No silent fixes: the firm always sees what the first draft got wrong.
+          const firstFailures = [...asObjects(coaching.failed_required), ...asObjects(coaching.violated_prohibited)].map(checkLabel);
+          const findings = plain(coaching.summary) || (firstFailures.length ? `Attempt 1 failed: ${firstFailures.join('; ')}.` : 'The findings against the first attempt were not recorded.');
+          lines.push(`<p>The first draft was blocked and rewritten${escHtml(attemptsNote)}.</p>`, `<p class="gate-coaching">${escHtml(findings)}</p>`);
+        } else if (ev.first_pass_compliant === true || attempts === 1) {
+          lines.push('<p>Passed on the first attempt.</p>');
+        } else {
+          lines.push('<p>Passed. The attempt history was not recorded.</p>');
+        }
+        if (evaluator === 'deterministic_fallback' || evaluator === 'llm_incomplete') {
+          lines.push('<p class="gate-alert">The rubric evaluator was unavailable or incomplete for this reply, so only the code-level checks (citations, disclaimer, guarantee language) stand behind this status.</p>');
+        }
+      } else if (state === 'BLOCKED') {
+        const failing = failingChecks(ev).map(checkLabel);
+        lines.push(`<p class="gate-alert">Blocked: the reply the client saw did NOT clear the gate.${attempts > 1 ? ` A rewrite was attempted${escHtml(attemptsNote)} and still failed.` : ''}</p>`);
+        lines.push(`<p>${failing.length ? `Failing checks: ${escHtml(failing.join('; '))}.` : 'No failing check details were recorded.'}</p>`);
+      } else {
+        lines.push('<p class="gate-alert">An audit is stored for this lead, but its gate status is missing or unrecognised. Treat the AI reply as unverified.</p>');
+      }
+      return lines.join('\n');
+    }
+
+    function citationAuditHtml(ev) {
+      if (!ev || !Array.isArray(ev.citation_audit)) return '<p class="gate-empty">No citation audit on file.</p>';
+      if (ev.citation_audit.length === 0) return '<p class="gate-empty">No case citations in the AI reply.</p>';
+      return `<ul class="cite-list">${ev.citation_audit.map(citationRowHtml).join('')}</ul>`;
+    }
+
+    function citationRowHtml(entry) {
+      const item = isObj(entry) ? entry : { citation_text: entry };
+      const status = plain(item.status);
+      const lookup = plain(item.courtlistener_status);
+      let detail = '';
+      if (lookup === 'VERIFIED') {
+        const caseName = plain(item.courtlistener_case_name);
+        detail = `<div class="cite-detail cl-verified">${linkOrText(`CourtListener: VERIFIED${caseName ? ` — ${caseName}` : ''}`, item.courtlistener_url)}</div>`;
+      } else if (lookup === 'NOT_FOUND_404') {
+        detail = '<div class="cite-detail cl-notfound">CourtListener: NOT FOUND</div>';
+      } else if (plain(item.matched_case)) {
+        detail = `<div class="cite-detail">${linkOrText(`Matches a case the search returned: ${plain(item.matched_case)}`, item.matched_case_url)}</div>`;
+      }
+      return `<li class="cite-row"><div class="cite-head"><span class="cite-text">${escHtml(plain(item.citation_text) || 'Citation text not recorded')}</span>` +
+        `<span class="cite-chip ${CITATION_CHIPS.get(status) || 'chip-unknown'}">${escHtml(status || 'UNKNOWN')}</span></div>${detail}</li>`;
+    }
+
+    function gateChecksHtml(ev) {
+      const required = asObjects(ev.required_checks).map(check => checkRowHtml(check.passed === true, check, plain(check.evidence_or_gap)));
+      const prohibited = asObjects(ev.prohibited_checks).map(check => {
+        const quote = plain(check.offending_quote);
+        const detail = check.violated === true ? (quote ? `Offending quote: “${quote}”` : '') : (check.violated !== false ? 'Violation status not recorded.' : '');
+        return checkRowHtml(check.violated === false, check, detail);
+      });
+      const group = (title, rows) => (rows.length ? `<p class="check-group">${title}</p><ul class="check-list">${rows.join('')}</ul>` : '');
+      const body = group('Required', required) + group('Prohibited', prohibited);
+      return `<h3 class="gate-section-title">Rubric checks</h3>${body || '<p class="gate-empty">No rubric checks were recorded.</p>'}`;
+    }
+
+    function checkRowHtml(ok, check, detail) {
+      return `<li class="check-row ${ok ? 'check-pass' : 'check-fail'}"><span class="check-mark" role="img" aria-label="${ok ? 'Pass' : 'Fail'}">${ok ? '✓' : '✗'}</span>` +
+        `<span class="check-body"><span class="check-id">${escHtml(plain(check.id))}</span><span class="check-name">${escHtml(plain(check.name))}</span>` +
+        `${detail ? `<span class="check-detail">${escHtml(detail)}</span>` : ''}</span></li>`;
+    }
+
     $('acceptButton').addEventListener('click', () => respond('accept'));
+    hitlChecks().forEach(box => box.addEventListener('change', updateAcceptGate));
+    // The checks are never kept: every load, and every return through the back button, starts unchecked.
+    resetHitlChecks();
+    window.addEventListener('pageshow', event => { if (event.persisted) resetHitlChecks(); });
     $('declineButton').addEventListener('click', () => { $('declineConfirm').style.display = ''; });
     $('cancelDecline').addEventListener('click', () => { $('declineConfirm').style.display = 'none'; });
     $('confirmDecline').addEventListener('click', () => respond('decline'));

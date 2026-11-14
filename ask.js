@@ -5,6 +5,7 @@ import { searchMalpracticeCases, extractCaseType } from './courtlistener.js';
 import { rememberCases, recallCases } from './case-memory.js';
 import { scoreLead } from './auction.js';
 import { buildModelList, chatCompletionsWithFallback } from './openaiModelFailover.js';
+import { evaluateAndRemediateDraft, renderRubricForPrompt, renderCurrentLawForPrompt } from './gatekeeper.js';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const ANSWER_MODELS = buildModelList(
@@ -85,9 +86,12 @@ export async function answerUserQuestion({ question, mode = 'personal', sessionI
 
   const caseContext = buildCaseContext(cases, { recalled });
 
-  const systemPrompt = mode === 'estate'
+  // The prompt for the mode, then the rules the gate grades the reply on (rubrics/*.json).
+  const basePrompt = mode === 'estate'
     ? buildEstatePrompt(turn, caseContext, caseType)
     : buildPersonalPrompt(turn, caseContext, caseType);
+  const complianceRules = rubricPromptBlock(mode, turn);
+  const systemPrompt = complianceRules ? `${basePrompt}\n\n${complianceRules}` : basePrompt;
 
   const messages = [
     { role: 'system', content: systemPrompt },
@@ -102,10 +106,41 @@ export async function answerUserQuestion({ question, mode = 'personal', sessionI
   ];
 
   const [completion, leadScore, caseAnalysis] = await Promise.all(parallelTasks);
-  await remembering;
-  const answer = completion.choices[0].message.content;
+  const draft = completion.choices[0].message.content;
 
-  return { answer, cases, caseType, leadScore, caseAnalysis, turn };
+  // Gatekeeper & Coach: grade the draft against the rubric; a blocked draft is rewritten once.
+  let answer = draft;
+  let evaluation = null;
+  try {
+    const gated = await evaluateAndRemediateDraft({
+      openai,
+      auxModels: AUX_MODELS,
+      answerModels: ANSWER_MODELS,
+      messages,
+      draftText: draft,
+      turn,
+      mode,
+      retrievedCases: cases,
+    });
+    answer = gated.finalText;
+    evaluation = gated.evaluation;
+  } catch (err) {
+    // The gate itself is broken (for example a rubric file missing from the deployment). Keep
+    // answering, but make the failure impossible to miss in the logs.
+    console.error('[Gatekeeper] UNAVAILABLE — reply served UNGATED:', err);
+  }
+  await remembering;
+
+  return { answer, cases, caseType, leadScore, caseAnalysis, turn, evaluation };
+}
+
+function rubricPromptBlock(mode, turn) {
+  try {
+    return renderRubricForPrompt(mode, turn);
+  } catch (err) {
+    console.error('[Gatekeeper] Could not render rubric for the system prompt:', err.message);
+    return '';
+  }
 }
 
 // ─── System Prompts ────────────────────────────────────────────────────────────
@@ -207,6 +242,8 @@ async function analyzeMalpracticeSituation(question, history, cases, caseType, m
     const caseSnippets = cases.slice(0, 3)
       .map(c => c.caseName + (c.snippet ? ': ' + c.snippet.substring(0, 150) : ''))
       .join('\n');
+    // New York law the model may state wrongly (rubrics/ny_malpractice_current_law.json).
+    const currentLaw = renderCurrentLawForPrompt();
 
     const res = await chatCompletionsWithFallback(openai, {
       models: AUX_MODELS,
@@ -220,7 +257,7 @@ ${allText.substring(0, 1500)}
 
 Relevant NY cases:
 ${caseSnippets.substring(0, 500)}
-
+${currentLaw ? `\n${currentLaw}\n` : ''}
 Respond ONLY with valid JSON:
 {
   "score": 7,

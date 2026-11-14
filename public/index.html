@@ -150,6 +150,15 @@
 
   </div>
 
+  <!-- Shown when the visitor names a public hospital (deadlines.js). script.js keeps the paragraph for the current mode. -->
+  <template id="publicHospitalNoticeTemplate">
+    <div class="deadline-notice" role="note">
+      <div class="deadline-title">⏱️ Public hospital: a 90-day deadline may apply</div>
+      <p class="deadline-text deadline-personal">If your care was at a hospital or clinic run by New York City, a county or the State (for example NYC Health + Hospitals/Bellevue, Kings County, Elmhurst or Jacobi, or SUNY Downstate), a written notice of the claim generally must be filed within 90 days of the malpractice. That is far sooner than the usual deadline, and a court allows a late notice only in limited cases. Speak with a malpractice attorney as soon as possible.</p>
+      <p class="deadline-text deadline-estate">If your loved one was treated at a hospital or clinic run by New York City, a county or the State (for example NYC Health + Hospitals/Bellevue, Kings County, Elmhurst or Jacobi, or SUNY Downstate), a written notice of the wrongful-death claim generally must be filed within 90 days after the estate's representative is appointed. Claims for the patient's own injuries can have earlier deadlines. Speak with a malpractice attorney as soon as possible.</p>
+    </div>
+  </template>
+
   <!-- Contact form, offered from the referral step. The consent sentence must match CONTACT_CONSENT_TEXT in site.js. -->
   <template id="contactFormTemplate">
     <form class="contact-card" novalidate>

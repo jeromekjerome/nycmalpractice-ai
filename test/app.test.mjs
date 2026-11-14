@@ -1407,3 +1407,61 @@ test('with no saved decisions and no search, the reply falls back to general pri
     await server.close();
   }
 });
+
+// ─── Public hospital deadline ─────────────────────────────────────────────────
+
+test("a public hospital in the visitor's words is recognised, and not one named only in a reply", async () => {
+  const { mentionsPublicHospital } = await import('../deadlines.js');
+  const said = content => [{ role: 'user', content }];
+  for (const words of [
+    'They misread my scan at Bellevue.', 'I gave birth at Kings County Hospital', 'jacobi ER sent me home', 'NYC Health + Hospitals/Elmhurst',
+    'it was H+H Woodhull', 'a city hospital in the Bronx', 'the state-run clinic', 'SUNY Downstate did my surgery', 'Coney Island Hospital',
+    'my mother was at Sea View nursing home', 'Lincoln Hospital in the Bronx',
+  ]) {
+    assert.ok(mentionsPublicHospital(said(words)), words);
+  }
+  for (const words of ['My doctor at Mount Sinai missed it.', 'I live downstate.', 'Dr. Carter operated on me', 'NYU Langone', 'a private clinic in Queens', 'Abraham Lincoln']) {
+    assert.ok(!mentionsPublicHospital(said(words)), words);
+  }
+  // The replies name Bellevue as an example; that alone does not count.
+  assert.ok(!mentionsPublicHospital([{ role: 'assistant', content: 'For example Bellevue, Kings County or Elmhurst.' }, { role: 'user', content: 'It was NYU.' }]));
+});
+
+test('POST /api/ask tells the page to show the public hospital deadline when the visitor names one', async () => {
+  clearSearchCache();
+  const server = await startServer(app);
+  try {
+    for (const [question, expected] of [['They missed my stroke at Bellevue.', 'public_hospital'], ['My dentist in Manhattan broke my jaw.', null]]) {
+      const world = fakeWorld();
+      await withOutboundHttp(world.handler, async () => {
+        const { response, body } = await postJson(server.baseUrl, '/api/ask', { question, mode: 'personal', sessionId: 'sess-public-hospital', history: [] });
+        assert.equal(response.status, 200);
+        assert.equal(body.deadlineNotice, expected, question);
+      });
+    }
+  } finally {
+    await server.close();
+  }
+});
+
+test("a restored conversation brings back the public hospital deadline, and not the visitor's name or phone number", async () => {
+  const handler = async (url, init) => {
+    const query = JSON.parse(init.body).query.replace(/\s+/g, ' ').trim();
+    assert.doesNotMatch(query, /\bname\b|\bphone\b/, 'the conversation route read the contact details');
+    return rowsResponse([['session_id', TEXT], ['mode', TEXT], ['case_type', TEXT], ['history', JSONB]],
+      [['sess-restore', 'personal', 'birth_injury', JSON.stringify([{ role: 'user', content: 'I delivered at Woodhull.' }, { role: 'assistant', content: 'I am sorry.' }])]]);
+  };
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(handler, async () => {
+      const response = await fetch(`${server.baseUrl}/api/conversations/sess-restore`);
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.deadlineNotice, 'public_hospital');
+      assert.equal(body.history.length, 2);
+      assert.ok(!('name' in body) && !('phone' in body));
+    });
+  } finally {
+    await server.close();
+  }
+});

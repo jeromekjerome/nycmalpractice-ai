@@ -2628,3 +2628,58 @@ test('POST /api/ask still answers when the stored conversation cannot be read, w
   assert.ok(!world.calls.openai.some(call => call.kind === 'scoreLead'), 'an unverifiable history was scored');
   assert.ok(!world.calls.sql.some(call => /^INSERT INTO conversations/.test(call.query)), 'an unverifiable history was saved');
 });
+
+// ─── What each firm link opens ────────────────────────────────────────────────
+
+test('a firm link opens only what it was emailed for', async () => {
+  const BOOL_TYPE = 16;
+  const TOKENS = {
+    'auction-9': [9, null],
+    'lead-501':  [null, 501],
+    'portal':    [null, null],
+  };
+  const handler = async (url, init) => {
+    const { query, params } = JSON.parse(init.body);
+    const q = query.replace(/\s+/g, ' ').trim();
+    if (/FROM firm_tokens/.test(q)) {
+      const scope = TOKENS[params[0]];
+      return scope
+        ? rowsResponse([['firm_id', INT], ['name', TEXT], ['auction_id', INT], ['lead_id', INT], ['subscription_active', BOOL_TYPE]],
+          [['7', 'Test Firm', scope[0] == null ? null : String(scope[0]), scope[1] == null ? null : String(scope[1]), 't']])
+        : rowsResponse([], []);
+    }
+    return jsonResponse(EMPTY_ROWS);
+  };
+  const full = { sol_and_notice_verified: true, conflict_check_completed: true, case_quality_reviewed: true };
+  const server = await startServer(app);
+  const status = async (method, route, payload) => (await fetch(server.baseUrl + route, {
+    method, headers: { 'content-type': 'application/json' }, ...(payload ? { body: JSON.stringify(payload) } : {}),
+  })).status;
+  try {
+    await withOutboundHttp(handler, async () => {
+      // Auctions: only the link for that auction.
+      assert.equal(await status('GET', '/api/auctions/9?token=auction-9'), 404);   // allowed; this fake has no auction row
+      for (const token of ['lead-501', 'portal']) assert.equal(await status('GET', '/api/auctions/9?token=' + token), 403, token);
+      assert.equal(await status('GET', '/api/auctions/10?token=auction-9'), 403);
+      assert.equal(await status('POST', '/api/auctions/10/bid', { token: 'auction-9', amount: 500 }), 403);
+
+      // Leads: the link for that lead, or the portal link.
+      for (const token of ['lead-501', 'portal']) assert.equal(await status('GET', '/api/leads/501?token=' + token), 404, token);
+      assert.equal(await status('GET', '/api/leads/502?token=lead-501'), 403);
+      assert.equal(await status('GET', '/api/leads/501?token=auction-9'), 403);
+      assert.equal(await status('POST', '/api/leads/502/decline', { token: 'lead-501' }), 403);
+      assert.equal(await status('POST', '/api/leads/502/accept', { token: 'lead-501', hitlVerification: full }), 403);
+
+      // Account pages: only the portal link.
+      assert.equal(await status('GET', '/api/portal?token=portal'), 200);
+      for (const token of ['lead-501', 'auction-9']) {
+        assert.equal(await status('GET', '/api/portal?token=' + token), 403, token);
+        assert.equal(await status('GET', '/api/billing/portal?token=' + token), 403, token);
+        assert.equal(await status('PUT', '/api/portal/profile', { token, specializations: ['dental'] }), 403, token);
+        assert.equal(await status('PUT', '/api/firms/7/profile', { token, specializations: ['dental'] }), 401, token);
+      }
+    });
+  } finally {
+    await server.close();
+  }
+});

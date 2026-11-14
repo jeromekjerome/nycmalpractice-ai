@@ -22,8 +22,9 @@ export async function createSubscriptionCheckout({ stripeCustomerId, firmId }) {
     // The site address has a default (site.js); an unset APP_URL made Stripe refuse the checkout. A firm
     // that pays lands on the sign-up page's last step, not on the portal, which needs a sign-in link.
     success_url: `${APP_URL}/register.html?subscribed=1`,
-    cancel_url:  `${APP_URL}/register.html`,
+    cancel_url:  `${APP_URL}/register.html?step=4`,
     metadata: { firmId: String(firmId) },
+    client_reference_id: String(firmId),
     subscription_data: { metadata: { firmId: String(firmId) } },
   });
 }
@@ -57,8 +58,9 @@ export async function createRefund({ paymentIntentId, amountDollars, idempotency
   }, idempotencyKey ? { idempotencyKey } : undefined);
 }
 
-// The card a new subscription pays with, which later lead charges use.
-export async function getSubscriptionPaymentMethod(subscriptionId) {
+// A new subscription's card, which later lead charges use, and the firm it was created for (checkout puts
+// the firm id on the subscription as well as on the checkout session).
+export async function getSubscriptionDetails(subscriptionId) {
   const sub = await getStripe().subscriptions.retrieve(subscriptionId, { expand: ['default_payment_method'] });
-  return sub.default_payment_method?.id || null;
+  return { paymentMethodId: sub.default_payment_method?.id || null, firmId: sub.metadata?.firmId || null };
 }

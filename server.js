@@ -11,7 +11,7 @@ import { closeExpiredAuctions, createAuction, deliverColdLead, getAuctionStatus,
 import { registerFirm, sendVerificationCode, verifyPhoneCode, validateToken, updateFirmSubscription, getFirm, updateFirmProfile, createMagicLink, VerificationLimitError, recentDeclineCounts, linkOpensAuction, linkOpensLead, linkOpensAccount } from './firms.js';
 import { rateLimit } from './rate-limit.js';
 import nodemailer from 'nodemailer';
-import { createSubscriptionCheckout, createPortalSession, constructWebhookEvent, getSubscriptionPaymentMethod } from './stripe.js';
+import { createSubscriptionCheckout, createPortalSession, constructWebhookEvent, getSubscriptionDetails } from './stripe.js';
 import OpenAI from 'openai';
 import { buildModelList, probeAllModelChains } from './openaiModelFailover.js';
 import { APP_URL, CONTACT_CONSENT_TEXT, CONTACT_FORM_FROM_STEP } from './site.js';
@@ -183,6 +183,9 @@ app.post('/api/ask', limitChat, async (req, res) => {
     });
   } catch (err) {
     console.error('Error in /api/ask:', err);
+    // An auction being closed alongside this message is finished first: once the reply is sent the function
+    // may be suspended, leaving the auction part-way through.
+    await finishBeforeReply('closing expired auctions', closingAuctions, followUpDeadline());
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -302,7 +305,7 @@ app.put('/api/firms/:id/profile', async (req, res) => {
   const { specializations, serviceArea, contactName, token } = req.body;
   if (!(await ownsRegistration(token, req.params.id))) return res.status(401).json({ error: REGISTRATION_EXPIRED });
   try {
-    await updateFirmProfile(req.params.id, { specializations: specializations || [], serviceArea, contactName });
+    await updateFirmProfile(req.params.id, { specializations, serviceArea, contactName });
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -352,14 +355,27 @@ app.post('/api/webhooks/stripe', async (req, res) => {
 
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
-    const firmId  = session.metadata?.firmId || session.subscription_data?.metadata?.firmId;
-    if (firmId && session.subscription) {
+    if (session.subscription) {
       try {
-        const paymentMethodId = await getSubscriptionPaymentMethod(session.subscription);
-        await updateFirmSubscription(firmId, { stripeSubscriptionId: session.subscription, stripePaymentMethodId: paymentMethodId });
-      } catch (err) { console.error('Subscription activation error:', err.message); }
+        // The firm is named on the session (metadata or client_reference_id) and on the subscription; sessions
+        // created before this change named it only on the subscription, which this event does not carry.
+        const details = await getSubscriptionDetails(session.subscription);
+        const firmId  = session.metadata?.firmId || session.client_reference_id || details.firmId;
+        if (firmId) {
+          await updateFirmSubscription(firmId, { stripeSubscriptionId: session.subscription, stripePaymentMethodId: details.paymentMethodId });
+          console.log(`Firm ${firmId} subscription activated`);
+        } else {
+          console.error(`Checkout session ${session.id} names no firm; subscription ${session.subscription} not activated`);
+        }
+      } catch (err) {
+        // Answered 500 so Stripe retries the event; switching a subscription on is safe to repeat. It used to
+        // answer 200, and a firm that paid stayed switched off if this step failed once.
+        console.error('Subscription activation error:', err.message);
+        return res.status(500).json({ error: 'Subscription activation failed; Stripe will retry' });
+      }
     }
   }
+
   if (event.type === 'customer.subscription.deleted') {
     await sql`UPDATE firms SET subscription_active = FALSE WHERE stripe_subscription_id = ${event.data.object.id}`;
   }
@@ -472,7 +488,7 @@ app.put('/api/portal/profile', async (req, res) => {
   const tokenData = await validateToken(token);
   if (!tokenData) return res.status(401).json({ error: 'Invalid or expired link' });
   if (!linkOpensAccount(tokenData)) return res.status(403).json({ error: ACCOUNT_ONLY });
-  await updateFirmProfile(tokenData.firm_id, { specializations: specializations || [], serviceArea, contactName });
+  await updateFirmProfile(tokenData.firm_id, { specializations, serviceArea, contactName });
   res.json({ ok: true });
 });
 
@@ -498,7 +514,7 @@ app.patch('/api/admin/firms/:id', async (req, res) => {
   if (!requireAdmin(req, res)) return;
   const { active, specializations, serviceArea, contactName } = req.body;
   if (typeof active === 'boolean') await sql`UPDATE firms SET active = ${active} WHERE id = ${req.params.id}`;
-  if (specializations !== undefined || serviceArea !== undefined || contactName !== undefined) await updateFirmProfile(req.params.id, { specializations: specializations || [], serviceArea, contactName });
+  if (specializations !== undefined || serviceArea !== undefined || contactName !== undefined) await updateFirmProfile(req.params.id, { specializations, serviceArea, contactName });
   res.json({ ok: true });
 });
 
@@ -574,16 +590,11 @@ function verifyCron(req, res) {
 app.get('/api/cron', async (req, res) => {
   if (!verifyCron(req, res)) return;
   try {
-    const { declineOverdueLeads, notifyOperator } = await import('./auction.js');
+    const { declineOverdueLeads, reportStuckAuctions } = await import('./auction.js');
     const { resetDeclineCounts } = await import('./firms.js');
 
     const closed = await closeExpiredAuctions();
-    // An auction left 'closing' for over an hour stopped part-way through: the operator checks it by hand.
-    const stuck = await sql`SELECT id FROM auctions WHERE status = 'closing' AND closes_at < NOW() - INTERVAL '1 hour'`;
-    if (stuck.length) {
-      const ids = stuck.map(row => `#${row.id}`).join(', ');
-      await notifyOperator(`Auctions stuck while closing: ${ids}`, `<p>These auctions began closing but did not finish: ${ids}. Check Stripe for a charge and the leads table before closing them by hand.</p>`);
-    }
+    await reportStuckAuctions();
 
     const declined = await declineOverdueLeads();
     await resetDeclineCounts();

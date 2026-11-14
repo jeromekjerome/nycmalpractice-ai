@@ -145,14 +145,16 @@ export async function getActiveFirms(caseType = null) {
 // are shown on the admin page, and were stored exactly as sent.
 export async function updateFirmProfile(firmId, { specializations, serviceArea, contactName }) {
   const areas = [...new Set((Array.isArray(specializations) ? specializations : []).filter(area => PRACTICE_AREAS.includes(area)))];
+  // A field left out of the request is left as it is: the portal saves only the practice areas.
+  const given = value => value !== undefined;
   const plainText = (value, max) => (typeof value === 'string'
     ? value.replace(/[\u0000-\u001f\u007f<>]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max)
     : '') || null;
   await sql`
     UPDATE firms
-    SET specializations = ${areas},
-        service_area    = ${plainText(serviceArea, 200)},
-        contact_name    = ${plainText(contactName, 100)}
+    SET specializations = CASE WHEN ${given(specializations)} THEN ${areas} ELSE specializations END,
+        service_area    = CASE WHEN ${given(serviceArea)} THEN ${plainText(serviceArea, 200)} ELSE service_area END,
+        contact_name    = CASE WHEN ${given(contactName)} THEN ${plainText(contactName, 100)} ELSE contact_name END
     WHERE id = ${firmId}
   `;
 }

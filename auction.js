@@ -81,13 +81,18 @@ Malpractice SOL in NY: 2.5 years from act/omission or the end of continuous trea
   }
 }
 
-// Charges a firm for a lead and returns the PaymentIntent id, or null when the firm cannot be charged: no card
-// on file, the card declined, or the bank asked for the cardholder (an off-session charge cannot ask). A lead
-// is delivered only after a charge goes through; leads used to go out unpaid when the charge failed.
+// Charges a firm for a lead. The result says what happened:
+//   { status: 'charged', id }  the charge went through;
+//   { status: 'declined' }     it certainly did not (no card on file, the card declined, the bank wants the
+//                              cardholder present, which an off-session charge cannot ask, or Stripe refused
+//                              the request);
+//   { status: 'unknown' }      Stripe could not say (a network failure or a Stripe-side error after its own
+//                              retries). The charge may have gone through, so the caller must not treat it as a
+//                              decline and charge someone else.
 async function chargeFirm(firm, amountDollars, description, metadata, idempotencyKey) {
   if (!firm?.stripe_customer_id || !firm?.stripe_payment_method_id) {
     console.warn(`Firm ${firm?.id} has no card on file; not charged for: ${description}`);
-    return null;
+    return { status: 'declined' };
   }
   try {
     const charge = await chargeCustomer({
@@ -95,12 +100,17 @@ async function chargeFirm(firm, amountDollars, description, metadata, idempotenc
       paymentMethodId:  firm.stripe_payment_method_id,
       amountDollars, description, metadata, idempotencyKey,
     });
-    if (charge?.status === 'succeeded' || charge?.status === 'processing') return charge.id;
-    console.error(`Charge to firm ${firm.id} not completed (${charge?.status}): ${description}`);
-    return null;
+    if (charge?.status === 'succeeded' || charge?.status === 'processing') return { status: 'charged', id: charge.id };
+    if (['requires_payment_method', 'requires_action', 'canceled'].includes(charge?.status)) return { status: 'declined' };
+    console.error(`Charge to firm ${firm.id} ended in status ${charge?.status}: ${description}`);
+    return { status: 'unknown' };
   } catch (err) {
-    console.error(`Charge to firm ${firm.id} failed (${description}):`, err.message);
-    return null;
+    if (err?.type === 'StripeCardError' || err?.type === 'StripeInvalidRequestError') {
+      console.warn(`Charge to firm ${firm.id} declined (${err.code || err.type}): ${description}`);
+      return { status: 'declined' };
+    }
+    console.error(`Charge to firm ${firm.id} has an unknown outcome (${err?.type || err?.message}): ${description}`);
+    return { status: 'unknown' };
   }
 }
 
@@ -114,23 +124,42 @@ export async function deliverColdLead(sessionId, caseType, scoreData, leadData) 
 
   let delivered = 0;
   for (const firm of firms) {
-    try {
-      // Charged first: a firm whose card is missing or declined does not get the lead.
-      const chargeId = await chargeFirm(firm, TIER_CONFIG.cold.reserve, `Cold malpractice lead — ${caseType}`,
-        { sessionId, firmId: String(firm.id) }, `cold-${sessionId}-${firm.id}`);
-      if (!chargeId) continue;
+    // Charged first: a firm whose card is missing or declined does not get the lead.
+    const key = `cold-${sessionId}-${firm.id}`;
+    const charge = await chargeFirm(firm, TIER_CONFIG.cold.reserve, `Cold malpractice lead — ${caseType}`, { sessionId, firmId: String(firm.id) }, key);
+    if (charge.status === 'unknown') {
+      await notifyOperator(`Cold lead: charge to firm ${firm.id} has an unknown outcome`,
+        `<p>Stripe did not confirm or refuse the $${TIER_CONFIG.cold.reserve} charge to firm ${escapeHtml(firm.id)} for a cold lead (session ${escapeHtml(sessionId)}, idempotency key ${escapeHtml(key)}). The firm was not sent the lead. Check Stripe, then deliver the lead or refund the charge by hand.</p>`);
+      continue;
+    }
+    if (charge.status !== 'charged') continue;
 
+    let leadId;
+    try {
       const deadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
       const [lead] = await sql`
         INSERT INTO leads (firm_id, session_id, case_type, tier, price_paid, stripe_charge_id, accept_deadline, lead_data)
-        VALUES (${firm.id}, ${sessionId}, ${caseType}, 'cold', ${TIER_CONFIG.cold.reserve}, ${chargeId}, ${deadline}, ${JSON.stringify(leadData)})
+        VALUES (${firm.id}, ${sessionId}, ${caseType}, 'cold', ${TIER_CONFIG.cold.reserve}, ${charge.id}, ${deadline}, ${JSON.stringify(leadData)})
         RETURNING id
       `;
-      const token = await createMagicLink(firm.id, { leadId: lead.id, expiresInHours: 72 });
-      await sendLeadDeliveryEmail(firm, lead.id, token, leadData, scoreData, 'cold', TIER_CONFIG.cold.reserve);
-      delivered += 1;
+      leadId = lead.id;
     } catch (err) {
-      console.error(`Cold lead delivery failed for firm ${firm.id}:`, err.message);
+      // Charged, but the lead could not be recorded: the charge is refunded and the operator told.
+      console.error(`Cold lead for firm ${firm.id} charged but not recorded:`, err.message);
+      const refunded = await createRefund({ paymentIntentId: charge.id, amountDollars: TIER_CONFIG.cold.reserve, idempotencyKey: `refund-${key}` })
+        .then(() => true, () => false);
+      await notifyOperator(`Cold lead for firm ${firm.id} charged but not delivered`,
+        `<p>Firm ${escapeHtml(firm.id)} was charged (payment ${escapeHtml(charge.id)}) for a cold lead (session ${escapeHtml(sessionId)}), but the lead could not be recorded: ${escapeHtml(err.message)}.</p>` +
+        `<p>${refunded ? 'The charge was refunded.' : 'The refund also failed: refund it in Stripe.'}</p>`);
+      continue;
+    }
+    delivered += 1;   // the lead exists and is in the firm's portal, even if the email below fails
+    try {
+      const token = await createMagicLink(firm.id, { leadId, expiresInHours: 72 });
+      await sendLeadDeliveryEmail(firm, leadId, token, leadData, scoreData, 'cold', TIER_CONFIG.cold.reserve);
+    } catch (err) {
+      await notifyOperator(`Lead #${leadId} was not emailed to firm ${firm.id}`,
+        `<p>Firm ${escapeHtml(firm.id)} was charged and lead #${escapeHtml(leadId)} is in its portal, but the email failed: ${escapeHtml(err.message)}. Send the firm a portal link from the admin page.</p>`);
     }
   }
   if (delivered === 0) {
@@ -147,7 +176,14 @@ export async function createAuction(sessionId, caseType, scoreData, leadData) {
     VALUES (${sessionId}, ${caseType}, ${scoreData.score}, ${scoreData.tier}, ${config.reserve}, ${config.reserve}, ${closesAt}, ${JSON.stringify(scoreData.dimensions)}, ${scoreData.preview}, ${JSON.stringify(leadData)})
     RETURNING *
   `;
-  await notifyAllFirms(auction);
+  try {
+    await notifyAllFirms(auction);
+  } catch (err) {
+    // Firms may not have been told about it: the auction is cancelled, so asking again starts a fresh one
+    // rather than leaving a second, unseen auction for the same lead.
+    await sql`UPDATE auctions SET status = 'cancelled' WHERE id = ${auction.id} AND status = 'open'`.catch(() => {});
+    throw err;
+  }
   return auction;
 }
 
@@ -230,7 +266,9 @@ export async function getAuctionStatus(auctionId) {
 
 // Closes an auction once its time is up. The highest bidder whose card can be charged wins and pays its own
 // bid; a bidder whose card is missing or declined does not get the lead, and the next bidder is tried. With
-// no bids, or no bidder that could be charged, the operator is told: the client asked to be contacted.
+// no bids, or no bidder that could be charged, the operator is told: the client asked to be contacted. When
+// Stripe cannot say whether a charge went through, nobody else is charged and the auction is left 'closing'
+// for the operator.
 export async function closeAuction(auctionId) {
   // Claimed first, so two runs at once (the nightly job and a page visit) close it once.
   const [auction] = await sql`
@@ -247,21 +285,44 @@ export async function closeAuction(auctionId) {
     if (!firm || firm.active === false || !firm.subscription_active) continue;
     if (firm.suspended_until && new Date(firm.suspended_until) > new Date()) continue;
     const amount = parseFloat(bid.amount);
-    const chargeId = await chargeFirm(firm, amount, `Malpractice lead auction — ${auction.tier} / ${auction.case_type}`,
-      { auctionId: String(auctionId), firmId: String(firm.id) }, `auction-${auctionId}-${firm.id}`);
-    if (!chargeId) continue;
+    const key = `auction-${auctionId}-${firm.id}`;
+    const charge = await chargeFirm(firm, amount, `Malpractice lead auction — ${auction.tier} / ${auction.case_type}`,
+      { auctionId: String(auctionId), firmId: String(firm.id) }, key);
+    if (charge.status === 'unknown') {
+      await notifyOperator(`Auction #${auctionId}: charge to firm ${firm.id} has an unknown outcome`,
+        `<p>Stripe did not confirm or refuse the $${amount.toFixed(2)} charge to firm ${escapeHtml(firm.id)} for auction #${escapeHtml(auctionId)} (idempotency key ${escapeHtml(key)}). No other bidder was charged and no lead was sent; the auction is left closing. Check Stripe, then deliver the lead or close the auction by hand.</p>`);
+      return { pending: true };
+    }
+    if (charge.status !== 'charged') continue;
 
-    await sql`UPDATE auctions SET status = 'closed', winner_firm_id = ${firm.id}, winning_bid = ${amount} WHERE id = ${auctionId}`;
-    const deadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
-    const [lead] = await sql`
-      INSERT INTO leads (auction_id, firm_id, session_id, case_type, tier, price_paid, stripe_charge_id, accept_deadline)
-      VALUES (${auctionId}, ${firm.id}, ${auction.session_id}, ${auction.case_type}, ${auction.tier}, ${amount}, ${chargeId}, ${deadline})
-      RETURNING id`;
-    const token = await createMagicLink(firm.id, { leadId: lead.id, expiresInHours: 72 });
-    await sendLeadDeliveryEmail(firm, lead.id, token, auction.lead_data, auction, auction.tier, amount);
+    let leadId;
+    try {
+      await sql`UPDATE auctions SET status = 'closed', winner_firm_id = ${firm.id}, winning_bid = ${amount} WHERE id = ${auctionId}`;
+      const deadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+      const [lead] = await sql`
+        INSERT INTO leads (auction_id, firm_id, session_id, case_type, tier, price_paid, stripe_charge_id, accept_deadline)
+        VALUES (${auctionId}, ${firm.id}, ${auction.session_id}, ${auction.case_type}, ${auction.tier}, ${amount}, ${charge.id}, ${deadline})
+        RETURNING id`;
+      leadId = lead.id;
+    } catch (err) {
+      await notifyOperator(`Auction #${auctionId}: firm ${firm.id} charged but the win was not recorded`,
+        `<p>Firm ${escapeHtml(firm.id)} was charged $${amount.toFixed(2)} (payment ${escapeHtml(charge.id)}) for auction #${escapeHtml(auctionId)}, but recording the win failed: ${escapeHtml(err.message)}. Record the lead or refund the charge by hand.</p>`);
+      throw err;
+    }
+    try {
+      const token = await createMagicLink(firm.id, { leadId, expiresInHours: 72 });
+      await sendLeadDeliveryEmail(firm, leadId, token, auction.lead_data, auction, auction.tier, amount);
+    } catch (err) {
+      await notifyOperator(`Lead #${leadId} was not emailed to firm ${firm.id}`,
+        `<p>Firm ${escapeHtml(firm.id)} won auction #${escapeHtml(auctionId)} and was charged $${amount.toFixed(2)}; lead #${escapeHtml(leadId)} is in its portal, but the email failed: ${escapeHtml(err.message)}. Send the firm a portal link from the admin page.</p>`);
+    }
     for (const other of bids.filter(b => String(b.firm_id) !== String(firm.id))) {
-      const loser = await getFirm(other.firm_id);
-      if (loser) await sendLoserEmail(loser, auction, amount);
+      try {
+        const loser = await getFirm(other.firm_id);
+        if (loser) await sendLoserEmail(loser, auction, amount);
+      } catch (err) {
+        console.error(`Auction ${auctionId}: the email to losing firm ${other.firm_id} failed:`, err.message);
+      }
     }
     console.log(`Auction ${auctionId} closed — winner: firm ${firm.id}, charged $${amount}`);
     return { winnerFirmId: firm.id, amount };
@@ -284,6 +345,17 @@ export async function closeExpiredAuctions() {
     catch (err) { console.error(`Closing auction ${row.id} failed:`, err.message); }
   }
   return expired.length;
+}
+
+// An auction left 'closing' for over an hour stopped part-way: a charge had an unknown outcome, or recording
+// the win failed. The operator checks Stripe and the leads table, then finishes it by hand.
+export async function reportStuckAuctions() {
+  const stuck = await sql`SELECT id FROM auctions WHERE status = 'closing' AND closes_at < NOW() - INTERVAL '1 hour'`;
+  if (!stuck.length) return 0;
+  const ids = stuck.map(row => `#${row.id}`).join(', ');
+  await notifyOperator(`Auctions stuck while closing: ${ids}`,
+    `<p>These auctions began closing but did not finish: ${ids}. Check Stripe for a charge and the leads table before finishing them by hand.</p>`);
+  return stuck.length;
 }
 
 export async function acceptLead(leadId, firmId) {

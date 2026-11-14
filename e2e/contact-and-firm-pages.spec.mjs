@@ -179,3 +179,31 @@ test('firm sign-up sends its registration token with every later step, and keeps
   await page.locator('button[onclick="goCheckout()"]').click();
   await expect.poll(() => sent.checkout).toEqual({ firmId: 7, token: 'reg-token' });
 });
+
+test('naming a public hospital shows its 90-day deadline once, in the words for the current mode', async ({ page }) => {
+  await mockBasics(page);
+  await page.route('**/api/ask', route => route.fulfill(json({ answer: 'I am so sorry. When did this happen?', cases: [], deadlineNotice: 'public_hospital' })));
+  await page.goto('/');
+  await page.locator('#userInput').fill('They missed my stroke at Bellevue.');
+  await page.locator('#submitBtn').click();
+  const notice = page.locator('#conversation .deadline-notice');
+  await expect(notice).toBeVisible();
+  await expect(notice).toContainText('within 90 days of the malpractice');
+  await expect(notice).not.toContainText('wrongful-death');
+
+  await page.locator('#userInput').fill('Last month.');
+  await page.locator('#submitBtn').click();
+  await expect(page.locator('#conversation .msg-ai')).toHaveCount(3);
+  await expect(notice).toHaveCount(1);
+
+  // A family asking about a death gets the wrongful-death version.
+  await page.locator('#modeToggle').evaluate(el => {
+    el.checked = true;
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await expect(notice).toHaveCount(0);
+  await page.locator('#userInput').fill('My father died after surgery at Kings County Hospital.');
+  await page.locator('#submitBtn').click();
+  await expect(notice).toHaveCount(1);
+  await expect(notice).toContainText("after the estate's representative is appointed");
+});

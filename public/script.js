@@ -109,6 +109,7 @@ async function submitQuestion() {
 
     if (data.cases?.length) renderCases(data.cases);
     if (data.caseAnalysis)  renderCaseAnalysis(data.caseAnalysis);
+    if (data.deadlineNotice === 'public_hospital') showPublicHospitalNotice();
     if (data.contactForm)   offerContactForm();
 
   } catch (err) {
@@ -123,6 +124,17 @@ async function submitQuestion() {
 document.getElementById('userInput').addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitQuestion(); }
 });
+
+// ─── Public hospital deadline ─────────────────────────────────────────────────
+// Shown once, beside the reply, when the visitor names a city, county or State hospital: the
+// 90-day notice deadline is far shorter than the usual one. The server decides (deadlines.js).
+function showPublicHospitalNotice() {
+  if (document.querySelector('#conversation .deadline-notice')) return;
+  const notice = document.getElementById('publicHospitalNoticeTemplate').content.firstElementChild.cloneNode(true);
+  notice.querySelector(currentMode === 'estate' ? '.deadline-personal' : '.deadline-estate').remove();
+  document.getElementById('conversation').appendChild(notice);
+  notice.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
 
 // ─── Contact form ─────────────────────────────────────────────────────────────
 // Offered from the referral step. Nothing goes to a law firm until the visitor submits it with the
@@ -310,6 +322,7 @@ function getCookie(name) {
       div.innerHTML = msg.role === 'user' ? escHtml(msg.content) : markdownToHtml(msg.content);
       conv.appendChild(div);
     }
+    if (data.deadlineNotice === 'public_hospital') showPublicHospitalNotice();
     conv.lastElementChild?.scrollIntoView({ behavior: 'smooth' });
   } catch {}
 })();

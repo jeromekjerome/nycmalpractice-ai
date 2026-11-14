@@ -15,6 +15,7 @@ import { createSubscriptionCheckout, createPortalSession, constructWebhookEvent 
 import OpenAI from 'openai';
 import { buildModelList, probeAllModelChains } from './openaiModelFailover.js';
 import { APP_URL, CONTACT_CONSENT_TEXT, CONTACT_FORM_FROM_STEP } from './site.js';
+import { mentionsPublicHospital } from './deadlines.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -117,6 +118,8 @@ app.post('/api/ask', limitChat, async (req, res) => {
       caseAnalysis: result.caseAnalysis || null, leadTier: result.leadScore?.tier || null,
       // From the referral step on, the page offers the contact form.
       contactForm: result.turn >= CONTACT_FORM_FROM_STEP,
+      // The visitor named a public hospital: the page shows its 90-day notice deadline.
+      deadlineNotice: mentionsPublicHospital(updatedHistory) ? 'public_hospital' : null,
     });
   } catch (err) {
     console.error('Error in /api/ask:', err);
@@ -127,9 +130,11 @@ app.post('/api/ask', limitChat, async (req, res) => {
 // ─── Conversation History ─────────────────────────────────────────────────────
 app.get('/api/conversations/:sessionId', async (req, res) => {
   try {
-    const [conv] = await sql`SELECT session_id, mode, case_type, history, name, phone, contact_consent_at, updated_at FROM conversations WHERE session_id = ${req.params.sessionId} LIMIT 1`;
-    if (!conv) return res.json({ history: [], name: null, phone: null });
-    res.json(conv);
+    // What the page needs to restore the conversation. The name and phone number are not sent back:
+    // the page never shows them again, and they are not needed to continue.
+    const [conv] = await sql`SELECT session_id, mode, case_type, history, contact_consent_at, updated_at FROM conversations WHERE session_id = ${req.params.sessionId} LIMIT 1`;
+    if (!conv) return res.json({ history: [] });
+    res.json({ ...conv, deadlineNotice: mentionsPublicHospital(conv.history) ? 'public_hospital' : null });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

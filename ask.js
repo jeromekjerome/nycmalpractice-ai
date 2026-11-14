@@ -31,6 +31,33 @@ const CASE_TYPE_NAMES = {
 };
 
 const NO_CASES_CONTEXT = 'No specific cases retrieved. Apply general NYS medical malpractice principles under CPLR §214-a.';
+
+// What the case card reads: every message the visitor wrote, oldest first (they hold the facts), then the end of
+// the AI's last reply for context. It used to read the last 3,000 characters of the whole conversation, and from
+// the fourth message on the AI's long replies pushed the visitor's own facts out.
+export function analysisTranscript(history, question, { visitorChars = 4000, replyChars = 600 } = {}) {
+  const said = [...(history || []).filter(h => h.role === 'user').map(h => String(h.content ?? '')), String(question ?? '')];
+  const lines = said.map((text, i) => `Visitor message ${i + 1}: ${text}`);
+  // Over the limit, messages from the middle go first: the first one (what happened) and the latest stay.
+  while (lines.join('\n').length > visitorChars && lines.length > 2) lines.splice(1, 1);
+  let visitor = lines.join('\n');
+  if (visitor.length > visitorChars) visitor = visitor.slice(0, visitorChars / 2) + '\n…\n' + visitor.slice(-visitorChars / 2);
+  const lastReply = [...(history || [])].reverse().find(h => h.role === 'assistant');
+  const reply = lastReply ? String(lastReply.content ?? '') : '';
+  return visitor + (reply ? `\n\nThe end of the AI's last reply, for context only:\n${reply.length > replyChars ? '…' + reply.slice(-replyChars) : reply}` : '');
+}
+
+// The side analyses (lead score, case card, seminar score) get 20 seconds; one that takes longer is left out of
+// this reply rather than holding back an answer that is ready. Each AI call alone may take 30 seconds and a retry.
+const DEFAULT_SIDE_CALL_CAP_MS = 20_000;
+function sideCall(work) {
+  if (!work) return null;
+  let timer;
+  const late = new Promise(resolve => {
+    timer = setTimeout(() => resolve(null), Number(process.env.ASK_SIDE_CALL_CAP_MS) || DEFAULT_SIDE_CALL_CAP_MS);
+  });
+  return Promise.race([work, late]).finally(() => clearTimeout(timer));
+}
 const NATIONAL_FALLBACK_NOTE =
   'NOTE: No New York decisions matched this search. The cases below come from a national search and may be ' +
   'from other jurisdictions — treat them as persuasive authority only and do not present them as New York law.';
@@ -104,8 +131,8 @@ export async function answerUserQuestion({ question, mode = 'personal', sessionI
 
   const parallelTasks = [
     chatCompletionsWithFallback(openai, { models: ANSWER_MODELS, messages, temperature: 0.7, max_tokens: 1000 }),
-    turn >= 2 && allowLeadScoring ? scoreLead(question, history, caseType, mode)                         : Promise.resolve(null),
-    turn >= 3 ? analyzeMalpracticeSituation(question, history, cases, caseType, mode) : Promise.resolve(null),
+    turn >= 2 && allowLeadScoring ? sideCall(scoreLead(question, history, caseType, mode)) : Promise.resolve(null),
+    turn >= 3 ? sideCall(analyzeMalpracticeSituation(question, history, cases, caseType, mode)) : Promise.resolve(null),
   ];
 
   const [completion, leadScore, caseAnalysis] = await Promise.all(parallelTasks);
@@ -165,7 +192,7 @@ CORE PRINCIPLES:
 - Foreign object left in the body: the claim may still be brought within 1 year of discovering the object (or of facts that would reasonably have led to its discovery), even after the 2 years and 6 months have run; implants, fixation devices and chemical compounds do not count as foreign objects
 - Infancy: for a patient who was a minor, the deadline is extended, but in malpractice cases never beyond 10 years after the malpractice (CPLR §208)
 - Public hospitals: a claim against NYC Health + Hospitals (for example Bellevue, Kings County or Elmhurst) or another city- or county-run hospital needs a notice of claim within 90 days and a lawsuit within 1 year and 90 days; state-run hospitals have their own short deadlines in the Court of Claims. These are far shorter than the usual deadline, so raise them as soon as a public hospital is involved
-- Federal providers: care at a VA or military hospital or clinic, or at a community health center whose staff are deemed federal employees, is a claim against the United States under the Federal Tort Claims Act: a written administrative claim (usually Standard Form 95) to the agency within 2 years, sooner than the 2 years and 6 months above, and no lawsuit until the agency denies it or 6 months pass. Raise it as soon as one may be involved
+- Federal providers: care at a VA or military hospital or clinic, or at a community health center whose staff are deemed federal employees, is a claim against the United States under the Federal Tort Claims Act: a written administrative claim (usually Standard Form 95) to the agency, generally within 2 years after the patient knew or should have known of the injury and its cause, which can be sooner than the 2 years and 6 months above; no lawsuit until the agency denies it or 6 months pass; different rules apply to active-duty service members. Raise it as soon as one may be involved
 - Certificate of Merit required (CPLR §3012-a): attorney must certify expert review before filing
 - CPLR Article 16 limits the non-economic damages owed by a defendant who is 50% or less at fault
 - Always end with: "This is general information, not legal advice."
@@ -205,7 +232,7 @@ CORE PRINCIPLES:
 - This is a wrongful death claim — profound loss requiring both compassion and legal precision
 - Wrongful death SOL in NY: 2 years from date of death (EPTL §5-4.1) — different from personal injury SOL
 - Public hospitals: if NYC Health + Hospitals or another city- or county-run hospital was involved, a notice of claim is due within 90 days of the estate representative's appointment — raise this immediately
-- Federal providers: if a VA or military hospital or clinic, or a community health center whose staff are deemed federal employees, was involved, the claim is against the United States under the Federal Tort Claims Act: a written administrative claim (usually Standard Form 95) to the agency within 2 years, and no lawsuit until the agency denies it or 6 months pass — raise this immediately
+- Federal providers: if a VA or military hospital or clinic, or a community health center whose staff are deemed federal employees, was involved, the claim is against the United States under the Federal Tort Claims Act: a written administrative claim (usually Standard Form 95) to the agency, generally within 2 years, and no lawsuit until the agency denies it or 6 months pass — raise this immediately
 - The survival claim for the person's own conscious pain and suffering has its own deadline, tied to the malpractice deadline; an attorney must check both
 - New York allows only pecuniary (economic) wrongful death damages, not damages for grief; the Grieving Families Act, which would change that and lengthen the deadline, has been vetoed four times (most recently in December 2025) and is not law
 - The action is brought by the estate administrator / personal representative, not the family directly
@@ -238,10 +265,6 @@ TURN ${turn}: If they want to speak with a qualified NYC wrongful death / malpra
 
 // ─── Case Situation Analysis ───────────────────────────────────────────────────
 
-// How much of the conversation the analysis reads: its end, where the facts accumulate. It used to read only
-// the first 1,500 characters, so anything the visitor said later never reached the card.
-const ANALYSIS_TRANSCRIPT_CHARS = 3000;
-
 const cleanText = (value, max) => (typeof value === 'string' && value.trim() ? value.trim().slice(0, max) : null);
 const cleanList = (value, max) => (Array.isArray(value) ? value : []).map(item => cleanText(item, 200)).filter(Boolean).slice(0, max);
 const COMPLEXITY_LEVELS = { low: 'Low', medium: 'Medium', high: 'High' };
@@ -272,8 +295,7 @@ export function normalizeCaseAnalysis(raw) {
 async function analyzeMalpracticeSituation(question, history, cases, caseType, mode) {
   try {
     const typeName    = CASE_TYPE_NAMES[caseType] || 'Medical Malpractice';
-    const transcript  = [...history.map(h => `${h.role}: ${h.content}`), `user: ${question}`].join('\n');
-    const conversation = transcript.length > ANALYSIS_TRANSCRIPT_CHARS ? transcript.slice(-ANALYSIS_TRANSCRIPT_CHARS) : transcript;
+    const conversation = analysisTranscript(history, question);
     const perspective = mode === 'estate' ? 'estate / wrongful death claimant' : 'injured patient';
 
     const caseSnippets = cases.slice(0, 3)

@@ -159,9 +159,12 @@ export async function updateFirmProfile(firmId, { specializations, serviceArea, 
   `;
 }
 
-export async function updateFirmSubscription(firmId, { stripeSubscriptionId, stripePaymentMethodId }) {
+// A completed checkout switches the firm on, unless Stripe already reports the subscription unpaid: a late
+// retry of this event used to switch back on a firm that a failed payment had switched off.
+export async function updateFirmSubscription(firmId, { stripeSubscriptionId, stripePaymentMethodId, status = null }) {
+  const paidUp = status ? PAID_UP_STATUSES.includes(status) : true;
   await sql`
-    UPDATE firms SET subscription_active = TRUE, subscription_status = 'active',
+    UPDATE firms SET subscription_active = ${paidUp}, subscription_status = ${status || 'active'},
       stripe_subscription_id = ${stripeSubscriptionId},
       stripe_payment_method_id = ${stripePaymentMethodId}
     WHERE id = ${firmId}

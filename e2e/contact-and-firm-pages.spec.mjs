@@ -270,3 +270,41 @@ test('a federal provider shows its 2-year claim deadline, and a restored convers
   await expect(notices).toHaveCount(1);
   await expect(notices).toContainText('Federal provider');
 });
+
+test('when the host cuts a slow reply off, the question goes back in the box', async ({ page }) => {
+  await mockBasics(page);
+  await page.route('**/api/ask', route => route.fulfill({ status: 504, contentType: 'text/html', body: '<html><body>FUNCTION_INVOCATION_TIMEOUT</body></html>' }));
+  await page.goto('/');
+  await page.locator('#userInput').fill('The surgeon left a sponge inside me.');
+  await page.locator('#submitBtn').click();
+  await expect(page.locator('#conversation .msg-notice')).toHaveText('Sorry, something went wrong and your message was not answered. It is back in the box below: please send it again.');
+  await expect(page.locator('#conversation')).not.toContainText('FUNCTION_INVOCATION_TIMEOUT');
+  await expect(page.locator('#userInput')).toHaveValue('The surgeon left a sponge inside me.');
+  await expect(page.locator('#conversation .msg-user')).toHaveCount(0);
+});
+
+test('screen readers hear that the answer is on its way, and a reload brings back the contact form', async ({ page }) => {
+  await page.route('**/api/reset-session', route => route.fulfill(json({ ok: true })));
+  await page.route('**/api/case-types', route => route.fulfill(json({ caseTypes: ['Surgical Error'] })));
+  let saved = { history: [] };
+  await page.route('**/api/conversations/**', route => route.fulfill(json(saved)));
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  await page.route('**/api/ask', async route => { await held; await route.fulfill(json({ answer: 'When did this happen?', cases: [] })); });
+  await page.goto('/');
+  await expect(page.locator('#conversation')).toHaveAttribute('role', 'log');
+  await page.locator('#userInput').fill('My doctor missed a fracture.');
+  await page.locator('#submitBtn').click();
+  await expect(page.locator('#chatStatus')).toHaveText('Your message was sent. The answer usually takes 10 to 20 seconds.');
+  await expect(page.locator('#conversation .msg-thinking')).toHaveAttribute('aria-hidden', 'true');
+  release();
+  await expect(page.locator('#conversation .msg-ai').last()).toContainText('When did this happen?');
+
+  const history = [1, 2, 3, 4].flatMap(n => [{ role: 'user', content: 'Message ' + n }, { role: 'assistant', content: 'Reply ' + n }]);
+  saved = { mode: 'personal', history, contactForm: true };
+  await page.reload();
+  await expect(page.locator('#conversation .contact-card')).toBeVisible();
+  saved = { mode: 'personal', history, contactForm: false, contact_consent_at: '2026-11-14T10:00:00Z' };
+  await page.reload();
+  await expect(page.locator('#conversation .contact-done')).toContainText('Your request has been received');
+});

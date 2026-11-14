@@ -21,7 +21,8 @@ import { toPublicEvaluation, isHitlVerificationComplete, HITL_ATTESTATION_KEYS, 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
 const sql = neon(process.env.DATABASE_URL);
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// Each AI call is cut off after 30 seconds and retried once; it could wait 10 minutes.
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 30_000, maxRetries: 1 });
 const answerModels = buildModelList(
   process.env.OPENAI_MODEL_ANSWER || 'gpt-4o',
   process.env.OPENAI_MODEL_ANSWER_FALLBACKS || 'gpt-5.4-mini,gpt-4.1'
@@ -77,6 +78,21 @@ async function finishBeforeReply(label, work, deadline) {
     console.error(`[ask] ${label} was still running when the reply was due; replying without waiting for it`);
   }
   return outcome;
+}
+
+// The longest a visitor waits for a reply (40 seconds unless ASK_REPLY_DEADLINE_MS says otherwise). Past it the
+// page is told to send the message again, and keeps it in the box; the host used to cut the request off with
+// its own error page, and the question was lost. The function's own limit is 60 seconds.
+const DEFAULT_ASK_REPLY_DEADLINE_MS = 40_000;
+const SLOW_REPLY = 'This is taking longer than usual, and your message was not answered. It is still in the box below: please send it again.';
+
+// The work's result, or null if it is not done in time. A failure that comes after the deadline is only logged.
+function withinDeadline(work, ms) {
+  let timer;
+  let late = false;
+  const deadline = new Promise(resolve => { timer = setTimeout(() => { late = true; resolve(null); }, ms); });
+  work.catch(err => { if (late) console.error('[ask] a reply that missed its deadline then failed:', err?.message || err); });
+  return Promise.race([work, deadline]).finally(() => clearTimeout(timer));
 }
 
 // A failure is logged in full; the caller gets a plain message, never the internal error text.
@@ -170,7 +186,14 @@ app.post('/api/ask', limitChat, async (req, res) => {
   }
 
   try {
-    const result = await answerUserQuestion({ question, mode, sessionId, history, allowLeadScoring: historyTrusted });
+    const result = await withinDeadline(answerUserQuestion({ question, mode, sessionId, history, allowLeadScoring: historyTrusted }),
+      Number(process.env.ASK_REPLY_DEADLINE_MS) || DEFAULT_ASK_REPLY_DEADLINE_MS);
+    if (!result) {
+      // Nothing from this turn is saved, so the visitor can simply send it again.
+      console.error('[ask] no reply in time; the visitor was asked to send the message again');
+      await finishBeforeReply('closing expired auctions', closingAuctions, Date.now() + 5_000);
+      return res.status(503).json({ error: SLOW_REPLY, retry: true });
+    }
 
     try {
       await sql`INSERT INTO user_interactions (session_id, question, mode, case_type) VALUES (${sessionId}, ${question}, ${mode}, ${result.caseType || 'other'})`;
@@ -207,13 +230,21 @@ app.post('/api/ask', limitChat, async (req, res) => {
 });
 
 // ─── Conversation History ─────────────────────────────────────────────────────
+const visitorMessages = history => (Array.isArray(history) ? history.filter(message => message?.role === 'user').length : 0);
+
 app.get('/api/conversations/:sessionId', async (req, res) => {
   try {
     // What the page needs to restore the conversation. The name and phone number are not sent back:
     // the page never shows them again, and they are not needed to continue.
     const [conv] = await sql`SELECT session_id, mode, case_type, history, contact_consent_at, updated_at FROM conversations WHERE session_id = ${req.params.sessionId} LIMIT 1`;
     if (!conv) return res.json({ history: [] });
-    res.json({ ...conv, deadlineNotices: deadlineNotices(conv.history), deadlineNotice: mentionsPublicHospital(conv.history) ? 'public_hospital' : null });
+    res.json({
+      ...conv,
+      deadlineNotices: deadlineNotices(conv.history),
+      deadlineNotice: mentionsPublicHospital(conv.history) ? 'public_hospital' : null,
+      // The contact form comes back if it was offered (from the referral step) and not yet sent.
+      contactForm: !conv.contact_consent_at && visitorMessages(conv.history) >= CONTACT_FORM_FROM_STEP,
+    });
   } catch (err) {
     console.error('Error in /api/conversations:', err);
     res.status(500).json({ error: 'The conversation could not be loaded.' });

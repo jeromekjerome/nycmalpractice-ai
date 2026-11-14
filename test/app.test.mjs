@@ -3033,3 +3033,60 @@ test('a failure reaches the caller as a plain message, never the internal error 
     await server.close();
   }
 });
+
+// ─── A slow reply, and what a reload brings back ──────────────────────────────
+
+test('a reply that takes too long gets a plain "send it again", and nothing from the turn is saved', async () => {
+  const world = fakeWorld({ answer: 'A reply that comes too late.' });
+  // The drafting call takes longer than the deadline this test sets.
+  const slow = async (url, init) => {
+    if (url.startsWith('https://api.openai.com/') && String(JSON.parse(init.body).messages?.[0]?.content || '').startsWith('You are an expert')) {
+      await new Promise(resolve => setTimeout(resolve, 900));
+    }
+    return world.handler(url, init);
+  };
+  const previous = process.env.ASK_REPLY_DEADLINE_MS;
+  process.env.ASK_REPLY_DEADLINE_MS = '300';
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(slow, async () => {
+      const { response, body } = await postJson(server.baseUrl, '/api/ask', { question: 'I was hurt.', mode: 'personal', sessionId: 'sess-slow-reply', history: [] });
+      assert.equal(response.status, 503);
+      assert.equal(body.retry, true);
+      assert.match(body.error, /taking longer than usual/);
+      assert.match(body.error, /send it again/);
+      // The late reply finishes in the background; it is still not saved.
+      await new Promise(resolve => setTimeout(resolve, 1500));
+    });
+  } finally {
+    if (previous === undefined) delete process.env.ASK_REPLY_DEADLINE_MS; else process.env.ASK_REPLY_DEADLINE_MS = previous;
+    await server.close();
+  }
+  assert.ok(!world.calls.sql.some(call => /^INSERT INTO conversations/.test(call.query)), 'a turn that missed its deadline was saved');
+});
+
+test('a restored conversation offers the contact form again until it is sent', async () => {
+  const exchange = n => Array.from({ length: n }, (_, i) => [
+    { role: 'user', content: 'Message ' + (i + 1) },
+    { role: 'assistant', content: 'Reply ' + (i + 1) },
+  ]).flat();
+  const cases = [
+    [exchange(4), null, true],                         // referral step reached, nothing sent: offered again
+    [exchange(3), null, false],                        // not yet at the referral step
+    [exchange(5), '2026-11-14 10:00:00+00', false],    // already sent
+  ];
+  const server = await startServer(app);
+  try {
+    for (const [history, consentedAt, expected] of cases) {
+      const handler = async (url, init) => rowsResponse(
+        [['session_id', TEXT], ['mode', TEXT], ['case_type', TEXT], ['history', JSONB], ['contact_consent_at', TIMESTAMPTZ]],
+        [['sess-restore-form', 'personal', 'misdiagnosis', JSON.stringify(history), consentedAt]]);
+      await withOutboundHttp(handler, async () => {
+        const body = await (await fetch(server.baseUrl + '/api/conversations/sess-restore-form')).json();
+        assert.equal(body.contactForm, expected, history.length / 2 + ' messages, consent ' + consentedAt);
+      });
+    }
+  } finally {
+    await server.close();
+  }
+});

@@ -7,7 +7,8 @@ import { scoreLead } from './auction.js';
 import { buildModelList, chatCompletionsWithFallback } from './openaiModelFailover.js';
 import { evaluateAndRemediateDraft, renderRubricForPrompt, renderCurrentLawForPrompt } from './gatekeeper.js';
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// Each AI call is cut off after 30 seconds and retried once; it could wait 10 minutes.
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 30_000, maxRetries: 1 });
 const ANSWER_MODELS = buildModelList(
   process.env.OPENAI_MODEL_ANSWER || 'gpt-4o',
   process.env.OPENAI_MODEL_ANSWER_FALLBACKS || 'gpt-5.4-mini,gpt-4.1'

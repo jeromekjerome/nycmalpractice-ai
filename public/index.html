@@ -61,7 +61,8 @@
             <span class="card-icon">⚕️</span>
             <span class="card-title" id="chatTitle">Malpractice Case Advisor</span>
           </div>
-          <div class="conversation" id="conversation">
+          <!-- A log: screen readers read each new message and reply as it arrives. -->
+          <div class="conversation" id="conversation" role="log" aria-live="polite" aria-relevant="additions" aria-label="Conversation">
             <div class="msg msg-ai" id="welcomeMsg">
               Welcome. This AI is specialized in New York medical malpractice law. Whether you were personally harmed by a healthcare provider or you've lost a loved one due to medical negligence, I can help you understand your rights and the strength of your potential claim.<br><br>
               <strong>To get started</strong> — tell me what happened. What type of provider was involved, and what injury resulted?
@@ -136,6 +137,8 @@
         <span id="btnText">Send →</span>
         <div class="spinner" id="btnSpinner" style="display:none"></div>
       </button>
+      <!-- Read out by screen readers while a reply is on its way (script.js, announce). -->
+      <div id="chatStatus" class="sr-only" role="status" aria-live="polite"></div>
     </div>
 
     <!-- Footer -->

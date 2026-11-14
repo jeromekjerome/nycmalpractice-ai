@@ -4,6 +4,7 @@ import { neon } from '@neondatabase/serverless';
 import { createCustomer } from './stripe.js';
 import crypto from 'crypto';
 import twilio from 'twilio';
+import { PRACTICE_AREAS } from './site.js';
 
 const sql = neon(process.env.DATABASE_URL);
 
@@ -140,8 +141,20 @@ export async function getActiveFirms(caseType = null) {
   `;
 }
 
+// Only the practice areas the forms offer are stored, and the free-text fields are capped plain text: they
+// are shown on the admin page, and were stored exactly as sent.
 export async function updateFirmProfile(firmId, { specializations, serviceArea, contactName }) {
-  await sql`UPDATE firms SET specializations = ${specializations}, service_area = ${serviceArea}, contact_name = ${contactName} WHERE id = ${firmId}`;
+  const areas = [...new Set((Array.isArray(specializations) ? specializations : []).filter(area => PRACTICE_AREAS.includes(area)))];
+  const plainText = (value, max) => (typeof value === 'string'
+    ? value.replace(/[\u0000-\u001f\u007f<>]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max)
+    : '') || null;
+  await sql`
+    UPDATE firms
+    SET specializations = ${areas},
+        service_area    = ${plainText(serviceArea, 200)},
+        contact_name    = ${plainText(contactName, 100)}
+    WHERE id = ${firmId}
+  `;
 }
 
 export async function updateFirmSubscription(firmId, { stripeSubscriptionId, stripePaymentMethodId }) {

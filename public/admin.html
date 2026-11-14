@@ -107,20 +107,25 @@
       document.getElementById('statLeads').textContent  = data.leadCounts?.total || 0;
 
       const tbody = document.getElementById('firmsBody');
+      // Everything a firm typed is escaped before it goes into the page.
       tbody.innerHTML = (data.firms || []).map(f => `
         <tr>
-          <td>${f.name}</td>
-          <td style="color:var(--muted)">${f.email}</td>
-          <td style="color:var(--muted)">${f.phone || '—'}</td>
+          <td>${esc(f.name)}</td>
+          <td style="color:var(--muted)">${esc(f.email)}</td>
+          <td style="color:var(--muted)">${esc(f.phone || '—')}</td>
           <td><span class="badge ${f.active ? 'b-active' : 'b-inactive'}">${f.active ? 'Active' : 'Inactive'}</span></td>
           <td>${f.subscription_active ? '<span class="badge b-subscribed">Subscribed</span>' : '<span style="color:var(--muted);font-size:0.78rem">None</span>'}</td>
-          <td style="color:var(--muted);font-size:0.78rem">${(f.specializations || []).map(s => MALP_LABELS[s] || s).join(', ') || 'All'}</td>
+          <td style="color:var(--muted);font-size:0.78rem">${esc((f.specializations || []).map(s => MALP_LABELS[s] || s).join(', ') || 'All')}</td>
           <td style="display:flex;gap:0.35rem;flex-wrap:wrap">
-            <button class="action-btn" onclick="toggleFirm(${f.id}, ${!f.active})">${f.active ? 'Deactivate' : 'Activate'}</button>
-            <button class="action-btn" onclick="sendPortalLink(${f.id})">Send Link</button>
+            <button class="action-btn" onclick="toggleFirm(${Number(f.id)}, ${!f.active})">${f.active ? 'Deactivate' : 'Activate'}</button>
+            <button class="action-btn" onclick="sendPortalLink(${Number(f.id)})">Send Link</button>
           </td>
         </tr>
       `).join('');
+    }
+
+    function esc(value) {
+      return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 
     async function toggleFirm(id, active) {

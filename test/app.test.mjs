@@ -2965,3 +2965,71 @@ test("accepting a lead stores the supervising attorney's three checks on it", as
   assert.deepEqual({ ...stored, attestedAt: undefined }, { ...checks, attestedAt: undefined });
   assert.ok(!Number.isNaN(Date.parse(stored.attestedAt)));
 });
+
+// ─── Browser protections, other websites, and what an error reveals ───────────
+
+const { SECURITY_HEADERS } = await import('../security-headers.js');
+
+test('every page and API response carries the browser protections, and other websites cannot call the API', async () => {
+  const server = await startServer(app);
+  try {
+    for (const route of ['/', '/index.html', '/health']) {
+      const response = await fetch(server.baseUrl + route, { headers: { origin: 'https://evil.example' } });
+      assert.equal(response.status, 200, route);
+      for (const [name, value] of Object.entries(SECURITY_HEADERS)) assert.equal(response.headers.get(name), value, route + ' ' + name);
+      assert.equal(response.headers.get('access-control-allow-origin'), null, route + ' answers other websites');
+    }
+    assert.match(SECURITY_HEADERS['Content-Security-Policy'], /frame-ancestors 'none'/);
+    assert.match(SECURITY_HEADERS['Content-Security-Policy'], /object-src 'none'/);
+    // A cross-site preflight gets no permission either.
+    const preflight = await fetch(server.baseUrl + '/api/ask', {
+      method: 'OPTIONS',
+      headers: { origin: 'https://evil.example', 'access-control-request-method': 'POST', 'access-control-request-headers': 'content-type' },
+    });
+    assert.equal(preflight.headers.get('access-control-allow-origin'), null);
+  } finally {
+    await server.close();
+  }
+  const blog = await startServer(blogApp);
+  try {
+    const response = await fetch(blog.baseUrl + '/blog');
+    assert.equal(response.status, 200);
+    for (const [name, value] of Object.entries(SECURITY_HEADERS)) assert.equal(response.headers.get(name), value, 'blog ' + name);
+  } finally {
+    await blog.close();
+  }
+});
+
+test('a failure reaches the caller as a plain message, never the internal error text', async () => {
+  const SECRET_DETAIL = 'relation "conversations" does not exist at character 42';
+  resetRateLimits();
+  const failing = async () => new Response(JSON.stringify({ message: SECRET_DETAIL, code: '42P01' }), { status: 400, headers: { 'content-type': 'application/json' } });
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(failing, async () => {
+      for (const [method, route, payload] of [
+        ['GET', '/api/conversations/sess-broken'],
+        ['POST', '/api/firms/portal-link', { email: 'firm@example.test' }],
+        ['GET', '/api/portal?token=abc'],
+      ]) {
+        const response = await fetch(server.baseUrl + route, {
+          method, headers: { 'content-type': 'application/json' }, ...(payload ? { body: JSON.stringify(payload) } : {}),
+        });
+        const body = await response.text();
+        assert.equal(response.status, 500, route);
+        assert.doesNotMatch(body, /does not exist|42P01|at character|node_modules|.js:d+/, route + ' revealed ' + body);
+      }
+    });
+    // A body that is not JSON is a plain 400, without a stack trace.
+    const garbled = await fetch(server.baseUrl + '/api/ask', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"question": "hi",' });
+    assert.equal(garbled.status, 400);
+    const said = await garbled.text();
+    assert.doesNotMatch(said, /SyntaxError|at JSON.parse|node_modules/);
+    // A forged webhook is refused without the reason.
+    const forged = await fetch(server.baseUrl + '/api/webhooks/stripe', { method: 'POST', headers: { 'content-type': 'application/json', 'stripe-signature': 't=1,v1=forged' }, body: '{}' });
+    assert.equal(forged.status, 400);
+    assert.equal(await forged.text(), 'Webhook signature verification failed');
+  } finally {
+    await server.close();
+  }
+});

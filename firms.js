@@ -13,22 +13,61 @@ function twilioClient() {
   return twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 }
 
-export async function registerFirm({ name, email, phone, attorneyName = null, attorneyRegistration = null }) {
-  const existing = await sql`SELECT id FROM firms WHERE email = ${email} LIMIT 1`;
-  if (existing.length > 0) return { firm: existing[0], isNew: false };
+// A firm's email is kept in lower case and matched without regard to case, so Intake@Firm.com cannot register
+// a second time or miss its sign-in link. Its phone number is kept in the +1 form Twilio needs: a number typed
+// as (212) 555-0100 was stored as typed.
+export const normalizeEmail = email => String(email ?? '').trim().toLowerCase();
 
+export function toE164(phone) {
+  const digits = String(phone ?? '').replace(/\D/g, '');
+  return digits.length === 10 ? `+1${digits}` : `+${digits}`;
+}
+
+export async function findFirmByEmail(email) {
+  const [firm] = await sql`SELECT id, name, email FROM firms WHERE lower(email) = ${normalizeEmail(email)} LIMIT 1`;
+  return firm || null;
+}
+
+export async function registerFirm({ name, email, phone, attorneyName = null, attorneyRegistration = null }) {
+  const cleanEmail = normalizeEmail(email);
+  const existing = await findFirmByEmail(cleanEmail);
+  if (existing) return { firm: existing, isNew: false };
+
+  // A Stripe customer now if possible; ensureStripeCustomer makes one at checkout if this fails.
   let stripeCustomerId = null;
   try {
-    const customer = await createCustomer({ name, email });
+    const customer = await createCustomer({ name, email: cleanEmail });
     stripeCustomerId = customer.id;
   } catch (err) { console.warn('Stripe customer creation failed:', err.message); }
 
   const [firm] = await sql`
     INSERT INTO firms (name, email, phone, stripe_customer_id, attorney_name, attorney_registration)
-    VALUES (${name}, ${email}, ${phone}, ${stripeCustomerId}, ${attorneyName}, ${attorneyRegistration})
+    VALUES (${name}, ${cleanEmail}, ${toE164(phone)}, ${stripeCustomerId}, ${attorneyName}, ${attorneyRegistration})
     RETURNING *
   `;
   return { firm, isNew: true };
+}
+
+// A firm whose Stripe customer could not be made at sign-up (a Stripe error) gets one when it goes to pay. It
+// used to have none, so Checkout made a customer of its own that was never saved: the firm paid $199 a month
+// but could never be charged for a lead.
+export async function ensureStripeCustomer(firm) {
+  if (firm.stripe_customer_id) return firm.stripe_customer_id;
+  const customer = await createCustomer({ name: firm.name, email: firm.email, firmId: firm.id });
+  const [saved] = await sql`
+    UPDATE firms SET stripe_customer_id = COALESCE(stripe_customer_id, ${customer.id})
+    WHERE id = ${firm.id} RETURNING stripe_customer_id`;
+  return saved?.stripe_customer_id || customer.id;
+}
+
+// A firm that typed a wrong number, or a landline that cannot take texts, corrects it before verifying. A
+// verified number is not changed here.
+export async function changeUnverifiedPhone(firmId, phone) {
+  const rows = await sql`
+    UPDATE firms SET phone = ${toE164(phone)}
+    WHERE id = ${firmId} AND phone_verified IS NOT TRUE
+    RETURNING id, phone`;
+  return rows[0] || null;
 }
 
 // Thrown when a verification text may not be sent yet; the message is safe to show.
@@ -160,13 +199,16 @@ export async function updateFirmProfile(firmId, { specializations, serviceArea, 
 }
 
 // A completed checkout switches the firm on, unless Stripe already reports the subscription unpaid: a late
-// retry of this event used to switch back on a firm that a failed payment had switched off.
-export async function updateFirmSubscription(firmId, { stripeSubscriptionId, stripePaymentMethodId, status = null }) {
+// retry of this event used to switch back on a firm that a failed payment had switched off. The customer that
+// paid is saved with the card: the card belongs to that customer, and lead charges need both.
+export async function updateFirmSubscription(firmId, { stripeSubscriptionId, stripePaymentMethodId, stripeCustomerId = null, status = null }) {
   const paidUp = status ? PAID_UP_STATUSES.includes(status) : true;
   await sql`
     UPDATE firms SET subscription_active = ${paidUp}, subscription_status = ${status || 'active'},
       stripe_subscription_id = ${stripeSubscriptionId},
-      stripe_payment_method_id = ${stripePaymentMethodId}
+      stripe_customer_id = COALESCE(${stripeCustomerId}, stripe_customer_id),
+      card_declined_at = CASE WHEN ${stripePaymentMethodId}::text IS NULL THEN card_declined_at ELSE NULL END,
+      stripe_payment_method_id = COALESCE(${stripePaymentMethodId}, stripe_payment_method_id)
     WHERE id = ${firmId}
   `;
 }
@@ -236,11 +278,45 @@ export async function approveFirm(firmId, approved) {
 // switch the firm off until Stripe reports it paid again; a failed payment used to leave the leads coming.
 export const PAID_UP_STATUSES = Object.freeze(['active', 'trialing']);
 
-export async function setSubscriptionStatus(subscriptionId, status) {
+// The subscription's card is saved with its status: lead charges used to keep the card from the first checkout
+// after the firm replaced it. A card that changes clears an earlier decline.
+export async function setSubscriptionStatus(subscriptionId, status, paymentMethodId = null) {
   const paidUp = PAID_UP_STATUSES.includes(status);
   const rows = await sql`
-    UPDATE firms SET subscription_active = ${paidUp}, subscription_status = ${status || null}
+    UPDATE firms SET subscription_active = ${paidUp}, subscription_status = ${status || null},
+      card_declined_at = CASE WHEN ${paymentMethodId}::text IS DISTINCT FROM stripe_payment_method_id AND ${paymentMethodId}::text IS NOT NULL THEN NULL ELSE card_declined_at END,
+      stripe_payment_method_id = COALESCE(${paymentMethodId}, stripe_payment_method_id)
     WHERE stripe_subscription_id = ${subscriptionId}
     RETURNING id`;
   return rows.length;
+}
+
+// The card a firm chose under Manage Billing (Stripe's customer.updated event).
+export async function setCustomerCard(stripeCustomerId, paymentMethodId) {
+  if (!stripeCustomerId || !paymentMethodId) return 0;
+  const rows = await sql`
+    UPDATE firms SET stripe_payment_method_id = ${paymentMethodId},
+      card_declined_at = CASE WHEN stripe_payment_method_id IS DISTINCT FROM ${paymentMethodId} THEN NULL ELSE card_declined_at END
+    WHERE stripe_customer_id = ${stripeCustomerId}
+    RETURNING id`;
+  return rows.length;
+}
+
+// A card a lead charge found on file, and charged, after the stored one was declined.
+export async function setFirmCard(firmId, paymentMethodId) {
+  await sql`UPDATE firms SET stripe_payment_method_id = ${paymentMethodId}, card_declined_at = NULL WHERE id = ${firmId}`;
+}
+
+// A declined lead charge is reported to the firm at most once a day. The time is shown in the portal until a new
+// card is saved or a charge goes through. Returns whether this decline is the one to report.
+export async function claimCardDeclinedNotice(firmId) {
+  const rows = await sql`
+    UPDATE firms SET card_declined_at = NOW()
+    WHERE id = ${firmId} AND (card_declined_at IS NULL OR card_declined_at < NOW() - INTERVAL '24 hours')
+    RETURNING id`;
+  return rows.length > 0;
+}
+
+export async function clearCardDeclined(firmId) {
+  await sql`UPDATE firms SET card_declined_at = NULL WHERE id = ${firmId} AND card_declined_at IS NOT NULL`;
 }

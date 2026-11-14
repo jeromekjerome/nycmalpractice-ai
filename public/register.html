@@ -104,6 +104,11 @@
         </div>
         <div class="error-msg" id="step1Error"></div>
         <button class="next-btn" onclick="registerFirm()">Continue →</button>
+        <!-- A firm already registered, or one coming back to finish, signs in by email and finishes in its portal. -->
+        <div id="signInBox" style="display:none;margin-top:0.75rem;text-align:center">
+          <button class="next-btn" id="signInLinkBtn" onclick="emailSignInLink()" style="background:transparent;border:1px solid var(--border);color:var(--text)">Email me a sign-in link</button>
+          <div id="signInMsg" style="font-size:0.82rem;color:var(--muted);margin-top:0.5rem"></div>
+        </div>
       </div>
 
       <!-- Step 2: Phone Verify -->
@@ -119,6 +124,11 @@
           <input type="number" maxlength="1" class="otp-digit" oninput="otpNext(this,5)">
         </div>
         <div class="code-hint">Didn't get it? <a onclick="resendCode()">Resend code</a></div>
+        <div class="code-hint">Wrong number, or a landline that cannot get texts? <a onclick="showPhoneChange()">Change it</a></div>
+        <div id="phoneChange" style="display:none;margin-top:0.75rem">
+          <input type="tel" id="newPhone" placeholder="+1 (212) 555-0100" aria-label="Mobile phone number">
+          <button class="next-btn" id="phoneBtn" onclick="changePhone()" style="margin-top:0.5rem">Save the number and text a new code</button>
+        </div>
         <div class="error-msg" id="step2Error"></div>
         <button class="next-btn" onclick="verifyPhone()" style="margin-top:1.25rem">Verify →</button>
         <span class="back-link" onclick="goStep(1)">← Back</span>
@@ -151,6 +161,7 @@
       <div id="step4" style="display:none">
         <div class="reg-title">Activate Your Subscription</div>
         <div class="reg-sub">$199/month gives you access to the malpractice lead marketplace, auction bidding, and cold lead delivery. Cancel anytime.</div>
+        <div class="reg-sub" id="cancelNote" style="display:none">Checkout was cancelled and nothing was charged. Subscribe when you are ready.</div>
         <div style="background:rgba(158,58,90,0.07);border:1px solid rgba(158,58,90,0.2);border-radius:12px;padding:1.25rem;margin-bottom:1.25rem">
           <div style="font-weight:700;margin-bottom:0.5rem">What's included:</div>
           <ul style="list-style:none;display:flex;flex-direction:column;gap:0.4rem">
@@ -161,6 +172,7 @@
             <li style="font-size:0.85rem;color:var(--muted)">✓ Firm portal with lead management</li>
           </ul>
         </div>
+        <div class="error-msg" id="step4Error"></div>
         <button class="next-btn" onclick="goCheckout()">Subscribe with Stripe →</button>
         <span class="back-link" onclick="goStep(3)">← Back</span>
       </div>
@@ -177,13 +189,25 @@
   </div>
 
   <script>
+    // Kept for the visit, so a firm back from Stripe (or after a reload) carries on where it stopped.
+    const saved = key => { try { return sessionStorage.getItem(key); } catch { return null; } };
+    const save  = (key, value) => { try { sessionStorage.setItem(key, value); } catch { /* private window */ } };
     let firmId = null;
     // Returned by the first step; the later steps send it to show they belong to this registration.
-    let registrationToken = sessionStorage.getItem('malpractice_registration_token');
+    let registrationToken = saved('malpractice_registration_token');
     let currentStep = 1;
 
     const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get('step') === '4') { goStep(4); firmId = sessionStorage.getItem('malpractice_firm_id'); }
+    if (urlParams.get('step') === '4') {
+      firmId = saved('malpractice_firm_id');
+      // Back from a cancelled checkout: the plan step again, or, in another tab, a sign-in link to finish.
+      if (firmId && registrationToken) {
+        goStep(4);
+        if (urlParams.get('cancelled')) document.getElementById('cancelNote').style.display = 'block';
+      } else {
+        offerSignIn('To finish signing up, enter your firm email above and we will email you a sign-in link. Your portal can start the subscription.');
+      }
+    }
     if (urlParams.get('subscribed') === '1') { goStep(5); track('partner_signup_complete', { app: 'malpractice-ai' }); }
     else { track('partner_signup_start', { app: 'malpractice-ai' }); }
 
@@ -209,11 +233,16 @@
       try {
         const res  = await fetch('/api/firms/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, email, phone, attorneyName, attorneyRegistration }) });
         const data = await res.json();
-        if (data.error) { showErr(errEl, data.error); return; }
+        if (data.error) {
+          // Already registered: the sign-in link is offered here, rather than only named.
+          if (data.signIn) offerSignIn('');
+          showErr(errEl, data.error);
+          return;
+        }
         firmId = data.firmId;
         registrationToken = data.registrationToken;
-        sessionStorage.setItem('malpractice_firm_id', firmId);
-        sessionStorage.setItem('malpractice_registration_token', registrationToken);
+        save('malpractice_firm_id', firmId);
+        save('malpractice_registration_token', registrationToken);
         if (data.notice) showErr(document.getElementById('step2Error'), data.notice);
         if (data.phoneVerified) { goStep(3); } else { goStep(2); }
       } catch (e) { showErr(errEl, 'Server error. Please try again.'); }
@@ -241,6 +270,31 @@
       if (res.ok) { errEl.style.display = 'none'; alert('A new code has been sent.'); } else { showErr(errEl, data.error || 'The code could not be sent. Please try again.'); }
     }
 
+    function showPhoneChange() {
+      document.getElementById('phoneChange').style.display = 'block';
+      document.getElementById('newPhone').focus();
+    }
+
+    async function changePhone() {
+      const phone = document.getElementById('newPhone').value.trim();
+      const errEl = document.getElementById('step2Error');
+      if (!phone) { showErr(errEl, 'Enter your mobile number.'); return; }
+      const btn = document.getElementById('phoneBtn');
+      btn.disabled = true;
+      try {
+        const res  = await fetch('/api/firms/phone', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ firmId, token: registrationToken, phone }) });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) {
+          errEl.style.display = 'none';
+          document.getElementById('phoneChange').style.display = 'none';
+          document.querySelector('#step2 .reg-sub').textContent = `We sent a 6-digit code to ${data.phone || phone}. Enter it below to continue.`;
+        } else {
+          showErr(errEl, data.error || 'The number could not be changed. Please try again.');
+        }
+      } catch { showErr(errEl, 'The number could not be changed. Please check your connection and try again.'); }
+      finally { btn.disabled = false; }
+    }
+
     async function saveProfile() {
       const specs = [...document.querySelectorAll('.spec-item input:checked')].map(i => i.value);
       const area  = document.getElementById('serviceArea').value.trim();
@@ -250,10 +304,38 @@
       goStep(4);
     }
 
+    // A checkout that cannot start says why; it used to do nothing at all.
     async function goCheckout() {
-      const res  = await fetch('/api/billing/checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ firmId, token: registrationToken }) });
-      const data = await res.json();
-      if (data.url) { track('partner_checkout_initiated', { app: 'malpractice-ai' }); window.location.href = data.url; }
+      const errEl = document.getElementById('step4Error');
+      try {
+        const res  = await fetch('/api/billing/checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ firmId, token: registrationToken }) });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.url) { track('partner_checkout_initiated', { app: 'malpractice-ai' }); window.location.href = data.url; return; }
+        showErr(errEl, data.error || 'Checkout could not be started. Please try again.');
+        // An expired sign-up session finishes in the portal, through a sign-in link.
+        if (res.status === 401) errEl.insertAdjacentHTML('beforeend', ' <a href="/portal.html" style="color:var(--accent)">Get a sign-in link →</a>');
+      } catch { showErr(errEl, 'Checkout could not be started. Please check your connection and try again.'); }
+    }
+
+    function offerSignIn(message) {
+      document.getElementById('signInBox').style.display = 'block';
+      document.getElementById('signInMsg').textContent = message;
+    }
+
+    async function emailSignInLink() {
+      const email = document.getElementById('firmEmail').value.trim();
+      const msg = document.getElementById('signInMsg');
+      if (!email) { msg.textContent = 'Enter your firm email above first.'; return; }
+      const btn = document.getElementById('signInLinkBtn');
+      btn.disabled = true;
+      try {
+        const res  = await fetch('/api/firms/portal-link', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) });
+        const data = await res.json().catch(() => ({}));
+        msg.textContent = res.ok
+          ? `We emailed a sign-in link to ${email}. Open it to finish signing up from your firm portal.`
+          : (data.error || 'The link could not be sent. Please try again.');
+      } catch { msg.textContent = 'The link could not be sent. Please check your connection and try again.'; }
+      finally { btn.disabled = false; }
     }
 
     function showErr(el, msg) { el.textContent = msg; el.style.display = 'block'; }

@@ -37,6 +37,13 @@
     .save-btn:hover { opacity: 0.88; }
     .manage-btn { font-size: 0.78rem; color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 0.3rem 0.7rem; cursor: pointer; background: transparent; transition: border-color 0.2s; }
     .manage-btn:hover { border-color: var(--accent); color: var(--text); }
+    .setup-note { color: var(--muted); font-size: 0.86rem; margin-bottom: 0.85rem; line-height: 1.5; }
+    .setup-row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; margin-bottom: 0.75rem; }
+    .setup-input { flex: 1; min-width: 160px; background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-family: 'Inter', sans-serif; font-size: 0.88rem; padding: 0.55rem 0.85rem; outline: none; }
+    .setup-input:focus { border-color: var(--accent); }
+    .notice-banner { border: 1px solid rgba(248,113,113,0.35); background: rgba(248,113,113,0.08); color: #fca5a5; border-radius: 10px; padding: 0.85rem 1rem; font-size: 0.86rem; margin-bottom: 1.25rem; line-height: 1.5; }
+    .portal-msg { font-size: 0.85rem; margin-bottom: 1rem; display: none; }
+    .link-btn { background: none; border: none; padding: 0; color: var(--accent); font: inherit; cursor: pointer; text-decoration: underline; }
   </style>
 </head>
 <body>
@@ -66,9 +73,37 @@
         <div style="font-size:0.8rem;color:var(--muted)" id="firmNameEl"></div>
       </div>
       <div style="display:flex;gap:0.75rem;align-items:center">
-        <button class="manage-btn" onclick="openBillingPortal()">Manage Billing</button>
+        <button class="manage-btn" id="billingBtn" onclick="openBillingPortal()" style="display:none">Manage Billing</button>
         <a href="/" style="font-size:0.82rem;color:var(--muted);text-decoration:none">← Back to Chat</a>
       </div>
+    </div>
+
+    <div class="portal-msg" id="portalMsg" role="status"></div>
+
+    <!-- A lead charge that failed: the firm sees why it is missing leads. -->
+    <div class="notice-banner" id="cardNotice" style="display:none"></div>
+
+    <!-- A firm that stopped part-way through sign-up finishes it here. -->
+    <div class="glass-panel" id="setupPanel" style="padding:1.25rem;margin-bottom:1.5rem;display:none">
+      <div style="font-weight:700;margin-bottom:0.6rem">Finish Signing Up</div>
+      <div id="phoneSetup" style="display:none">
+        <p class="setup-note">Verify your mobile number first. We text a 6-digit code to <strong id="phoneOnFile"></strong>.</p>
+        <div class="setup-row">
+          <button class="save-btn" id="sendCodeBtn" onclick="sendCode()">Text me a code</button>
+          <input class="setup-input" id="codeInput" inputmode="numeric" maxlength="6" placeholder="6-digit code" aria-label="Verification code">
+          <button class="save-btn" id="verifyBtn" onclick="verifyCode()">Verify</button>
+        </div>
+        <p class="setup-note" style="margin-bottom:0.5rem">Wrong number, or a landline? <button class="link-btn" onclick="document.getElementById('phoneChange').style.display='flex'">Change it</button></p>
+        <div class="setup-row" id="phoneChange" style="display:none">
+          <input class="setup-input" id="newPhone" type="tel" placeholder="+1 (212) 555-0100" aria-label="Mobile phone number">
+          <button class="save-btn" id="phoneBtn" onclick="changePhone()">Save and text a code</button>
+        </div>
+      </div>
+      <div id="subscribeSetup" style="display:none">
+        <p class="setup-note">Start your subscription ($199 a month) to receive auction invitations and leads. You are charged for each lead you receive.</p>
+        <button class="save-btn" id="subscribeBtn" onclick="startSubscription()">Start Subscription →</button>
+      </div>
+      <p class="setup-note" id="paymentDueNote" style="display:none;margin-bottom:0">Your last subscription payment did not go through, so leads are paused. Update your card under Manage Billing.</p>
     </div>
 
     <!-- Stats -->
@@ -126,7 +161,87 @@
       other:               'Malpractice',
     };
 
-    const token = new URLSearchParams(window.location.search).get('token');
+    // The sign-in link is kept for the visit, so returning from Stripe's pages (which are not given the link)
+    // opens the portal again rather than the sign-in form.
+    const params = new URLSearchParams(window.location.search);
+    const token = (() => {
+      const fromLink = params.get('token');
+      try {
+        if (fromLink) sessionStorage.setItem('malpractice_portal_token', fromLink);
+        return fromLink || sessionStorage.getItem('malpractice_portal_token');
+      } catch { return fromLink; }
+    })();
+    let currentFirm = null;
+
+    function showMessage(text, isError = false) {
+      const el = document.getElementById('portalMsg');
+      el.textContent = text;
+      el.style.color = isError ? '#f87171' : 'var(--success)';
+      el.style.display = 'block';
+    }
+
+    // What the firm still needs before it gets leads, first things first.
+    function standing(firm) {
+      const paymentDue = ['past_due', 'unpaid'].includes(firm.subscription_status);
+      if (!firm.phone_verified) return { label: 'Phone not verified', ok: false };
+      if (paymentDue) return { label: 'Payment due', ok: false, paymentDue };
+      if (!firm.subscription_active) return { label: 'Not subscribed', ok: false };
+      // No leads until the operator has checked the supervising attorney's New York registration.
+      if (!firm.approved_at) return { label: 'Awaiting approval', ok: false };
+      return { label: '✓ Active', ok: true };
+    }
+
+    // Finishing sign-up: the portal link opens the same steps the sign-up page used.
+    async function postForFirm(path, body) {
+      const res = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ firmId: currentFirm.id, token, ...body }) });
+      return { res, data: await res.json().catch(() => ({})) };
+    }
+
+    async function withButton(id, work) {
+      const btn = document.getElementById(id);
+      btn.disabled = true;
+      try { await work(); }
+      catch { showMessage('Something went wrong. Please check your connection and try again.', true); }
+      finally { btn.disabled = false; }
+    }
+
+    function sendCode() {
+      return withButton('sendCodeBtn', async () => {
+        const { res, data } = await postForFirm('/api/firms/resend-code', {});
+        showMessage(res.ok ? 'Code sent. It works for 10 minutes.' : (data.error || 'The code could not be sent.'), !res.ok);
+      });
+    }
+
+    function verifyCode() {
+      const code = document.getElementById('codeInput').value.replace(/\D/g, '');
+      if (code.length !== 6) { showMessage('Enter the 6-digit code.', true); return; }
+      return withButton('verifyBtn', async () => {
+        const { data } = await postForFirm('/api/firms/verify-phone', { code });
+        if (!data.ok) { showMessage(data.error || 'That code is not right, or has expired. Text yourself a new one.', true); return; }
+        showMessage('Phone verified ✓');
+        loadPortal();
+      });
+    }
+
+    function changePhone() {
+      const phone = document.getElementById('newPhone').value.trim();
+      if (!phone) { showMessage('Enter your mobile number.', true); return; }
+      return withButton('phoneBtn', async () => {
+        const { res, data } = await postForFirm('/api/firms/phone', { phone });
+        if (!res.ok) { showMessage(data.error || 'The number could not be changed.', true); return; }
+        document.getElementById('phoneOnFile').textContent = data.phone || phone;
+        document.getElementById('phoneChange').style.display = 'none';
+        showMessage('Number saved. We texted a code to it.');
+      });
+    }
+
+    function startSubscription() {
+      return withButton('subscribeBtn', async () => {
+        const { res, data } = await postForFirm('/api/billing/checkout', { from: 'portal' });
+        if (res.ok && data.url) { window.location.href = data.url; return; }
+        showMessage(data.error || 'Checkout could not be started. Please try again.', true);
+      });
+    }
 
     async function sendPortalLink() {
       const email = document.getElementById('loginEmail').value.trim();
@@ -137,7 +252,7 @@
     }
 
     async function openBillingPortal() {
-      window.location.href = `/api/billing/portal?token=${token}`;
+      window.location.href = `/api/billing/portal?token=${encodeURIComponent(token)}`;
     }
 
     async function saveProfile() {
@@ -148,16 +263,13 @@
       setTimeout(() => msg.style.display = 'none', 2000);
     }
 
-    if (token) {
-      document.getElementById('loginView').style.display  = 'none';
-      document.getElementById('portalView').style.display = 'block';
-
-      (async () => {
-        const res  = await fetch(`/api/portal?token=${token}`);
+    async function loadPortal() {
+        const res  = await fetch(`/api/portal?token=${encodeURIComponent(token)}`);
         const data = await res.json();
         if (data.error) { document.getElementById('loginView').style.display = 'block'; document.getElementById('portalView').style.display = 'none'; return; }
 
-        document.getElementById('firmNameEl').textContent = data.firm?.name || '';
+        const firm = currentFirm = data.firm || {};
+        document.getElementById('firmNameEl').textContent = firm.name || '';
         const leads    = data.leads || [];
         const total    = leads.length;
         const accepted = leads.filter(l => l.status === 'accepted').length;
@@ -165,17 +277,35 @@
         document.getElementById('statTotal').textContent    = total;
         document.getElementById('statAccepted').textContent = accepted;
         document.getElementById('statPending').textContent  = pending;
-        // No leads until the operator has checked the supervising attorney's New York registration.
-        document.getElementById('statStatus').textContent   = !data.firm?.approved_at ? 'Awaiting approval' : data.firm?.subscription_active ? '✓ Active' : 'Inactive';
-        document.getElementById('statStatus').style.color   = data.firm?.approved_at && data.firm?.subscription_active ? 'var(--success)' : '#f87171';
+        const state = standing(firm);
+        document.getElementById('statStatus').textContent   = state.label;
+        document.getElementById('statStatus').style.color   = state.ok ? 'var(--success)' : '#f87171';
 
-        if (data.firm?.specializations?.length) {
+        // Manage Billing opens Stripe's page for an existing customer; a firm that has never paid starts here.
+        document.getElementById('billingBtn').style.display = firm.stripe_customer_id ? '' : 'none';
+        const needsPhone = !firm.phone_verified;
+        const needsSubscription = !needsPhone && !firm.subscription_active && !state.paymentDue;
+        document.getElementById('setupPanel').style.display     = needsPhone || needsSubscription || state.paymentDue ? 'block' : 'none';
+        document.getElementById('phoneSetup').style.display     = needsPhone ? 'block' : 'none';
+        document.getElementById('subscribeSetup').style.display = needsSubscription ? 'block' : 'none';
+        document.getElementById('paymentDueNote').style.display = state.paymentDue ? 'block' : 'none';
+        document.getElementById('phoneOnFile').textContent      = firm.phone || 'your phone';
+        const cardNotice = document.getElementById('cardNotice');
+        if (firm.card_declined_at) {
+          cardNotice.textContent = `A lead charge to your card was declined on ${new Date(firm.card_declined_at).toLocaleDateString()}, so that lead went elsewhere. Update your card under Manage Billing so you don't miss more leads.`;
+          cardNotice.style.display = 'block';
+        } else {
+          cardNotice.style.display = 'none';
+        }
+
+        if (firm.specializations?.length) {
           document.querySelectorAll('#specGrid input').forEach(cb => {
             cb.checked = data.firm.specializations.includes(cb.value);
           });
         }
 
         if (leads.length === 0) { document.getElementById('noLeads').style.display = 'block'; return; }
+        document.getElementById('noLeads').style.display = 'none';
         const tbody = document.getElementById('leadsBody');
         tbody.innerHTML = leads.map(l => `
           <tr>
@@ -187,7 +317,16 @@
             <td>${l.status === 'pending' ? `<a href="lead.html?id=${l.id}&token=${token}" style="font-size:0.78rem;color:var(--accent)">View →</a>` : ''}</td>
           </tr>
         `).join('');
-      })();
+    }
+
+    if (token) {
+      document.getElementById('loginView').style.display  = 'none';
+      document.getElementById('portalView').style.display = 'block';
+      loadPortal().then(() => {
+        if (params.get('subscribed')) showMessage('Thank you. Your subscription will show as active within a minute.');
+        else if (params.get('checkout') === 'cancelled') showMessage('Checkout cancelled. Nothing was charged.', true);
+        else if (params.get('billing') === 'none') showMessage('Start your subscription first.', true);
+      }).catch(() => { document.getElementById('loginView').style.display = 'block'; document.getElementById('portalView').style.display = 'none'; });
     }
   </script>
 </body>

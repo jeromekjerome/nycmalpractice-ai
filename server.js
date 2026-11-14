@@ -8,10 +8,10 @@ import { dirname, join } from 'path';
 import { neon } from '@neondatabase/serverless';
 import { answerUserQuestion } from './ask.js';
 import { closeExpiredAuctions, createAuction, deliverColdLead, getAuctionStatus, placeBid, acceptLead, declineLead, notifyOperatorOfContactRequest, notifyOperator, TIER_CONFIG } from './auction.js';
-import { registerFirm, sendVerificationCode, verifyPhoneCode, validateToken, updateFirmSubscription, getFirm, updateFirmProfile, createMagicLink, VerificationLimitError, recentDeclineCounts, linkOpensAuction, linkOpensLead, linkOpensAccount, approveFirm, setSubscriptionStatus } from './firms.js';
+import { registerFirm, sendVerificationCode, verifyPhoneCode, validateToken, updateFirmSubscription, getFirm, updateFirmProfile, createMagicLink, VerificationLimitError, recentDeclineCounts, linkOpensAuction, linkOpensLead, linkOpensAccount, approveFirm, setSubscriptionStatus, ensureStripeCustomer, changeUnverifiedPhone, setCustomerCard, findFirmByEmail } from './firms.js';
 import { rateLimit } from './rate-limit.js';
 import nodemailer from 'nodemailer';
-import { createSubscriptionCheckout, createPortalSession, constructWebhookEvent, getSubscriptionDetails } from './stripe.js';
+import { createSubscriptionCheckout, createPortalSession, constructWebhookEvent, getSubscriptionDetails, getCustomerCard } from './stripe.js';
 import OpenAI from 'openai';
 import { buildModelList, probeAllModelChains } from './openaiModelFailover.js';
 import { APP_URL, CONTACT_CONSENT_TEXT, CONTACT_FORM_FROM_STEP } from './site.js';
@@ -355,19 +355,30 @@ app.post('/api/firms/register', limitSignup, async (req, res) => {
     const { firm, isNew } = await registerFirm({ name, email, phone, attorneyName: attorneyName.trim(), attorneyRegistration: registrationNumber(attorneyRegistration) });
     if (!isNew) {
       // An existing firm signs in through the link emailed to it, never through this form: otherwise
-      // anyone who knew a firm's email could change its profile or billing.
-      return res.status(409).json({ error: 'This email is already registered. Use Firm Login to get a sign-in link by email.' });
+      // anyone who knew a firm's email could change its profile or billing. The page offers to email the link.
+      return res.status(409).json({ error: 'This email is already registered. Use Firm Login to get a sign-in link by email.', signIn: true });
     }
+    // The firm exists from here on, so a text that cannot be sent is a notice, not a failure: a failure used to
+    // leave a firm that could neither finish sign-up nor register again.
     let notice = null;
+    let textProblem = null;
     try { await sendVerificationCode(firm.id); }
-    catch (err) { if (!(err instanceof VerificationLimitError)) throw err; notice = err.message; }
+    catch (err) {
+      if (err instanceof VerificationLimitError) notice = err.message;
+      else {
+        console.error(`The verification text for new firm ${firm.id} failed:`, err.message);
+        textProblem = err.message;
+        notice = 'We could not text a code to that number. Check that it is a mobile number, or change it below, then send a new code.';
+      }
+    }
     const registrationToken = await createMagicLink(firm.id, { expiresInHours: 6 });
     // The operator checks the attorney's registration and approves the firm before it gets any lead.
     await notifyOperator(`New firm awaiting approval: ${firm.name}`,
       `<p>${escapeHtml(firm.name)} (${escapeHtml(firm.email)}) has registered. Supervising attorney: ${escapeHtml(firm.attorney_name)}, ` +
       `New York registration number ${escapeHtml(firm.attorney_registration)}.</p>` +
       `<p>Check the registration in the <a href="https://iapps.courts.state.ny.us/attorneyservices/search?0">New York attorney search</a>, ` +
-      `then approve the firm on the admin page. It gets no leads until then.</p>`);
+      `then approve the firm on the admin page. It gets no leads until then.</p>` +
+      (textProblem ? `<p>The verification text to ${escapeHtml(firm.phone)} could not be sent: ${escapeHtml(textProblem)}</p>` : ''));
     res.json({ firmId: firm.id, isNew, phoneVerified: firm.phone_verified, registrationToken, ...(notice ? { notice } : {}) });
   } catch (err) {
     console.error('Error in /api/firms/register:', err);
@@ -405,16 +416,43 @@ app.post('/api/firms/resend-code', limitTexts, async (req, res) => {
   }
 });
 
+// A firm that typed a wrong number, or a landline, corrects it and gets a new code, from sign-up or its portal.
+app.post('/api/firms/phone', limitTexts, async (req, res) => {
+  const { firmId, token, phone } = req.body;
+  if (!firmId) return res.status(400).json({ error: 'firmId required' });
+  if (!(await ownsRegistration(token, firmId))) return res.status(401).json({ error: REGISTRATION_EXPIRED });
+  const digits = typeof phone === 'string' ? phone.replace(/\D/g, '') : '';
+  if (digits.length < 10 || digits.length > 15) return res.status(400).json({ error: 'Please enter a valid phone number.' });
+  try {
+    const changed = await changeUnverifiedPhone(firmId, phone);
+    if (!changed) return res.status(409).json({ error: 'Your phone number is already verified.' });
+    await sendVerificationCode(firmId);
+    res.json({ ok: true, phone: changed.phone });
+  } catch (err) {
+    if (err instanceof VerificationLimitError) return res.status(429).json({ error: err.message });
+    console.error('Error in /api/firms/phone:', err);
+    res.status(502).json({ error: 'The number was saved, but the code could not be sent. Check that it is a mobile number and try again.' });
+  }
+});
+
 // ─── Stripe ───────────────────────────────────────────────────────────────────
+// Reached from the last sign-up step and, for a firm that stopped before paying, from its portal (both tokens
+// open the firm's account).
 app.post('/api/billing/checkout', async (req, res) => {
-  const { firmId, token } = req.body;
+  const { firmId, token, from } = req.body;
   if (!firmId) return res.status(400).json({ error: 'firmId required' });
   if (!(await ownsRegistration(token, firmId))) return res.status(401).json({ error: REGISTRATION_EXPIRED });
   const firm = await getFirm(firmId);
   if (!firm) return res.status(404).json({ error: 'Firm not found' });
-  if (!firm.phone_verified) return res.status(403).json({ error: 'Phone not verified' });
+  if (!firm.phone_verified) return res.status(403).json({ error: 'Please verify your phone number first.' });
+  // A second subscription would bill the firm twice.
+  if (firm.subscription_active) return res.status(409).json({ error: 'Your subscription is already active.' });
+  if (['past_due', 'unpaid'].includes(firm.subscription_status)) {
+    return res.status(409).json({ error: 'Your subscription has a payment due. Update your card under Manage Billing.' });
+  }
   try {
-    const session = await createSubscriptionCheckout({ stripeCustomerId: firm.stripe_customer_id, firmId });
+    const stripeCustomerId = await ensureStripeCustomer(firm);
+    const session = await createSubscriptionCheckout({ stripeCustomerId, firmId: firm.id, from: from === 'portal' ? 'portal' : 'register' });
     res.json({ url: session.url });
   } catch (err) { serverError(req, res, err); }
 });
@@ -423,6 +461,8 @@ app.get('/api/billing/portal', async (req, res) => {
   const tokenData = await validateToken(req.query.token);
   if (!tokenData) return res.status(401).json({ error: 'Invalid token' });
   if (!linkOpensAccount(tokenData)) return res.status(403).json({ error: ACCOUNT_ONLY });
+  // A firm that has never paid has nothing to manage yet: its portal offers to start the subscription.
+  if (!tokenData.stripe_customer_id) return res.redirect('/portal.html?billing=none');
   try {
     const portal = await createPortalSession({ stripeCustomerId: tokenData.stripe_customer_id });
     res.redirect(portal.url);
@@ -443,7 +483,8 @@ app.post('/api/webhooks/stripe', async (req, res) => {
         const details = await getSubscriptionDetails(session.subscription);
         const firmId  = session.metadata?.firmId || session.client_reference_id || details.firmId;
         if (firmId) {
-          await updateFirmSubscription(firmId, { stripeSubscriptionId: session.subscription, stripePaymentMethodId: details.paymentMethodId, status: details.status });
+          const stripeCustomerId = typeof session.customer === 'string' ? session.customer : (session.customer?.id || null);
+          await updateFirmSubscription(firmId, { stripeSubscriptionId: session.subscription, stripePaymentMethodId: details.paymentMethodId, stripeCustomerId, status: details.status });
           console.log(`Firm ${firmId} subscription activated`);
         } else {
           console.error(`Checkout session ${session.id} names no firm; subscription ${session.subscription} not activated`);
@@ -467,12 +508,27 @@ app.post('/api/webhooks/stripe', async (req, res) => {
       : (object.subscription || object.parent?.subscription_details?.subscription || null);
     if (subscriptionId) {
       try {
-        const { status } = await getSubscriptionDetails(subscriptionId);
-        const firms = await setSubscriptionStatus(subscriptionId, status);
+        const { status, paymentMethodId } = await getSubscriptionDetails(subscriptionId);
+        const firms = await setSubscriptionStatus(subscriptionId, status, paymentMethodId);
         console.log(`Subscription ${subscriptionId} is ${status}: ${firms} firm(s) updated`);
       } catch (err) {
         console.error('Subscription status update error:', err.message);
         return res.status(500).json({ error: 'Subscription update failed; Stripe will retry' });
+      }
+    }
+  }
+
+  // A firm that changes its card under Manage Billing changes its customer's default card; later lead charges
+  // use it. The card is read from Stripe, so events that arrive out of order cannot restore an old one.
+  if (event.type === 'customer.updated') {
+    const customerId = event.data.object?.id;
+    if (customerId) {
+      try {
+        const card = await getCustomerCard(customerId);
+        if (card) console.log(`Customer ${customerId}'s card saved for ${await setCustomerCard(customerId, card)} firm(s)`);
+      } catch (err) {
+        console.error('Card update error:', err.message);
+        return res.status(500).json({ error: 'Card update failed; Stripe will retry' });
       }
     }
   }
@@ -572,7 +628,7 @@ app.post('/api/firms/portal-link', limitEmails, async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ error: 'email required' });
   try {
-    const [firm] = await sql`SELECT id, name, email FROM firms WHERE email = ${email} LIMIT 1`;
+    const firm = await findFirmByEmail(email);
     if (!firm) return res.status(404).json({ error: 'No firm found with that email address' });
     const token = await createMagicLink(firm.id, { expiresInHours: 720 });
     const url   = `${APP_URL}/portal.html?token=${token}`;

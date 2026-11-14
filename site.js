@@ -18,3 +18,11 @@ export const CONTACT_FORM_FROM_STEP = 4;
 
 // The practice areas a firm can choose on the sign-up form and in the portal ('other' means every case type).
 export const PRACTICE_AREAS = Object.freeze(['surgical_error', 'misdiagnosis', 'medication_error', 'birth_injury', 'anesthesia_error', 'hospital_negligence', 'nursing_home', 'dental', 'other']);
+
+// How each case type is named in emails to firms and on the admin page.
+const CASE_TYPE_LABELS = Object.freeze({
+  surgical_error: 'surgical error', misdiagnosis: 'failure to diagnose', medication_error: 'medication error',
+  birth_injury: 'birth injury', anesthesia_error: 'anesthesia error', hospital_negligence: 'hospital negligence',
+  nursing_home: 'nursing home', dental: 'dental malpractice', other: 'medical malpractice',
+});
+export const caseTypeLabel = type => CASE_TYPE_LABELS[type] || CASE_TYPE_LABELS.other;

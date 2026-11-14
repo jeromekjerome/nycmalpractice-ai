@@ -1338,3 +1338,72 @@ test('a lead is answered once: a second decline or a late accept changes nothing
   assert.ok(!calls.some(call => /refund_amount|UPDATE firms/.test(call.query)), 'a lead answered twice was refunded or counted twice');
   assert.ok(calls.some(call => /^UPDATE leads SET status = 'accepted' WHERE id = \$1 AND status = 'pending' RETURNING id/.test(call.query)));
 });
+
+// ─── Case law when CourtListener cannot be searched ───────────────────────────
+
+test('found decisions are saved for the case type, without the visitor words, and used when a later search fails', async () => {
+  const question = 'My name is Jane Roe. My radiologist missed a tumor in March.';
+  // 1) A search that works saves what it found, under the case type only.
+  clearSearchCache();
+  const working = fakeWorld();
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(working.handler, async () => {
+      const { response } = await postJson(server.baseUrl, '/api/ask', { question, mode: 'personal', sessionId: 'sess-memory-1', history: [] });
+      assert.equal(response.status, 200);
+    });
+    const saved = working.calls.sql.find(call => /^INSERT INTO search_cache \(case_type, cases, updated_at\)/.test(call.query));
+    assert.ok(saved, 'the decisions found were not saved');
+    assert.equal(saved.params[0], 'misdiagnosis');
+    const stored = JSON.parse(saved.params[1]);
+    assert.equal(stored[0].caseName, 'Patient v. General Hospital');
+    for (const words of ['Jane', 'Roe', 'radiologist', 'tumor', 'delayed cancer diagnosis']) {
+      assert.ok(!saved.params.some(param => String(param).includes(words)), `the saved row holds "${words}"`);
+    }
+
+    // 2) CourtListener throttles the token: the saved decisions are used, and the model is told what they are.
+    clearSearchCache();
+    const failing = fakeWorld();
+    const handler = async (url, init) => {
+      if (url.startsWith('https://www.courtlistener.com/')) return jsonResponse({ detail: 'Request was throttled.' }, 429);
+      if (url.endsWith('/sql') && /^SELECT cases FROM search_cache WHERE case_type = \$1/.test(JSON.parse(init.body).query.replace(/\s+/g, ' ').trim())) {
+        assert.equal(String(JSON.parse(init.body).params[1]), '30');
+        return rowsResponse([['cases', JSONB]], [[saved.params[1]]]);
+      }
+      return failing.handler(url, init);
+    };
+    await withOutboundHttp(handler, async () => {
+      const { response, body } = await postJson(server.baseUrl, '/api/ask', { question, mode: 'personal', sessionId: 'sess-memory-2', history: [] });
+      assert.equal(response.status, 200);
+      assert.equal(body.cases.length, 1);
+      assert.equal(body.cases[0].caseName, 'Patient v. General Hospital');
+    });
+    const system = failing.calls.openai.find(call => call.kind === 'answer').request.messages[0].content;
+    assert.ok(system.includes('were not matched to these facts'), 'the model was not told the cases are from an earlier search');
+    assert.ok(system.includes('Case: Patient v. General Hospital'));
+    assert.ok(!failing.calls.sql.some(call => /^INSERT INTO search_cache/.test(call.query)), 'remembered cases were saved again as new');
+  } finally {
+    await server.close();
+  }
+});
+
+test('with no saved decisions and no search, the reply falls back to general principles', async () => {
+  clearSearchCache();
+  const world = fakeWorld();
+  const handler = async (url, init) => {
+    if (url.startsWith('https://www.courtlistener.com/')) return jsonResponse({ detail: 'Request was throttled.' }, 429);
+    return world.handler(url, init);
+  };
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(handler, async () => {
+      const { response, body } = await postJson(server.baseUrl, '/api/ask', { question: 'A surgeon left a sponge in me.', mode: 'personal', sessionId: 'sess-memory-3', history: [] });
+      assert.equal(response.status, 200);
+      assert.deepEqual(body.cases, []);
+    });
+    const system = world.calls.openai.find(call => call.kind === 'answer').request.messages[0].content;
+    assert.ok(system.includes('No specific cases retrieved'));
+  } finally {
+    await server.close();
+  }
+});

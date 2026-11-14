@@ -2,6 +2,7 @@
 
 import OpenAI from 'openai';
 import { searchMalpracticeCases, extractCaseType } from './courtlistener.js';
+import { rememberCases, recallCases } from './case-memory.js';
 import { scoreLead } from './auction.js';
 import { buildModelList, chatCompletionsWithFallback } from './openaiModelFailover.js';
 
@@ -31,8 +32,11 @@ const NO_CASES_CONTEXT = 'No specific cases retrieved. Apply general NYS medical
 const NATIONAL_FALLBACK_NOTE =
   'NOTE: No New York decisions matched this search. The cases below come from a national search and may be ' +
   'from other jurisdictions — treat them as persuasive authority only and do not present them as New York law.';
+const RECALLED_NOTE =
+  'NOTE: The case law search could not be run just now. The cases below were found earlier for this type of ' +
+  'claim and were not matched to these facts; use them only as general examples of how New York courts decide such claims.';
 
-function buildCaseContext(cases) {
+function buildCaseContext(cases, { recalled = false } = {}) {
   if (!cases || cases.length === 0) return NO_CASES_CONTEXT;
 
   const blocks = cases.map(c => {
@@ -46,7 +50,8 @@ function buildCaseContext(cases) {
     );
   }).join('\n\n');
 
-  return cases.some(c => c.scope === 'national') ? `${NATIONAL_FALLBACK_NOTE}\n\n${blocks}` : blocks;
+  const notes = [recalled && RECALLED_NOTE, cases.some(c => c.scope === 'national') && NATIONAL_FALLBACK_NOTE].filter(Boolean);
+  return [...notes, blocks].join('\n\n');
 }
 
 export async function answerUserQuestion({ question, mode = 'personal', sessionId, history }) {
@@ -61,13 +66,24 @@ export async function answerUserQuestion({ question, mode = 'personal', sessionI
   // The classifier's terms only. The visitor's own message is never the query: it can hold a name
   // or a phone number, and the query goes to a third party. Without terms, the search uses the
   // case type's terms alone.
-  const cases = await searchMalpracticeCases({
+  let cases = await searchMalpracticeCases({
     query: typeof classification.terms === 'string' ? classification.terms : '',
     caseType,
     limit: 5,
   });
 
-  const caseContext = buildCaseContext(cases);
+  // Found decisions are saved for this case type while the reply is written; when the search found
+  // nothing (CourtListener throttled, slow or down), the decisions saved last time are used instead.
+  let remembering = Promise.resolve();
+  let recalled = false;
+  if (cases.length > 0) {
+    remembering = rememberCases(caseType, cases).catch(err => console.error('Could not save the cases found:', err.message));
+  } else {
+    cases = await recallCases(caseType).catch(err => { console.error('Could not read the saved cases:', err.message); return []; });
+    recalled = cases.length > 0;
+  }
+
+  const caseContext = buildCaseContext(cases, { recalled });
 
   const systemPrompt = mode === 'estate'
     ? buildEstatePrompt(turn, caseContext, caseType)
@@ -86,6 +102,7 @@ export async function answerUserQuestion({ question, mode = 'personal', sessionI
   ];
 
   const [completion, leadScore, caseAnalysis] = await Promise.all(parallelTasks);
+  await remembering;
   const answer = completion.choices[0].message.content;
 
   return { answer, cases, caseType, leadScore, caseAnalysis, turn };

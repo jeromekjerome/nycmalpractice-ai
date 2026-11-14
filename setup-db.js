@@ -138,6 +138,15 @@ async function setup() {
   await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_data JSONB`;
   await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS declined_at TIMESTAMPTZ`;  // decline counts look back 30 days from here
 
+  // The last decisions found for each case type, used when CourtListener cannot be searched (case-memory.js).
+  await sql`
+    CREATE TABLE IF NOT EXISTS search_cache (
+      case_type   TEXT PRIMARY KEY,
+      cases       JSONB NOT NULL,
+      updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+
   console.log('Database setup complete.');
 }
 

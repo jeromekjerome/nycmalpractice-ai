@@ -3,10 +3,10 @@
 import { neon } from '@neondatabase/serverless';
 import OpenAI from 'openai';
 import nodemailer from 'nodemailer';
-import { getActiveFirms, createMagicLink, getFirm, recordDecline, recentDeclineCounts } from './firms.js';
-import { chargeCustomer, createRefund } from './stripe.js';
+import { getActiveFirms, createMagicLink, getFirm, recordDecline, recentDeclineCounts, setFirmCard, claimCardDeclinedNotice, clearCardDeclined } from './firms.js';
+import { chargeCustomer, createRefund, cardsOnFile } from './stripe.js';
 import { buildModelList, chatCompletionsWithFallback } from './openaiModelFailover.js';
-import { APP_URL, MAX_FIRMS_PER_LEAD } from './site.js';
+import { APP_URL, MAX_FIRMS_PER_LEAD, caseTypeLabel } from './site.js';
 import { randomInt } from 'node:crypto';
 
 const sql    = neon(process.env.DATABASE_URL);
@@ -84,35 +84,94 @@ Malpractice SOL in NY: 2.5 years from act/omission or the end of continuous trea
 }
 
 // Charges a firm for a lead. The result says what happened:
-//   { status: 'charged', id }  the charge went through;
-//   { status: 'declined' }     it certainly did not (no card on file, the card declined, the bank wants the
+//   { status: 'charged', id }   the charge went through;
+//   { status: 'declined', reason }  it certainly did not (no card on file, the card declined, the bank wants the
 //                              cardholder present, which an off-session charge cannot ask, or Stripe refused
-//                              the request);
+//                              the request); `reason` is fit to show the firm;
 //   { status: 'unknown' }      Stripe could not say (a network failure or a Stripe-side error after its own
 //                              retries). The charge may have gone through, so the caller must not treat it as a
 //                              decline and charge someone else.
+// A charge declined on the stored card is tried once on each other card Stripe holds for the firm: a firm that
+// replaced its card under Manage Billing used to have every lead charged to the old one.
 async function chargeFirm(firm, amountDollars, description, metadata, idempotencyKey) {
-  if (!firm?.stripe_customer_id || !firm?.stripe_payment_method_id) {
-    console.warn(`Firm ${firm?.id} has no card on file; not charged for: ${description}`);
-    return { status: 'declined' };
+  if (!firm?.stripe_customer_id) {
+    console.warn(`Firm ${firm?.id} has no Stripe customer; not charged for: ${description}`);
+    return { status: 'declined', reason: 'There is no billing account on file for your firm.' };
   }
+  const stored = firm.stripe_payment_method_id || null;
+  const first = stored
+    ? await chargeCard(firm, stored, amountDollars, description, metadata, idempotencyKey)
+    : { status: 'declined', reason: 'There is no card on file for your firm.' };
+  if (first.status === 'charged') { await clearCardDeclined(firm.id).catch(() => {}); return first; }
+  if (first.status !== 'declined') return first;
+
+  const others = (await cardsOnFile({ stripeCustomerId: firm.stripe_customer_id, stripeSubscriptionId: firm.stripe_subscription_id })
+    .catch(err => { console.error(`The cards on file for firm ${firm.id} could not be read:`, err.message); return []; }))
+    .filter(card => card !== stored);
+  for (const card of others) {
+    // Its own key: Stripe refuses a key reused with different details, and a second run repeats each attempt.
+    const retry = await chargeCard(firm, card, amountDollars, description, metadata, `${idempotencyKey}-${card}`);
+    if (retry.status === 'charged') {
+      await setFirmCard(firm.id, card).catch(err => console.error(`Saving card ${card} for firm ${firm.id} failed:`, err.message));
+      return retry;
+    }
+    if (retry.status === 'unknown') return retry;
+  }
+  return first;
+}
+
+async function chargeCard(firm, card, amountDollars, description, metadata, idempotencyKey) {
   try {
     const charge = await chargeCustomer({
       stripeCustomerId: firm.stripe_customer_id,
-      paymentMethodId:  firm.stripe_payment_method_id,
+      paymentMethodId:  card,
       amountDollars, description, metadata, idempotencyKey,
     });
     if (charge?.status === 'succeeded' || charge?.status === 'processing') return { status: 'charged', id: charge.id };
-    if (['requires_payment_method', 'requires_action', 'canceled'].includes(charge?.status)) return { status: 'declined' };
+    if (charge?.status === 'requires_action') return { status: 'declined', reason: 'Your bank asked to approve the charge in person, which an automatic lead charge cannot do.' };
+    if (['requires_payment_method', 'canceled'].includes(charge?.status)) return { status: 'declined', reason: 'Your card was declined.' };
     console.error(`Charge to firm ${firm.id} ended in status ${charge?.status}: ${description}`);
     return { status: 'unknown' };
   } catch (err) {
-    if (err?.type === 'StripeCardError' || err?.type === 'StripeInvalidRequestError') {
+    if (err?.type === 'StripeCardError') {
       console.warn(`Charge to firm ${firm.id} declined (${err.code || err.type}): ${description}`);
-      return { status: 'declined' };
+      // Stripe writes card-error messages for the cardholder ("Your card has expired.").
+      return { status: 'declined', reason: err.message || 'Your card was declined.' };
+    }
+    if (err?.type === 'StripeInvalidRequestError') {
+      console.warn(`Charge to firm ${firm.id} refused (${err.code || err.type}): ${description}`);
+      return { status: 'declined', reason: 'The card on file can no longer be charged.' };
     }
     console.error(`Charge to firm ${firm.id} has an unknown outcome (${err?.type || err?.message}): ${description}`);
     return { status: 'unknown' };
+  }
+}
+
+// A firm whose card was declined for a lead is told why, with a portal link to update its card, at most once a
+// day; the operator is told too. Such a firm used to lose the lead silently, and a top bidder was even told it
+// had not been charged because another firm had won. Never throws.
+async function tellFirmChargeFailed(firm, { lost, reason }) {
+  try {
+    if (!(await claimCardDeclinedNotice(firm.id))) return false;
+    const token = await createMagicLink(firm.id, { expiresInHours: 720 });
+    const url = `${APP_URL}/portal.html?token=${token}`;
+    const html = `
+      <div style="font-family:sans-serif;max-width:600px;margin:auto;line-height:1.5">
+        <p>We could not charge your card for ${escapeHtml(lost)}: ${escapeHtml(reason || 'your card was declined.')}</p>
+        <p>You were not charged, and the lead could not go to your firm.</p>
+        <p>To keep receiving leads, update your card under Manage Billing in your firm portal:</p>
+        <p><a href="${url}" style="background:#9e3a5a;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;font-weight:600">Open your firm portal</a></p>
+        <p style="color:#777;font-size:12px">This link works for 30 days. NYCMalpractice.ai Lead Marketplace</p>
+      </div>`;
+    const t = getTransporter();
+    if (!t) console.log(`[EMAIL MOCK] Card declined notice → ${firm.email}: ${lost}`);
+    else await withTimeout(t.sendMail({ from: process.env.SMTP_USER, to: firm.email, subject: 'Your card was declined: update it to keep receiving leads', html }), 10_000);
+    await notifyOperator(`Card declined: firm ${firm.id} lost ${lost}`,
+      `<p>${escapeHtml(firm.name)} (firm ${escapeHtml(firm.id)}) could not be charged for ${escapeHtml(lost)}: ${escapeHtml(reason || 'declined')}. The firm has been emailed a portal link to update its card.</p>`);
+    return true;
+  } catch (err) {
+    console.error(`The card-declined notice to firm ${firm?.id} failed:`, err.message);
+    return false;
   }
 }
 
@@ -140,7 +199,10 @@ export async function deliverColdLead(sessionId, caseType, scoreData, leadData) 
       uncertain += 1;
       continue;
     }
-    if (charge.status !== 'charged') continue;
+    if (charge.status !== 'charged') {
+      await tellFirmChargeFailed(firm, { lost: `a new ${caseTypeLabel(caseType)} lead ($${TIER_CONFIG.cold.reserve})`, reason: charge.reason });
+      continue;
+    }
 
     let leadId;
     try {
@@ -288,6 +350,7 @@ export async function closeAuction(auctionId) {
   const bids = await sql`
     SELECT firm_id, MAX(amount) AS amount FROM bids WHERE auction_id = ${auctionId}
     GROUP BY firm_id ORDER BY MAX(amount) DESC, MIN(created_at) ASC`;
+  const declinedFirms = new Set();   // told why they did not get the lead, so not sent the losing-bidder email
   for (const bid of bids) {
     const firm = await getFirm(bid.firm_id);
     if (!firm || firm.active === false || !firm.subscription_active || !firm.approved_at) continue;
@@ -301,7 +364,11 @@ export async function closeAuction(auctionId) {
         `<p>Stripe did not confirm or refuse the $${amount.toFixed(2)} charge to firm ${escapeHtml(firm.id)} for auction #${escapeHtml(auctionId)} (idempotency key ${escapeHtml(key)}). No other bidder was charged and no lead was sent; the auction is left closing. Check Stripe, then deliver the lead or close the auction by hand.</p>`);
       return { pending: true };
     }
-    if (charge.status !== 'charged') continue;
+    if (charge.status !== 'charged') {
+      declinedFirms.add(String(firm.id));
+      await tellFirmChargeFailed(firm, { lost: `auction #${auctionId}, which your bid of $${amount.toFixed(2)} had won`, reason: charge.reason });
+      continue;
+    }
 
     let leadId;
     try {
@@ -324,7 +391,7 @@ export async function closeAuction(auctionId) {
       await notifyOperator(`Lead #${leadId} was not emailed to firm ${firm.id}`,
         `<p>Firm ${escapeHtml(firm.id)} won auction #${escapeHtml(auctionId)} and was charged $${amount.toFixed(2)}; lead #${escapeHtml(leadId)} is in its portal, but the email failed: ${escapeHtml(err.message)}. Send the firm a portal link from the admin page.</p>`);
     }
-    for (const other of bids.filter(b => String(b.firm_id) !== String(firm.id))) {
+    for (const other of bids.filter(b => String(b.firm_id) !== String(firm.id) && !declinedFirms.has(String(b.firm_id)))) {
       try {
         const loser = await getFirm(other.firm_id);
         if (loser) await sendLoserEmail(loser, auction, amount);

@@ -9,31 +9,61 @@ function getStripe() {
   return client;
 }
 
-export async function createCustomer({ name, email }) {
-  return getStripe().customers.create({ name, email });
+export async function createCustomer({ name, email, firmId = null }) {
+  return getStripe().customers.create({ name, email, ...(firmId ? { metadata: { firmId: String(firmId) } } : {}) });
 }
 
-export async function createSubscriptionCheckout({ stripeCustomerId, firmId }) {
+// A firm finishing sign-up from its portal returns to the portal; one signing up returns to the sign-up page.
+const CHECKOUT_RETURNS = {
+  register: { success: '/register.html?subscribed=1', cancel: '/register.html?step=4&cancelled=1' },
+  portal:   { success: '/portal.html?subscribed=1',   cancel: '/portal.html?checkout=cancelled' },
+};
+
+export async function createSubscriptionCheckout({ stripeCustomerId, firmId, from = 'register' }) {
+  const returns = CHECKOUT_RETURNS[from] || CHECKOUT_RETURNS.register;
   return getStripe().checkout.sessions.create({
+    // Always set: the route creates a customer first for a firm that has none. Without one, Checkout made a
+    // customer of its own that was never saved, so the firm paid but could never be charged for a lead.
     customer: stripeCustomerId || undefined,
     payment_method_types: ['card'],
     mode: 'subscription',
     line_items: [{ price: process.env.STRIPE_PRICE_ID, quantity: 1 }],
-    // The site address has a default (site.js); an unset APP_URL made Stripe refuse the checkout. A firm
-    // that pays lands on the sign-up page's last step, not on the portal, which needs a sign-in link.
-    success_url: `${APP_URL}/register.html?subscribed=1`,
-    cancel_url:  `${APP_URL}/register.html?step=4`,
+    // The site address has a default (site.js); an unset APP_URL made Stripe refuse the checkout.
+    success_url: `${APP_URL}${returns.success}`,
+    cancel_url:  `${APP_URL}${returns.cancel}`,
     metadata: { firmId: String(firmId) },
     client_reference_id: String(firmId),
     subscription_data: { metadata: { firmId: String(firmId) } },
   });
 }
 
+// Returns to the firm portal, which keeps its sign-in link for the visit; it used to return to the sign-in form.
+// The sign-in link itself is not given to Stripe.
 export async function createPortalSession({ stripeCustomerId }) {
   return getStripe().billingPortal.sessions.create({
     customer: stripeCustomerId,
-    return_url: `${APP_URL}/portal.html`,
+    return_url: `${APP_URL}/portal.html?billing=done`,
   });
+}
+
+const paymentMethodId = value => (typeof value === 'string' ? value : value?.id) || null;
+
+// The customer's default card, which Manage Billing sets when a firm changes its card.
+export async function getCustomerCard(stripeCustomerId) {
+  const customer = await getStripe().customers.retrieve(stripeCustomerId);
+  return paymentMethodId(customer?.invoice_settings?.default_payment_method);
+}
+
+// Every card Stripe holds as one of the firm's defaults: the customer's (Manage Billing sets it) and the
+// subscription's (Checkout sets it). A lead charge declined on the stored card is tried on the others.
+export async function cardsOnFile({ stripeCustomerId, stripeSubscriptionId }) {
+  const cards = [];
+  if (stripeCustomerId) cards.push(await getCustomerCard(stripeCustomerId));
+  if (stripeSubscriptionId) {
+    const sub = await getStripe().subscriptions.retrieve(stripeSubscriptionId);
+    cards.push(paymentMethodId(sub?.default_payment_method));
+  }
+  return [...new Set(cards.filter(Boolean))];
 }
 
 // Synchronous on purpose: it was async and called without await, so the webhook never read an event, no

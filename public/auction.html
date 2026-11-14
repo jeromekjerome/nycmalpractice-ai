@@ -189,7 +189,11 @@
     function showClosed(data) {
       $('auctionView').style.display = 'none';
       $('closedView').style.display = '';
-      if (data.status === 'cancelled') {
+      if (data.status === 'cancelled' && data.bidCount > 0) {
+        // There were bids, but no bidder's card could be charged.
+        $('closedTitle').textContent = 'Auction closed without a sale';
+        $('closedMessage').textContent = 'No bidder could be charged, so nobody won this lead. If your card was declined, we have emailed you a link to update it.';
+      } else if (data.status === 'cancelled') {
         $('closedTitle').textContent = 'No bids — auction cancelled';
         $('closedMessage').textContent = 'This lead received no bids.';
       } else {

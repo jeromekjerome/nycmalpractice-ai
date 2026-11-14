@@ -80,10 +80,13 @@ async function finishBeforeReply(label, work, deadline) {
   return outcome;
 }
 
-// The longest a visitor waits for a reply (40 seconds unless ASK_REPLY_DEADLINE_MS says otherwise). Past it the
+// The longest a visitor waits for a reply (45 seconds unless ASK_REPLY_DEADLINE_MS says otherwise). Past it the
 // page is told to send the message again, and keeps it in the box; the host used to cut the request off with
-// its own error page, and the question was lost. The function's own limit is 60 seconds.
-const DEFAULT_ASK_REPLY_DEADLINE_MS = 40_000;
+// its own error page, and the question was lost. The work after the reply (saving the conversation, closing
+// auctions) must also end within REQUEST_BUDGET_MS of the request's start, inside the host's 60-second limit;
+// each step used to get 20 seconds of its own, so a slow reply could run to 80.
+const DEFAULT_ASK_REPLY_DEADLINE_MS = 45_000;
+const REQUEST_BUDGET_MS = 57_000;
 const SLOW_REPLY = 'This is taking longer than usual, and your message was not answered. It is still in the box below: please send it again.';
 
 // The work's result, or null if it is not done in time. A failure that comes after the deadline is only logged.
@@ -174,6 +177,8 @@ app.post('/api/ask', limitChat, async (req, res) => {
   if (question.length > MAX_QUESTION_CHARS) {
     return res.status(400).json({ error: `Please keep your message under ${MAX_QUESTION_CHARS.toLocaleString('en-US')} characters.` });
   }
+  const requestStart = Date.now();
+  const finishBy = () => Math.min(followUpDeadline(), requestStart + REQUEST_BUDGET_MS);
   const closingAuctions = sweepExpiredAuctions();
 
   let history;
@@ -194,7 +199,7 @@ app.post('/api/ask', limitChat, async (req, res) => {
     if (!result) {
       // Nothing from this turn is saved, so the visitor can simply send it again.
       console.error('[ask] no reply in time; the visitor was asked to send the message again');
-      await finishBeforeReply('closing expired auctions', closingAuctions, Date.now() + 5_000);
+      await finishBeforeReply('closing expired auctions', closingAuctions, finishBy());
       return res.status(503).json({ error: SLOW_REPLY, retry: true });
     }
 
@@ -207,10 +212,10 @@ app.post('/api/ask', limitChat, async (req, res) => {
     // /api/contact, once the visitor has given contact details and agreed to be contacted.
     const leadScore = result.leadScore ? { ...result.leadScore, scoredAt: new Date().toISOString() } : null;
     if (historyTrusted) {
-      await finishBeforeReply('saving the conversation', upsertConversation(sessionId, mode, result.caseType, updatedHistory, leadScore, result.evaluation || null), followUpDeadline());
+      await finishBeforeReply('saving the conversation', upsertConversation(sessionId, mode, result.caseType, updatedHistory, leadScore, result.evaluation || null), finishBy());
     }
 
-    await finishBeforeReply('closing expired auctions', closingAuctions, followUpDeadline());
+    await finishBeforeReply('closing expired auctions', closingAuctions, finishBy());
     res.json({
       answer: result.answer, cases: result.cases || [], caseType: result.caseType || null,
       caseAnalysis: result.caseAnalysis || null, leadTier: result.leadScore?.tier || null,
@@ -227,7 +232,7 @@ app.post('/api/ask', limitChat, async (req, res) => {
     console.error('Error in /api/ask:', err);
     // An auction being closed alongside this message is finished first: once the reply is sent the function
     // may be suspended, leaving the auction part-way through.
-    await finishBeforeReply('closing expired auctions', closingAuctions, followUpDeadline());
+    await finishBeforeReply('closing expired auctions', closingAuctions, finishBy());
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -438,7 +443,7 @@ app.post('/api/webhooks/stripe', async (req, res) => {
         const details = await getSubscriptionDetails(session.subscription);
         const firmId  = session.metadata?.firmId || session.client_reference_id || details.firmId;
         if (firmId) {
-          await updateFirmSubscription(firmId, { stripeSubscriptionId: session.subscription, stripePaymentMethodId: details.paymentMethodId });
+          await updateFirmSubscription(firmId, { stripeSubscriptionId: session.subscription, stripePaymentMethodId: details.paymentMethodId, status: details.status });
           console.log(`Firm ${firmId} subscription activated`);
         } else {
           console.error(`Checkout session ${session.id} names no firm; subscription ${session.subscription} not activated`);
@@ -544,8 +549,9 @@ app.post('/api/leads/:id/accept', async (req, res) => {
   const attestation = {
     ...Object.fromEntries(HITL_ATTESTATION_KEYS.map(key => [key, true])),
     attestedAt: new Date().toISOString(),
-    attorneyName: firm?.attorney_name || null,
-    attorneyRegistration: firm?.attorney_registration || null,
+    // The firm's supervising attorney on file at sign-up; the page does not record who clicked.
+    attorneyOnFile: firm?.attorney_name || null,
+    attorneyRegistrationOnFile: firm?.attorney_registration || null,
   };
   const result = await acceptLead(req.params.id, tokenData.firm_id, attestation);
   if (result.ok) {
@@ -667,7 +673,12 @@ async function upsertConversation(sessionId, mode, caseType, history, leadScore 
 
 function getTransporter() {
   if (!process.env.SMTP_USER) return null;
-  return nodemailer.createTransport({ host: process.env.SMTP_HOST || 'mail.jwd.nyc', port: parseInt(process.env.SMTP_PORT || '465'), secure: true, auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } });
+  return nodemailer.createTransport({
+    host: process.env.SMTP_HOST || 'mail.jwd.nyc', port: parseInt(process.env.SMTP_PORT || '465'), secure: true, auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+    // A stalled mail server is given up on after 10 seconds; nodemailer would wait minutes, past the time
+    // limit of the request that is sending.
+    connectionTimeout: 10_000, greetingTimeout: 10_000, socketTimeout: 10_000,
+  });
 }
 
 async function sendPortalLinkEmail(firm, url) {

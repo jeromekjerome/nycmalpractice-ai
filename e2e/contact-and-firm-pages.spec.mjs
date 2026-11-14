@@ -265,7 +265,7 @@ test('a federal provider shows its 2-year claim deadline, and a restored convers
   await page.locator('#submitBtn').click();
   const notices = page.locator('#conversation .deadline-notice');
   await expect(notices).toHaveCount(2);
-  await expect(notices.nth(1)).toContainText('Standard Form 95, within 2 years');
+  await expect(notices.nth(1)).toContainText('Standard Form 95, generally within 2 years');
   await expect(notices.nth(1)).not.toContainText('your loved one');
 
   // The visitor comes back later: the conversation and its deadline notice return.
@@ -312,4 +312,17 @@ test('screen readers hear that the answer is on its way, and a reload brings bac
   saved = { mode: 'personal', history, contactForm: false, contact_consent_at: '2026-11-14T10:00:00Z' };
   await page.reload();
   await expect(page.locator('#conversation .contact-done')).toContainText('Your request has been received');
+});
+
+test('a reply that arrived stays, even if showing part of it fails', async ({ page }) => {
+  await mockBasics(page);
+  // A case entry the page cannot show: rendering the case list fails after the reply was saved.
+  await page.route('**/api/ask', route => route.fulfill(json({ answer: 'I am so sorry. When did this happen?', cases: [null] })));
+  await page.goto('/');
+  await page.locator('#userInput').fill('My surgeon operated on the wrong knee.');
+  await page.locator('#submitBtn').click();
+  await expect(page.locator('#conversation .msg-ai').last()).toContainText('When did this happen?');
+  await expect(page.locator('#conversation .msg-user')).toHaveText('My surgeon operated on the wrong knee.');
+  await expect(page.locator('#conversation .msg-notice')).toHaveCount(0);
+  await expect(page.locator('#userInput')).toHaveValue('');
 });

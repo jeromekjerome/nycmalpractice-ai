@@ -126,15 +126,18 @@ export async function deliverColdLead(sessionId, caseType, scoreData, leadData) 
 
   // At most three firms get a cold lead (the consent says "up to three"), tried in random order so every matching
   // firm has the same chance. It used to go to every matching firm.
+  // A charge Stripe could not confirm counts toward the three too: the operator may deliver that lead by hand.
   let delivered = 0;
+  let uncertain = 0;
   for (const firm of shuffled(firms)) {
-    if (delivered >= MAX_FIRMS_PER_LEAD) break;
+    if (delivered + uncertain >= MAX_FIRMS_PER_LEAD) break;
     // Charged first: a firm whose card is missing or declined does not get the lead, and the next one is tried.
     const key = `cold-${sessionId}-${firm.id}`;
     const charge = await chargeFirm(firm, TIER_CONFIG.cold.reserve, `Cold malpractice lead — ${caseType}`, { sessionId, firmId: String(firm.id) }, key);
     if (charge.status === 'unknown') {
       await notifyOperator(`Cold lead: charge to firm ${firm.id} has an unknown outcome`,
         `<p>Stripe did not confirm or refuse the $${TIER_CONFIG.cold.reserve} charge to firm ${escapeHtml(firm.id)} for a cold lead (session ${escapeHtml(sessionId)}, idempotency key ${escapeHtml(key)}). The firm was not sent the lead. Check Stripe, then deliver the lead or refund the charge by hand.</p>`);
+      uncertain += 1;
       continue;
     }
     if (charge.status !== 'charged') continue;
@@ -445,7 +448,12 @@ function escapeHtml(value) {
 
 function getTransporter() {
   if (!process.env.SMTP_USER) return null;
-  return nodemailer.createTransport({ host: process.env.SMTP_HOST || 'mail.jwd.nyc', port: 465, secure: true, auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } });
+  return nodemailer.createTransport({
+    host: process.env.SMTP_HOST || 'mail.jwd.nyc', port: 465, secure: true, auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+    // A stalled mail server is given up on after 10 seconds; nodemailer would wait minutes, past the time
+    // limit of the request that is sending.
+    connectionTimeout: 10_000, greetingTimeout: 10_000, socketTimeout: 10_000,
+  });
 }
 
 async function sendLeadDeliveryEmail(firm, leadId, token, leadData, scoreData, tier, amountCharged) {

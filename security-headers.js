@@ -7,7 +7,7 @@ export const SECURITY_HEADERS = Object.freeze({
   'Content-Security-Policy': [
     "default-src 'self'",
     // 'unsafe-inline': the pages carry small inline scripts (the analytics loader, page logic, onclick handlers).
-    "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdn.mxpnl.com",
+    "script-src 'self' 'unsafe-inline' https://cdn.mxpnl.com",
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com",
     "img-src 'self' data: https:",

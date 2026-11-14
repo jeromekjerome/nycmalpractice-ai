@@ -48,8 +48,8 @@ modeToggle.addEventListener('change', async () => {
     ? 'Wrongful Death SOL'
     : 'NY Statute of Limitations';
   document.getElementById('solText').innerHTML = currentMode === 'estate'
-    ? '<strong style="color:var(--text)">Wrongful death:</strong> 2 years from date of death (EPTL §5-4.1)<br><br><strong style="color:var(--text)">Public hospitals:</strong> notice of claim within 90 days after an administrator is appointed<br><br><strong style="color:var(--text)">Federal providers</strong> (VA and military hospitals, many community health centers): written claim to the agency within 2 years<br><br>The action is brought by the estate administrator, not the family directly. Estate appointment may be required first. <em>Act promptly.</em>'
-    : '<strong style="color:var(--text)">Personal injury:</strong> 2.5 years from the act or omission, or from the last treatment for the same condition<br><br><strong style="color:var(--text)">Public hospitals:</strong> notice of claim within 90 days; lawsuit within 1 year and 90 days<br><br><strong style="color:var(--text)">Federal providers</strong> (VA and military hospitals, many community health centers): written claim to the agency within 2 years<br><br><strong style="color:var(--text)">Wrongful death:</strong> 2 years from date of death<br><br>Later deadlines: foreign object (1 year from discovery), missed cancer diagnosis (Lavern’s Law, up to 7 years), infancy (no more than 10 years). <em>Act promptly.</em>';
+    ? '<strong style="color:var(--text)">Wrongful death:</strong> 2 years from date of death (EPTL §5-4.1)<br><br><strong style="color:var(--text)">Public hospitals:</strong> notice of claim within 90 days after an administrator is appointed<br><br><strong style="color:var(--text)">Federal providers</strong> (VA and military hospitals, many community health centers): written claim to the agency, generally within 2 years<br><br>The action is brought by the estate administrator, not the family directly. Estate appointment may be required first. <em>Act promptly.</em>'
+    : '<strong style="color:var(--text)">Personal injury:</strong> 2.5 years from the act or omission, or from the last treatment for the same condition<br><br><strong style="color:var(--text)">City and county hospitals:</strong> notice of claim within 90 days; lawsuit within 1 year and 90 days. State hospitals: claim or notice of intention within 90 days<br><br><strong style="color:var(--text)">Federal providers</strong> (VA and military hospitals, many community health centers): written claim to the agency, generally within 2 years<br><br><strong style="color:var(--text)">Wrongful death:</strong> 2 years from date of death<br><br>Later deadlines: foreign object (1 year from discovery), missed cancer diagnosis (Lavern’s Law, up to 7 years), infancy (no more than 10 years). <em>Act promptly.</em>';
 });
 
 function updateModeUI() {
@@ -96,6 +96,7 @@ async function submitQuestion() {
   announce('Your message was sent. The answer usually takes 10 to 20 seconds.');
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REPLY_TIMEOUT_MS);
+  let answered = false;   // the server answered and saved the turn
 
   try {
     const res = await fetch('/api/ask', {
@@ -117,6 +118,7 @@ async function submitQuestion() {
 
     conversationHistory.push({ role: 'user', content: q });
     conversationHistory.push({ role: 'assistant', content: data.answer });
+    answered = true;
 
     appendMessage('ai', markdownToHtml(data.answer));
 
@@ -127,6 +129,9 @@ async function submitQuestion() {
 
   } catch (err) {
     thinking.remove();
+    // The reply arrived and was saved; only showing part of it failed. Rolling back would offer to send the
+    // question again, which would repeat it in the saved conversation.
+    if (answered) { console.error('Showing the reply failed:', err); return; }
     returnQuestion(userMsg, input, q, NOT_ANSWERED);
   } finally {
     clearTimeout(timer);

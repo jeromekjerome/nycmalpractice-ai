@@ -2963,7 +2963,7 @@ test("accepting a lead stores the supervising attorney's three checks on it", as
   const accepted = calls.find(call => /^UPDATE leads SET status = 'accepted', accepted_at = NOW\(\), hitl_verification = \$1/.test(call.query));
   assert.ok(accepted, 'the acceptance did not record the checks');
   const stored = JSON.parse(accepted.params[0]);
-  assert.deepEqual({ ...stored, attestedAt: undefined }, { ...checks, attestedAt: undefined, attorneyName: 'Pat Lee', attorneyRegistration: '1234567' });
+  assert.deepEqual({ ...stored, attestedAt: undefined }, { ...checks, attestedAt: undefined, attorneyOnFile: 'Pat Lee', attorneyRegistrationOnFile: '1234567' });
   assert.ok(!Number.isNaN(Date.parse(stored.attestedAt)));
 });
 
@@ -3018,14 +3018,14 @@ test('a failure reaches the caller as a plain message, never the internal error 
         });
         const body = await response.text();
         assert.equal(response.status, 500, route);
-        assert.doesNotMatch(body, /does not exist|42P01|at character|node_modules|.js:d+/, route + ' revealed ' + body);
+        assert.doesNotMatch(body, /does not exist|42P01|at character|node_modules|\.js:\d+/, route + ' revealed ' + body);
       }
     });
     // A body that is not JSON is a plain 400, without a stack trace.
     const garbled = await fetch(server.baseUrl + '/api/ask', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"question": "hi",' });
     assert.equal(garbled.status, 400);
     const said = await garbled.text();
-    assert.doesNotMatch(said, /SyntaxError|at JSON.parse|node_modules/);
+    assert.doesNotMatch(said, /SyntaxError|at JSON\.parse|node_modules/);
     // A forged webhook is refused without the reason.
     const forged = await fetch(server.baseUrl + '/api/webhooks/stripe', { method: 'POST', headers: { 'content-type': 'application/json', 'stripe-signature': 't=1,v1=forged' }, body: '{}' });
     assert.equal(forged.status, 400);
@@ -3294,4 +3294,129 @@ test('a subscription that stops being paid stops the leads, and starts them agai
   }
   const updates = sql.filter(call => /^UPDATE firms SET subscription_active = \$1, subscription_status = \$2 WHERE stripe_subscription_id = \$3/.test(call.query));
   assert.deepEqual(updates.map(call => call.params.map(String)), [['false', 'past_due', 'sub_9'], ['false', 'past_due', 'sub_9'], ['true', 'active', 'sub_9']]);
+});
+
+// ─── What the independent reviews found ────────────────────────────────────────
+
+const REVIEW_APP = {"mode":"personal","caseType":"misdiagnosis","scorerPrompt":"You are a NYC medical malpractice case evaluator"};
+
+test('a slow side analysis does not hold back an answer that is ready', async () => {
+  const world = fakeWorld({ answer: 'Thank you. When did it happen?' });
+  const slowScorer = async (url, init) => {
+    if (url.startsWith('https://api.openai.com/') && String(JSON.parse(init.body).messages?.[0]?.content || '').startsWith(REVIEW_APP.scorerPrompt)) {
+      await new Promise(resolve => setTimeout(resolve, 1500));
+    }
+    return world.handler(url, init);
+  };
+  const previous = process.env.ASK_SIDE_CALL_CAP_MS;
+  process.env.ASK_SIDE_CALL_CAP_MS = '200';
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(slowScorer, async () => {
+      const history = [{ role: 'user', content: 'I was hurt.' }, { role: 'assistant', content: 'I am sorry. What happened?' }];
+      const started = Date.now();
+      const { response, body } = await postJson(server.baseUrl, '/api/ask', { question: 'It happened last month.', mode: REVIEW_APP.mode, sessionId: 'sess-slow-scorer', history });
+      assert.equal(response.status, 200);
+      assert.match(body.answer, /When did it happen/);
+      assert.equal(body.leadTier, null);
+      assert.ok(Date.now() - started < 1400, 'the reply waited for the slow scorer');
+      // The scorer finishes in the background; the fake answers it before the test ends.
+      await new Promise(resolve => setTimeout(resolve, 1600));
+    });
+  } finally {
+    if (previous === undefined) delete process.env.ASK_SIDE_CALL_CAP_MS; else process.env.ASK_SIDE_CALL_CAP_MS = previous;
+    await server.close();
+  }
+});
+
+test('the case card reads every message the visitor wrote, however long the AI replies are', async () => {
+  const { analysisTranscript } = await import('../ask.js');
+  const long = 'An assessment that goes on. '.repeat(130);   // about 3,600 characters, like a step-3 reply
+  const history = [
+    { role: 'user', content: 'FACT-ONE: it happened on March 3 and the provider was named in the records.' },
+    { role: 'assistant', content: long },
+    { role: 'user', content: 'FACT-TWO: I needed surgery afterwards.' },
+    { role: 'assistant', content: long },
+    { role: 'user', content: 'FACT-THREE: I still cannot work.' },
+    { role: 'assistant', content: long },
+  ];
+  const text = analysisTranscript(history, 'Yes, please connect me with an attorney.');
+  for (const fact of ['FACT-ONE', 'FACT-TWO', 'FACT-THREE', 'please connect me']) assert.ok(text.includes(fact), fact + ' was dropped');
+  assert.ok(text.length < 5000);
+  // Too many words from the visitor: the middle goes, the first and the latest stay.
+  const many = Array.from({ length: 40 }, (_, i) => [{ role: 'user', content: 'Message ' + i + ' ' + 'detail '.repeat(30) }, { role: 'assistant', content: 'ok' }]).flat();
+  const trimmed = analysisTranscript(many, 'LATEST');
+  assert.ok(trimmed.includes('Visitor message 1: Message 0 '), 'the first message was dropped');
+  assert.ok(trimmed.includes('LATEST'));
+  assert.ok(!trimmed.includes('Message 20 '), 'the middle was kept over the limit');
+
+  // End to end, at step 4: the analysis prompt carries the visitor's step-1 fact.
+  clearSearchCache();
+  const world = fakeWorld({ answer: 'You can use the contact form below.' });
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(world.handler, async () => {
+      const { response } = await postJson(server.baseUrl, '/api/ask', { question: 'Yes, please connect me with an attorney.', mode: REVIEW_APP.mode, sessionId: 'sess-card-facts', history });
+      assert.equal(response.status, 200);
+    });
+  } finally {
+    await server.close();
+  }
+  const prompt = String(world.calls.openai.find(call => call.kind === 'caseAnalysis').request.messages[0].content);
+  assert.match(prompt, /FACT-ONE/);
+  assert.match(prompt, /FACT-THREE/);
+});
+
+test('a charge Stripe cannot confirm counts toward the three firms a cold lead may reach', async () => {
+  const { deliverColdLead } = await import('../auction.js');
+  const charged = new Set();
+  const handler = async (url, init) => {
+    if (url.startsWith('https://api.stripe.com/')) {
+      charged.add(new URLSearchParams(String(init.body)).get('customer'));
+      return jsonResponse({ error: { type: 'api_error', message: 'Something went wrong on our end.' } }, 500);
+    }
+    const q = JSON.parse(init.body).query.replace(/\s+/g, ' ').trim();
+    if (/FROM firms WHERE active/.test(q)) {
+      return rowsResponse([['id', INT], ['name', TEXT], ['email', TEXT], ['stripe_customer_id', TEXT], ['stripe_payment_method_id', TEXT]],
+        [1, 2, 3, 4, 5].map(id => [String(id), 'Firm ' + id, 'f' + id + '@example.test', 'cus_' + id, 'pm_' + id]));
+    }
+    return jsonResponse(EMPTY_ROWS);
+  };
+  const { result } = await capturingLogs(() => withoutMail(() => withOutboundHttp(handler,
+    () => deliverColdLead('sess-unknown', REVIEW_APP.caseType, { score: 60, tier: 'cold' }, { preview: 'A preview.' }))));
+  assert.equal(result, 0);
+  assert.equal(charged.size, 3, 'more firms were charged than the lead may reach');
+});
+
+test('a completed checkout does not switch on a subscription Stripe already reports unpaid', async () => {
+  const { default: Stripe } = await import('stripe');
+  const payload = JSON.stringify({
+    id: 'evt_late', object: 'event', type: 'checkout.session.completed',
+    data: { object: { id: 'cs_late', object: 'checkout.session', subscription: 'sub_late', metadata: { firmId: '7' } } },
+  });
+  const signature = new Stripe('sk_test_123').webhooks.generateTestHeaderString({ payload, secret: process.env.STRIPE_WEBHOOK_SECRET });
+  const sql = [];
+  const handler = async (url, init) => {
+    if (url.startsWith('https://api.stripe.com/')) {
+      return jsonResponse({ id: 'sub_late', object: 'subscription', status: 'past_due', default_payment_method: { id: 'pm_1', object: 'payment_method' }, metadata: {} });
+    }
+    const { query, params } = JSON.parse(init.body);
+    sql.push({ query: query.replace(/\s+/g, ' ').trim(), params });
+    return jsonResponse(EMPTY_ROWS);
+  };
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(handler, async () => {
+      const response = await fetch(server.baseUrl + '/api/webhooks/stripe', {
+        method: 'POST', headers: { 'content-type': 'application/json', 'stripe-signature': signature }, body: payload,
+      });
+      assert.equal(response.status, 200);
+    });
+  } finally {
+    await server.close();
+  }
+  const update = sql.find(call => /^UPDATE firms/.test(call.query) && /subscription_active/.test(call.query));
+  assert.ok(update, 'the firm was not updated');
+  assert.equal(String(update.params[0]), 'false');
+  assert.equal(update.params[1], 'past_due');
 });

@@ -56,8 +56,8 @@ function updateModeUI() {
   const isEstate = currentMode === 'estate';
   document.getElementById('heroTitle').textContent   = isEstate ? 'Wrongful Death Malpractice\nfor New York Families' : 'Medical Malpractice Legal AI\nfor New York';
   document.getElementById('heroSubtitle').textContent = isEstate
-    ? 'Your loved one deserved better care. Understand your family\'s rights.'
-    : 'Understand your rights. Analyze your case. Connect with specialist attorneys.';
+    ? 'Your loved one deserved better care. Get matched with a New York malpractice firm that handles cases like your family\'s.'
+    : 'Describe what happened. Get matched with a New York malpractice firm that handles cases like yours.';
   document.getElementById('chatTitle').textContent  = isEstate ? 'Wrongful Death Claim Advisor' : 'Malpractice Case Advisor';
   document.getElementById('inputLabel').textContent = isEstate ? 'Describe what happened to your loved one' : 'Describe your situation';
   document.getElementById('userInput').placeholder  = isEstate

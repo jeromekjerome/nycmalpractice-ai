@@ -73,6 +73,10 @@ function getModeWelcome() {
 }
 
 // ─── Submit ───────────────────────────────────────────────────────────────────
+// The server answers within about 40 seconds or says it could not; past this the page stops waiting.
+const REPLY_TIMEOUT_MS = 70_000;
+const NOT_ANSWERED = 'Sorry, something went wrong and your message was not answered. It is back in the box below: please send it again.';
+
 async function submitQuestion() {
   const input = document.getElementById('userInput');
   const q     = input.value.trim();
@@ -85,22 +89,31 @@ async function submitQuestion() {
     mode: currentMode,
     turn_number: conversationHistory.filter(m => m.role === 'user').length + 1,
   });
-  appendMessage('user', escHtml(q));
+  const userMsg = appendMessage('user', escHtml(q));
   input.value = '';
 
   const thinking = appendThinking();
+  announce('Your message was sent. The answer usually takes 10 to 20 seconds.');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REPLY_TIMEOUT_MS);
 
   try {
     const res = await fetch('/api/ask', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ question: q, mode: currentMode, sessionId, history: conversationHistory }),
+      signal: controller.signal,
     });
-    const data = await res.json();
+    // A slow or failed reply may not be JSON at all (the host's own error page).
+    const data = await res.json().catch(() => null);
 
     thinking.remove();
 
-    if (data.error) { appendMessage('ai', 'I encountered an error. Please try again.'); return; }
+    if (!res.ok || typeof data?.answer !== 'string') {
+      // The server's own words when it refused the message (too long, too many) or could not answer in time.
+      returnQuestion(userMsg, input, q, [400, 429, 503].includes(res.status) && typeof data?.error === 'string' ? data.error : NOT_ANSWERED);
+      return;
+    }
 
     conversationHistory.push({ role: 'user', content: q });
     conversationHistory.push({ role: 'assistant', content: data.answer });
@@ -114,11 +127,30 @@ async function submitQuestion() {
 
   } catch (err) {
     thinking.remove();
-    appendMessage('ai', 'Network error — please check your connection and try again.');
+    returnQuestion(userMsg, input, q, NOT_ANSWERED);
   } finally {
+    clearTimeout(timer);
     isLoading = false;
     setLoading(false);
   }
+}
+
+// The question is not lost: the unanswered message leaves the conversation and goes back in the box. It used
+// to be cleared, with only an error in its place.
+function returnQuestion(userMsg, input, question, notice) {
+  userMsg.remove();
+  if (!input.value) input.value = question;
+  const note = appendMessage('ai', '');
+  note.classList.add('msg-notice');
+  note.textContent = notice;
+}
+
+// Read out by screen readers (the status region in index.html): the 10 to 20 second wait used to be silent.
+function announce(text) {
+  const region = document.getElementById('chatStatus');
+  if (!region) return;
+  region.textContent = '';
+  setTimeout(() => { region.textContent = text; }, 50);
 }
 
 document.getElementById('userInput').addEventListener('keydown', e => {
@@ -177,15 +209,19 @@ async function submitContactForm(event) {
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.ok) { errorEl.textContent = data.error || 'Something went wrong. Please try again.'; return; }
     contactShared = true;
-    const done = document.createElement('div');
-    done.className = 'msg msg-ai contact-done';
-    done.textContent = 'Thank you. Your request has been received, and a qualified New York malpractice attorney may contact you.';
-    form.replaceWith(done);
+    form.replaceWith(contactDoneMessage());
   } catch {
     errorEl.textContent = 'Network error — please check your connection and try again.';
   } finally {
     button.disabled = false;
   }
+}
+
+function contactDoneMessage() {
+  const done = document.createElement('div');
+  done.className = 'msg msg-ai contact-done';
+  done.textContent = 'Thank you. Your request has been received, and a qualified New York malpractice attorney may contact you.';
+  return done;
 }
 
 // ─── Render Helpers ───────────────────────────────────────────────────────────
@@ -203,6 +239,7 @@ function appendThinking() {
   const conv = document.getElementById('conversation');
   const div  = document.createElement('div');
   div.className = 'msg msg-thinking';
+  div.setAttribute('aria-hidden', 'true');   // the status region says it once (announce)
   div.innerHTML = '<div class="thinking-spinner"></div><span>Analyzing your situation…</span>';
   conv.appendChild(div);
   div.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -288,9 +325,12 @@ function escHtml(str) {
 }
 
 function setLoading(on) {
-  document.getElementById('submitBtn').disabled    = on;
+  const button = document.getElementById('submitBtn');
+  button.disabled    = on;
   document.getElementById('btnText').style.display = on ? 'none' : '';
   document.getElementById('btnSpinner').style.display = on ? 'block' : 'none';
+  // With its text hidden behind the spinner, the button still has a name for screen readers.
+  if (on) button.setAttribute('aria-label', 'Sending your message'); else button.removeAttribute('aria-label');
 }
 
 function setCookie(name, value, days) {
@@ -331,6 +371,10 @@ function getCookie(name) {
       conv.appendChild(div);
     }
     showDeadlineNotices(data);
+    // The contact form comes back if it was offered and not yet sent (or the note that it was); it used to be
+    // lost on reload.
+    if (data.contact_consent_at) conv.appendChild(contactDoneMessage());
+    else if (data.contactForm) offerContactForm();
     conv.lastElementChild?.scrollIntoView({ behavior: 'smooth' });
   } catch {}
 })();

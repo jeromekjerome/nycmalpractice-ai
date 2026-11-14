@@ -122,6 +122,9 @@ test('server-side errors surface the generic AI fallback', async ({ page }) => {
   await page.locator('#userInput').fill('Was this malpractice?');
   await page.locator('#userInput').press('Enter');
 
-  await expect(page.locator('#conversation')).toContainText('I encountered an error. Please try again.');
+  await expect(page.locator('#conversation')).toContainText('Sorry, something went wrong and your message was not answered.');
+  // The question is not lost: it is back in the box, and the unanswered message is gone.
+  await expect(page.locator('#userInput')).toHaveValue('Was this malpractice?');
+  await expect(page.locator('#conversation .msg-user')).toHaveCount(0);
 });
 

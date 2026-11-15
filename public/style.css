@@ -75,7 +75,11 @@ body.estate-mode .estate-label { color: var(--estate-accent); }
 
 .results-wrapper { margin-bottom: 1.25rem; }
 .results-grid { display: grid; grid-template-columns: 1fr 320px; gap: 1rem; align-items: start; }
-@media (max-width: 800px) { .results-grid { grid-template-columns: 1fr; } }
+@media (max-width: 800px) {
+  .results-grid { display: flex; flex-direction: column; }
+  .results-grid .sidebar-col { display: contents; }
+  #analysisCard { order: -1; }
+}
 .main-card { padding: 1.5rem; }
 .sidebar-col { display: flex; flex-direction: column; gap: 1rem; }
 .sidebar-card { padding: 1rem; }
@@ -189,10 +193,18 @@ body.estate-mode .header-nav .nav-cta { color: var(--estate-accent); }
 .contact-card { display: grid; gap: 0.6rem; padding: 1rem; border: 1px solid var(--border); border-radius: 10px; background: rgba(255,255,255,0.03); }
 .contact-title { font-weight: 600; color: var(--text); }
 .contact-intro { margin: 0; font-size: 0.85rem; color: var(--muted); }
-.contact-label { display: grid; gap: 0.25rem; font-size: 0.78rem; color: var(--muted); }
+.contact-label { display: grid; gap: 0.25rem; font-size: 0.78rem; color: var(--text); }
 .contact-input { padding: 0.6rem 0.75rem; background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font: inherit; font-size: 0.92rem; }
 .contact-input:focus { outline: none; border-color: var(--accent); }
 body.estate-mode .contact-input:focus { border-color: var(--estate-accent); }
-.contact-consent { display: flex; gap: 0.5rem; align-items: flex-start; font-size: 0.78rem; line-height: 1.5; color: var(--muted); }
+.contact-consent { display: flex; gap: 0.5rem; align-items: flex-start; font-size: 0.78rem; line-height: 1.5; color: var(--text); }
 .contact-consent input { margin-top: 0.2rem; flex-shrink: 0; }
 .contact-error { min-height: 1em; font-size: 0.82rem; color: #e55c5c; }
+
+@media (max-width: 600px) {
+  .interaction-card { bottom: 0.75rem; padding: 0.75rem; }
+  .interaction-card .input-label { margin-bottom: 0.4rem; }
+  .interaction-card .textarea-wrapper { margin-bottom: 0.5rem; }
+  .interaction-card textarea { max-height: 4.5rem; padding: 0.5rem 0.75rem; line-height: 1.4; }
+  .interaction-card .submit-btn { padding: 0.55rem 1rem; }
+}

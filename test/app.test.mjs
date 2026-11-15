@@ -940,10 +940,13 @@ test('the privacy policy describes the analytics and outside services the pages 
   }
   assert.match(policy, /We do not send Mixpanel the text of your conversation, your name, or your phone number/);
 
-  // Every outside host a page loads a script, stylesheet or font from is named in the policy.
+  // Canonical and social links name this site's address; they do not load an outside resource.
   const namedAs = { 'fonts.googleapis.com': 'Google Fonts', 'fonts.gstatic.com': 'Google Fonts' };
   const loadedHosts = new Set(files.filter(name => name.endsWith('.html')).flatMap(name =>
-    [...page(name).matchAll(/<(?:script|link)\b[^>]*\b(?:src|href)="https?:\/\/([^/"]+)/g)].map(([, host]) => host)));
+    [...page(name).matchAll(/<(?:script|link)\b[^>]*>/g)]
+      .map(([tag]) => tag)
+      .filter(tag => tag.startsWith('<script') || tag.includes('rel="stylesheet"'))
+      .flatMap(tag => [...tag.matchAll(/\b(?:src|href)="https?:\/\/([^/"]+)/g)].map(([, host]) => host))));
   assert.ok(loadedHosts.size > 0);
   for (const host of loadedHosts) {
     assert.ok(namedAs[host] && policy.includes(namedAs[host]), `pages load ${host}, which the privacy policy does not name`);
@@ -1031,6 +1034,94 @@ test('the blog serves only New York medical malpractice articles, under the site
   } finally {
     await server.close();
   }
+});
+
+test('robots and the sitemap lead crawlers to every public page and article', async () => {
+  const server = await startServer(app);
+  try {
+    const robotsResponse = await fetch(`${server.baseUrl}/robots.txt`);
+    assert.equal(robotsResponse.status, 200);
+    const robots = await robotsResponse.text();
+    assert.match(robots, /User-agent: \*/);
+    assert.match(robots, /Allow: \//);
+    assert.ok(robots.includes('Sitemap: https://nycmalpractice-ai.vercel.app/sitemap.xml'));
+
+    const sitemapResponse = await fetch(`${server.baseUrl}/sitemap.xml`);
+    assert.equal(sitemapResponse.status, 200);
+    assert.match(sitemapResponse.headers.get('content-type'), /^application\/xml\b/);
+    const sitemap = await sitemapResponse.text();
+    const urls = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map(([, url]) => url);
+    assert.deepEqual(urls, [
+      `${process.env.APP_URL}/`,
+      `${process.env.APP_URL}/about.html`,
+      `${process.env.APP_URL}/register.html`,
+      `${process.env.APP_URL}/disclaimer.html`,
+      `${process.env.APP_URL}/privacy.html`,
+      `${process.env.APP_URL}/terms.html`,
+      `${process.env.APP_URL}/blog`,
+      ...getBlogPosts().map(post => `${process.env.APP_URL}/blog/${post.slug}`),
+    ]);
+    for (const post of getBlogPosts()) {
+      assert.ok(sitemap.includes(`<lastmod>${post.date}</lastmod>`), `sitemap has no lastmod for ${post.slug}`);
+    }
+    assert.doesNotMatch(sitemap, /admin|portal|lead\.html|auction\.html|\/api\//);
+  } finally {
+    await server.close();
+  }
+});
+
+test('public pages have canonical URLs, social previews and a crawlable blog link', () => {
+  const pages = {
+    'index.html': '/',
+    'about.html': '/about.html',
+    'register.html': '/register.html',
+    'disclaimer.html': '/disclaimer.html',
+    'privacy.html': '/privacy.html',
+    'terms.html': '/terms.html',
+  };
+  for (const [name, path] of Object.entries(pages)) {
+    const html = readFileSync(new URL(`../public/${name}`, import.meta.url), 'utf8');
+    const canonical = `https://nycmalpractice-ai.vercel.app${path}`;
+    assert.match(html, /<meta name="description" content="[^"]{40,}">/, `${name} has no useful description`);
+    assert.ok(html.includes(`<link rel="canonical" href="${canonical}">`), `${name} canonical`);
+    assert.match(html, /<meta property="og:title" content="[^"]+">/, `${name} og:title`);
+    assert.match(html, /<meta property="og:description" content="[^"]{40,}">/, `${name} og:description`);
+    assert.ok(html.includes('<meta property="og:type" content="website">'), `${name} og:type`);
+    assert.ok(html.includes(`<meta property="og:url" content="${canonical}">`), `${name} og:url`);
+    assert.ok(html.includes('<meta name="twitter:card" content="summary">'), `${name} twitter card`);
+    assert.match(html, /<a href="\/blog"[^>]*>Legal Guides<\/a>/, `${name} does not link to the blog`);
+  }
+});
+
+test('firm-only pages stay out of search results', () => {
+  for (const name of ['admin.html', 'auction.html', 'lead.html', 'portal.html']) {
+    const html = readFileSync(new URL(`../public/${name}`, import.meta.url), 'utf8');
+    assert.ok(html.includes('<meta name="robots" content="noindex, nofollow">'), `${name} is indexable`);
+  }
+});
+
+test('blog pages complete their previews and offer a clear next step into chat', async () => {
+  const { blogListHTML, blogPostHTML, notFoundHTML } = await import('../blog.js');
+  const pages = [
+    blogListHTML(getBlogPosts(), 'NYCMalpractice.ai', 'https://nycmalpractice-ai.vercel.app'),
+    blogPostHTML(getBlogPost(getBlogPosts()[0].slug), 'NYCMalpractice.ai', 'https://nycmalpractice-ai.vercel.app'),
+  ];
+  for (const html of pages) {
+    assert.match(html, /<meta property="og:description" content="[^"]{40,}">/);
+    assert.ok(html.includes('<meta name="twitter:card" content="summary">'));
+    assert.match(html, /<aside class="chat-cta">[\s\S]*?<a href="\/">Describe your situation/);
+  }
+  assert.ok(notFoundHTML('NYCMalpractice.ai').includes('<meta name="robots" content="noindex, nofollow">'));
+});
+
+test('Vercel permanently redirects only the www host to the canonical domain', () => {
+  const vercel = JSON.parse(readFileSync(new URL('../vercel.json', import.meta.url), 'utf8'));
+  assert.deepEqual(vercel.redirects, [{
+    source: '/:path*',
+    has: [{ type: 'host', value: 'www\\.nycmalpractice\\.ai' }],
+    destination: 'https://nycmalpractice-ai.vercel.app/:path*',
+    permanent: true,
+  }]);
 });
 
 test('the blog articles state the New York malpractice rules correctly', () => {

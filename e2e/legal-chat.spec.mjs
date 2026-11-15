@@ -263,6 +263,20 @@ test('switching claimant modes restores both conversations without deleting eith
 });
 
 
+test('visitors can move from the home page to a guide and back into the assistant', async ({ page }) => {
+  await mockSession(page);
+  await mockCaseTypes(page);
+  await page.goto('/');
+  await page.locator('.site-footer').getByRole('link', { name: 'Legal Guides' }).click();
+  await expect(page).toHaveURL(/\/blog$/);
+  await expect(page.getByRole('heading', { name: 'Legal Insights' })).toBeVisible();
+  await page.locator('.post-card > a').first().click();
+  await expect(page.locator('.chat-cta')).toBeVisible();
+  await page.locator('.chat-cta a').click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.locator('#userInput')).toBeVisible();
+});
+
 test('landing actions remain visible without horizontal overflow on a phone', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 860 });
   await mockSession(page);

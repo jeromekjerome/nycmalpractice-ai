@@ -140,6 +140,14 @@ body.estate-mode .topics-list li::before { color: var(--estate-accent); }
 .factor-con { background: rgba(248,113,113,0.08); color: #fca5a5; border-left: 2px solid #f87171; }
 .factor-warn { background: rgba(251,191,36,0.08); color: #fbbf24; border-left: 2px solid #d97706; }
 .analysis-disclaimer { font-size: 0.7rem; color: var(--muted); margin-top: 0.5rem; font-style: italic; }
+.summary-form { margin-top: 0.85rem; padding-top: 0.75rem; border-top: 1px solid var(--border); }
+.summary-form label { display: block; margin-bottom: 0.4rem; color: var(--text); font-size: 0.78rem; font-weight: 600; }
+.summary-fields { display: flex; gap: 0.5rem; }
+.summary-fields input { flex: 1; min-width: 0; padding: 0.5rem 0.65rem; background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font: inherit; font-size: 0.85rem; }
+.summary-fields input:focus { outline: none; border-color: var(--accent); }
+.summary-fields button { padding: 0.5rem 0.85rem; border: none; border-radius: 8px; background: var(--accent); color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+.summary-fields button:disabled { opacity: 0.6; cursor: not-allowed; }
+.summary-note, .summary-status { margin-top: 0.45rem; color: var(--text); font-size: 0.7rem; line-height: 1.45; }
 
 .interaction-card { position: sticky; bottom: 1.5rem; }
 .input-label { display: block; font-size: 0.78rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 0.6rem; }

@@ -17,6 +17,7 @@ import OpenAI from 'openai';
 import { buildModelList, probeAllModelChains } from './openaiModelFailover.js';
 import { APP_URL, APP_ID, CONTACT_CONSENT_TEXT, CONTACT_FORM_FROM_STEP } from './site.js';
 import { mentionsPublicHospital, deadlineNotices } from './deadlines.js';
+import { buildSummaryEmail } from './summary.js';
 import { toPublicEvaluation, isHitlVerificationComplete, HITL_ATTESTATION_KEYS, loadRubric, loadCurrentLawNotes } from './gatekeeper.js';
 import blogApp from './blog-server.js';
 
@@ -122,6 +123,7 @@ const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const limitChat     = rateLimit('ask', [[20, 10 * MINUTE], [150, 24 * HOUR]], 'You have sent a lot of messages in a short time. Please wait a few minutes and try again.');
 const limitContact  = rateLimit('contact', [[5, HOUR]]);
+const limitSummary  = rateLimit('summary', [[3, HOUR], [5, 24 * HOUR]], 'Too many summary requests. Please wait before trying again.');
 const limitSignup   = rateLimit('firm-signup', [[5, HOUR]]);
 const limitTexts    = rateLimit('firm-texts', [[5, HOUR]]);
 const limitVerify   = rateLimit('firm-verify', [[20, HOUR]]);
@@ -272,6 +274,27 @@ app.get('/api/conversations/:sessionId', async (req, res) => {
   } catch (err) {
     console.error('Error in /api/conversations:', err);
     res.status(500).json({ error: 'The conversation could not be loaded.' });
+  }
+});
+
+app.post('/api/summary', limitSummary, async (req, res) => {
+  const { sessionId, email } = req.body || {};
+  const cleanEmail = typeof email === 'string' ? email.trim() : '';
+  if (typeof sessionId !== 'string' || !sessionId || sessionId.length > 200) return res.status(400).json({ error: 'sessionId required' });
+  if (cleanEmail.length > 254 || !/^[^\s@<>"'()]+@[^\s@<>"'()]+\.[A-Za-z]{2,}$/.test(cleanEmail)) {
+    return res.status(400).json({ error: 'Please enter a valid email address.' });
+  }
+  try {
+    const [conv] = await sql`SELECT mode, case_type, history, lead_score FROM conversations WHERE session_id = ${sessionId} LIMIT 1`;
+    if (!conv) return res.status(404).json({ error: 'We could not find an assessment to send. Please send a message first.' });
+    const message = buildSummaryEmail(conv, deadlineNotices(conv.history));
+    const transporter = getTransporter();
+    if (!transporter) console.log('[EMAIL MOCK] Case summary sent');
+    else await transporter.sendMail({ from: process.env.SMTP_USER, to: cleanEmail, ...message });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Error in /api/summary:', err);
+    res.status(500).json({ error: 'The summary could not be sent. Please try again.' });
   }
 });
 
@@ -1009,12 +1032,16 @@ async function refreshModelHealthSnapshot({ force = false } = {}) {
 
 // ─── Start ────────────────────────────────────────────────────────────────────
 if (process.env.NODE_ENV !== 'test' && (process.env.NODE_ENV !== 'production' || !process.env.VERCEL)) {
-  import('./cron.js').then(({ startCronJobs }) => startCronJobs());
   const PORT = process.env.PORT || 3003;
-  refreshModelHealthSnapshot({ force: true })
-    .finally(() => {
-      app.listen(PORT, () => console.log(`MalpracticeAI running on http://localhost:${PORT}`));
-    });
+  if (process.env.DISABLE_BACKGROUND_JOBS === '1') {
+    app.listen(PORT, () => console.log(`MalpracticeAI running on http://localhost:${PORT}`));
+  } else {
+    import('./cron.js').then(({ startCronJobs }) => startCronJobs());
+    refreshModelHealthSnapshot({ force: true })
+      .finally(() => {
+        app.listen(PORT, () => console.log(`MalpracticeAI running on http://localhost:${PORT}`));
+      });
+  }
 }
 
 // ─── Errors no route caught ───────────────────────────────────────────────────

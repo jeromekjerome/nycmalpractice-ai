@@ -6,6 +6,7 @@ import nodemailer from 'nodemailer';
 import { getActiveFirms, createMagicLink, getFirm, recordDecline, recentDeclineCounts, setFirmCard, claimCardDeclinedNotice, clearCardDeclined } from './firms.js';
 import { chargeCustomer, createRefund, cardsOnFile } from './stripe.js';
 import { buildModelList, chatCompletionsWithFallback } from './openaiModelFailover.js';
+import { renderCurrentLawForPrompt } from './gatekeeper.js';
 import { APP_URL, MAX_FIRMS_PER_LEAD, caseTypeLabel } from './site.js';
 import { randomInt } from 'node:crypto';
 
@@ -34,6 +35,7 @@ export function getTier(score) {
 export async function scoreLead(question, history, caseType, mode) {
   try {
     const histText = history.map(h => `${h.role}: ${h.content}`).join('\n');
+    const currentLaw = renderCurrentLawForPrompt();
 
     const res = await chatCompletionsWithFallback(openai, {
       models: AUX_MODELS,
@@ -49,7 +51,7 @@ Weights: injury_severity 30%, causation_clarity 25%, sol_status 20%, expert_viab
 Conversation:
 ${histText}
 Latest: ${question}
-
+${currentLaw ? `\n${currentLaw}\n` : ''}
 Respond ONLY with valid JSON:
 {
   "viable": true/false,

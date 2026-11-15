@@ -78,6 +78,37 @@ test('personal mode renders case guidance and supporting cards', async ({ page }
   expect(askPayload.mode).toBe('personal');
 });
 
+test('a visitor can email the assessment without putting the session in the return link', async ({ page }) => {
+  await mockSession(page);
+  await mockCaseTypes(page);
+  await page.route('**/api/ask', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      answer: 'The delay may have caused additional harm.',
+      cases: [],
+      caseAnalysis: { score: 8, verdict: 'strong', strengths: ['Documented delay'], weaknesses: [] },
+    }),
+  }));
+  let summaryRequest;
+  await page.route('**/api/summary', async route => {
+    summaryRequest = route.request().postDataJSON();
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+  });
+
+  await page.goto('/');
+  await page.locator('#userInput').fill('My doctor ignored repeated symptoms for months.');
+  await page.locator('#userInput').press('Enter');
+  const form = page.locator('#summaryForm');
+  await expect(form).toBeVisible();
+  await form.locator('#summaryEmail').fill('jane@example.test');
+  await form.locator('#summarySubmit').click();
+  await expect(page.locator('#summaryStatus')).toHaveText('Summary sent. Check your inbox.');
+  expect(summaryRequest.email).toBe('jane@example.test');
+  expect(typeof summaryRequest.sessionId).toBe('string');
+  expect(summaryRequest).not.toHaveProperty('returnUrl');
+});
+
 test('estate mode toggle changes the page state and request mode', async ({ page }) => {
   await mockSession(page);
   await mockCaseTypes(page);

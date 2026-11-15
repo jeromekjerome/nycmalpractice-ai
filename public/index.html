@@ -109,6 +109,15 @@
               <span class="card-title">Case Analysis</span>
             </div>
             <div id="analysisContent"></div>
+            <form id="summaryForm" class="summary-form">
+              <label for="summaryEmail">Email my summary</label>
+              <div class="summary-fields">
+                <input id="summaryEmail" name="email" type="email" autocomplete="email" maxlength="254" placeholder="you@example.com" required>
+                <button id="summarySubmit" type="submit">Send</button>
+              </div>
+              <p class="summary-note">Includes your assessment and deadline warnings. No session ID is included.</p>
+              <p id="summaryStatus" class="summary-status" role="status"></p>
+            </form>
           </div>
 
           <!-- Case Law -->

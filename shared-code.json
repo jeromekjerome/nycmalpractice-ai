@@ -1,0 +1,11 @@
+{
+  "files": {
+    "citator.js": "df1c086a9ec6054278ddf21340d39b5fdd7743c3ad6883a7a55e45a2ccb64be6",
+    "openaiModelFailover.js": "0e5454a96d33de878b4fe188f5859e5c40875b09f9c17d254e67657498ff95df",
+    "rate-limit.js": "f6e2a592e34a3b826bf42848f4444d368d11a7b7e5e59c51df8a980aa8910e23",
+    "case-memory.js": "f0f5a84c70d8d43c143487514a18f5c419f50ca055cd2d3a366c1c23f007607a",
+    "summary.js": "3f0193b77af9bb06bf020557fd5f783638aa3229ce23df59dde3acdfa18cb509",
+    "test/helpers.mjs": "f0100aad3784ab1ffcda203d100194049deeb1b050dce3e3649079d7d9b0316f",
+    "test/runner.mjs": "8e638350887bdd1910f9e6f0a90e57b5af28504348b13c0803d1fa11cfe11f7f"
+  }
+}

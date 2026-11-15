@@ -23,6 +23,11 @@ let conversationHistory = [];
 let currentMode = initialMode;
 let isLoading   = false;
 
+const summaryForm   = document.getElementById('summaryForm');
+const summaryEmail  = document.getElementById('summaryEmail');
+const summarySubmit = document.getElementById('summarySubmit');
+const summaryStatus = document.getElementById('summaryStatus');
+
 // ─── Mode Toggle ─────────────────────────────────────────────────────────────
 const modeToggle  = document.getElementById('modeToggle');
 const personalLbl = document.getElementById('personalLabel');
@@ -311,8 +316,33 @@ function renderCaseAnalysis(analysis, caseType, leadTier) {
     </div>
     <div class="analysis-disclaimer">Preliminary analysis only. Consult a qualified NY malpractice attorney.</div>
   `;
+  summaryStatus.textContent = '';
+  summarySubmit.disabled = false;
   card.style.display = 'block';
 }
+
+summaryForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  summarySubmit.disabled = true;
+  summaryStatus.textContent = 'Sending…';
+  try {
+    const response = await fetch('/api/summary', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId, email: summaryEmail.value.trim() }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.ok) {
+      summaryStatus.textContent = data.error || 'The summary could not be sent. Please try again.';
+      summarySubmit.disabled = false;
+      return;
+    }
+    summaryStatus.textContent = 'Summary sent. Check your inbox.';
+  } catch {
+    summaryStatus.textContent = 'The summary could not be sent. Please try again.';
+    summarySubmit.disabled = false;
+  }
+});
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 function markdownToHtml(text) {

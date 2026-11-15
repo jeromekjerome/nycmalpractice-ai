@@ -607,7 +607,7 @@ test('POST /api/contact with consent hands the lead off with the contact details
       await withOutboundHttp(slowHot.handler, async () => {
         const { response, body } = await postJson(server.baseUrl, '/api/contact', { sessionId: 'sess-contact-hot', ...CONTACT });
         assert.equal(response.status, 200);
-        assert.deepEqual(body, { ok: true });
+        assert.deepEqual(body, { ok: true, caseType: 'misdiagnosis', leadTier: 'hot' });
         assert.ok(slowHot.finished.includes('auction'), 'the auction had not been created before the reply');
       });
     } finally {
@@ -656,7 +656,7 @@ test('POST /api/contact sends nothing to firms without a qualifying score or a s
         await withOutboundHttp(world.handler, async () => {
           const { response, body } = await postJson(server.baseUrl, '/api/contact', { sessionId: 'sess-contact-' + label.replace(/ /g, '-'), ...CONTACT });
           assert.equal(response.status, 200, label);
-          assert.deepEqual(body, { ok: true });
+          assert.deepEqual(body, { ok: true, caseType: 'misdiagnosis', leadTier: options.leadScore?.tier || null });
         });
       } finally {
         await server.close();
@@ -679,7 +679,7 @@ test('POST /api/contact still replies when the lead hand-off outlasts the cap or
       await withOutboundHttp(slow.handler, async () => {
         const { response, body } = await postJson(server.baseUrl, '/api/contact', { sessionId: 'sess-contact-capped', ...CONTACT });
         assert.equal(response.status, 200);
-        assert.deepEqual(body, { ok: true });
+        assert.deepEqual(body, { ok: true, caseType: 'misdiagnosis', leadTier: 'hot' });
         assert.ok(slow.started.includes('auction'), 'the hand-off was started');
         assert.ok(!slow.finished.includes('auction'), 'the reply waited for a hand-off that outlasted the cap');
         // Let the slow statement finish inside the fake world before it is torn down.
@@ -697,7 +697,7 @@ test('POST /api/contact still replies when the lead hand-off outlasts the cap or
       await withOutboundHttp(failing, async () => {
         const { response, body } = await postJson(server.baseUrl, '/api/contact', { sessionId: 'sess-contact-failing', ...CONTACT });
         assert.equal(response.status, 200);
-        assert.deepEqual(body, { ok: true });
+        assert.deepEqual(body, { ok: true, caseType: 'misdiagnosis', leadTier: 'hot' });
       });
       // The failed hand-off is released, so asking again can send it.
       assert.ok(failingWorld.calls.sql.some(call => /^UPDATE conversations SET lead_sent_at = NULL WHERE session_id = \$1/.test(call.query)), 'the failed hand-off was not released');
@@ -917,10 +917,12 @@ test('the privacy policy describes the analytics and outside services the pages 
   const page = name => readFileSync(new URL(`../public/${name}`, import.meta.url), 'utf8');
   const policy = page('privacy.html').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
 
-  // Only these two pages load Mixpanel, with the settings the policy was written against.
+  // The static pages and blog templates use the settings the policy describes.
   const files = readdirSync(new URL('../public/', import.meta.url)).filter(name => /\.(html|js)$/.test(name));
   const pagesWithAnalytics = files.filter(name => page(name).includes('mixpanel.init(')).sort();
   assert.deepEqual(pagesWithAnalytics, ['index.html', 'register.html'], 'the policy names the pages that load Mixpanel; update it if this list changes');
+  const blog = readFileSync(new URL('../blog.js', import.meta.url), 'utf8');
+  assert.match(blog, /mixpanel\.init\('[^']+', \{ track_pageview: true, persistence: 'localStorage' \}\)/, 'the blog changed its Mixpanel settings');
   for (const name of pagesWithAnalytics) {
     assert.match(page(name), /mixpanel\.init\('[^']+', \{ track_pageview: true, persistence: 'localStorage' \}\)/, `${name} changed its Mixpanel settings`);
   }
@@ -932,8 +934,8 @@ test('the privacy policy describes the analytics and outside services the pages 
   const sent = ['script.js', 'register.html']
     .flatMap(name => [...page(name).matchAll(/track\('([a-z_]+)',\s*\{([^}]*)\}/g)])
     .flatMap(([, , props]) => [...props.matchAll(/([a-z_]+):/g)].map(([, key]) => key));
-  assert.deepEqual([...new Set(sent)].sort(), ['app', 'mode', 'score', 'turn_number', 'verdict'], 'a page reports something to Mixpanel that the policy does not describe');
-  for (const phrase of ['We use Mixpanel to measure how the site is used', 'the mode you are in', 'the number of the message', 'claim-strength rating and score']) {
+  assert.deepEqual([...new Set(sent)].sort(), ['app', 'case_type', 'lead_tier', 'mode', 'score', 'turn_number', 'verdict'], 'a page reports something to Mixpanel that the policy does not describe');
+  for (const phrase of ['We use Mixpanel to measure how the site is used', 'the mode you are in', 'the number of the message', 'case type and lead tier', 'claim-strength rating and score']) {
     assert.ok(policy.includes(phrase), `the policy no longer says: ${phrase}`);
   }
   assert.match(policy, /We do not send Mixpanel the text of your conversation, your name, or your phone number/);

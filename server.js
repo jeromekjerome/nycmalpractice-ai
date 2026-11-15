@@ -321,7 +321,7 @@ app.post('/api/contact', limitContact, async (req, res) => {
     } else {
       await finishBeforeReply('contact request notice', notifyOperatorOfContactRequest(conv.case_type, conv.mode), followUpDeadline());
     }
-    res.json({ ok: true });
+    res.json({ ok: true, caseType: conv.case_type || null, leadTier: score?.tier || null });
   } catch (err) {
     console.error('Error in /api/contact:', err);
     // A client who asked to be contacted may be lost: the operator is told at once, without the client's details.

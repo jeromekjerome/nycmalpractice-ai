@@ -277,6 +277,75 @@ test('visitors can move from the home page to a guide and back into the assistan
   await expect(page.locator('#userInput')).toBeVisible();
 });
 
+test('a phone puts the assessment first, keeps the input compact, and makes contact text readable', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockSession(page);
+  await mockCaseTypes(page);
+  await page.route('**/api/ask', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      answer: 'You can ask for contact below this reply.',
+      cases: [],
+      contactForm: true,
+      caseAnalysis: { score: 8, verdict: 'strong', strengths: ['Documented delay'], weaknesses: [] },
+    }),
+  }));
+  await page.goto('/');
+  await page.locator('#userInput').fill('My doctor ignored repeated symptoms for months.');
+  await page.locator('#userInput').press('Enter');
+  await expect(page.locator('#analysisCard')).toBeVisible();
+  await expect(page.locator('.contact-card')).toBeVisible();
+
+  const assessmentFirst = await page.evaluate(() => {
+    const assessment = document.getElementById('analysisCard');
+    const chat = document.querySelector('.main-card');
+    return assessment.getBoundingClientRect().top < chat.getBoundingClientRect().top;
+  });
+  expect(assessmentFirst).toBe(true);
+
+  const input = await page.locator('.interaction-card').evaluate(el => ({
+    height: el.getBoundingClientRect().height,
+    position: getComputedStyle(el).position,
+  }));
+  expect(input.position).toBe('sticky');
+  expect(input.height).toBeLessThanOrEqual(190);
+
+  const contrast = await page.evaluate(() => {
+    const parse = value => {
+      const [r, g, b, a = 1] = value.match(/[\d.]+/g).map(Number);
+      return { r, g, b, a };
+    };
+    const luminance = color => {
+      const channels = [color.r, color.g, color.b].map(value => {
+        const channel = value / 255;
+        return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+      });
+      return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+    };
+    const ratioFor = selector => {
+      const el = document.querySelector(selector);
+      const layers = [];
+      for (let node = el; node; node = node.parentElement) {
+        const color = parse(getComputedStyle(node).backgroundColor);
+        if (color.a > 0) layers.push(color);
+      }
+      const background = layers.reverse().reduce((base, layer) => ({
+        r: layer.r * layer.a + base.r * (1 - layer.a),
+        g: layer.g * layer.a + base.g * (1 - layer.a),
+        b: layer.b * layer.a + base.b * (1 - layer.a),
+      }), { r: 0, g: 0, b: 0 });
+      const foreground = parse(getComputedStyle(el).color);
+      const lighter = Math.max(luminance(foreground), luminance(background));
+      const darker = Math.min(luminance(foreground), luminance(background));
+      return (lighter + 0.05) / (darker + 0.05);
+    };
+    return { label: ratioFor('.contact-label'), consent: ratioFor('.contact-consent') };
+  });
+  expect(contrast.label).toBeGreaterThanOrEqual(4.5);
+  expect(contrast.consent).toBeGreaterThanOrEqual(4.5);
+});
+
 test('landing actions remain visible without horizontal overflow on a phone', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 860 });
   await mockSession(page);

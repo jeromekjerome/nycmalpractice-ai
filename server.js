@@ -18,6 +18,7 @@ import { buildModelList, probeAllModelChains } from './openaiModelFailover.js';
 import { APP_URL, APP_ID, CONTACT_CONSENT_TEXT, CONTACT_FORM_FROM_STEP } from './site.js';
 import { mentionsPublicHospital, deadlineNotices } from './deadlines.js';
 import { toPublicEvaluation, isHitlVerificationComplete, HITL_ATTESTATION_KEYS, loadRubric, loadCurrentLawNotes } from './gatekeeper.js';
+import blogApp from './blog-server.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -51,6 +52,7 @@ app.use(securityHeaders);
 app.use('/api/webhooks/stripe', express.raw({ type: 'application/json' }));
 app.use(express.json());
 app.use(express.static(join(__dirname, 'public')));
+app.use(blogApp);
 
 // ─── Work a reply must not leave behind ───────────────────────────────────────
 // A serverless function is suspended as soon as its response is sent, so work still running at

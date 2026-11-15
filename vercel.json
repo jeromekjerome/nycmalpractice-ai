@@ -4,7 +4,16 @@
     { "src": "server.js",      "use": "@vercel/node", "config": { "includeFiles": ["rubrics/**"] } },
     { "src": "blog-server.js", "use": "@vercel/node" }
   ],
+  "redirects": [
+    {
+      "source": "/:path*",
+      "has": [{ "type": "host", "value": "www\\.nycmalpractice\\.ai" }],
+      "destination": "https://nycmalpractice-ai.vercel.app/:path*",
+      "permanent": true
+    }
+  ],
   "routes": [
+    { "src": "/sitemap.xml", "dest": "/blog-server.js" },
     { "src": "/blog",       "dest": "/blog-server.js" },
     { "src": "/blog/(.*)", "dest": "/blog-server.js" },
     { "src": "/(.*)",      "dest": "/server.js" }

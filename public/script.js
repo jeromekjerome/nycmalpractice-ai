@@ -6,15 +6,21 @@ function track(eventName, params = {}) {
 }
 
 // ─── Session & State ─────────────────────────────────────────────────────────
-let sessionId = getCookie('malpractice_session');
-if (!sessionId) {
-  sessionId = crypto.randomUUID();
-  setCookie('malpractice_session', sessionId, 90);
-  track('session_start', { app: 'malpractice-ai', mode: 'personal' });
-}
+const lastSessionId = getCookie('malpractice_session');
+const isNewSession = !lastSessionId;
+const sessionIds = {
+  personal: getCookie('malpractice_personal_session') || lastSessionId || crypto.randomUUID(),
+  estate: getCookie('malpractice_estate_session') || crypto.randomUUID(),
+};
+const initialMode = lastSessionId === sessionIds.estate ? 'estate' : 'personal';
+let sessionId = sessionIds[initialMode];
+setCookie('malpractice_personal_session', sessionIds.personal, 90);
+setCookie('malpractice_estate_session', sessionIds.estate, 90);
+setCookie('malpractice_session', sessionId, 90);
+if (isNewSession) track('session_start', { app: 'malpractice-ai', mode: initialMode });
 
 let conversationHistory = [];
-let currentMode = 'personal';
+let currentMode = initialMode;
 let isLoading   = false;
 
 // ─── Mode Toggle ─────────────────────────────────────────────────────────────
@@ -22,38 +28,29 @@ const modeToggle  = document.getElementById('modeToggle');
 const personalLbl = document.getElementById('personalLabel');
 const estateLbl   = document.getElementById('estateLabel');
 
-modeToggle.addEventListener('change', async () => {
+modeToggle.addEventListener('change', () => {
   currentMode = modeToggle.checked ? 'estate' : 'personal';
   track('mode_toggle', { app: 'malpractice-ai', mode: currentMode });
-  document.body.classList.toggle('estate-mode', modeToggle.checked);
-
-  personalLbl.classList.toggle('active', !modeToggle.checked);
-  estateLbl.classList.toggle('active', modeToggle.checked);
-
-  // Reset session for new mode
-  conversationHistory = [];
-  contactShared = false;
-  await fetch('/api/reset-session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId }) }).catch(() => {});
-  sessionId = crypto.randomUUID();
+  sessionId = sessionIds[currentMode];
   setCookie('malpractice_session', sessionId, 90);
 
+  conversationHistory = [];
+  contactShared = false;
   updateModeUI();
   const conv = document.getElementById('conversation');
   conv.innerHTML = '';
   appendMessage('ai', getModeWelcome());
-
   document.getElementById('analysisCard').style.display = 'none';
   document.getElementById('casesCard').style.display    = 'none';
-  document.getElementById('solTitle').textContent = currentMode === 'estate'
-    ? 'Wrongful Death SOL'
-    : 'NY Statute of Limitations';
-  document.getElementById('solText').innerHTML = currentMode === 'estate'
-    ? '<strong style="color:var(--text)">Wrongful death:</strong> 2 years from date of death (EPTL §5-4.1)<br><br><strong style="color:var(--text)">Public hospitals:</strong> notice of claim within 90 days after an administrator is appointed<br><br><strong style="color:var(--text)">Federal providers</strong> (VA and military hospitals, many community health centers): written claim to the agency, generally within 2 years<br><br>The action is brought by the estate administrator, not the family directly. Estate appointment may be required first. <em>Act promptly.</em>'
-    : '<strong style="color:var(--text)">Personal injury:</strong> 2.5 years from the act or omission, or from the last treatment for the same condition<br><br><strong style="color:var(--text)">City and county hospitals:</strong> notice of claim within 90 days; lawsuit within 1 year and 90 days. State hospitals: claim or notice of intention within 90 days<br><br><strong style="color:var(--text)">Federal providers</strong> (VA and military hospitals, many community health centers): written claim to the agency, generally within 2 years<br><br><strong style="color:var(--text)">Wrongful death:</strong> 2 years from date of death<br><br>Later deadlines: foreign object (1 year from discovery), missed cancer diagnosis (Lavern’s Law, up to 7 years), infancy (no more than 10 years). <em>Act promptly.</em>';
+  restoreConversation();
 });
 
 function updateModeUI() {
   const isEstate = currentMode === 'estate';
+  document.body.classList.toggle('estate-mode', isEstate);
+  modeToggle.checked = isEstate;
+  personalLbl.classList.toggle('active', !isEstate);
+  estateLbl.classList.toggle('active', isEstate);
   document.getElementById('heroTitle').textContent   = isEstate ? 'Wrongful Death Malpractice\nfor New York Families' : 'Medical Malpractice Legal AI\nfor New York';
   document.getElementById('heroSubtitle').textContent = isEstate
     ? 'Your loved one deserved better care. Get matched with a New York malpractice firm that handles cases like your family\'s.'
@@ -63,6 +60,10 @@ function updateModeUI() {
   document.getElementById('userInput').placeholder  = isEstate
     ? 'Who passed away, when, and what was the alleged medical error?'
     : 'What happened, and when? What provider or facility was involved?';
+  document.getElementById('solTitle').textContent = isEstate ? 'Wrongful Death SOL' : 'NY Statute of Limitations';
+  document.getElementById('solText').innerHTML = isEstate
+    ? '<strong style="color:var(--text)">Wrongful death:</strong> 2 years from date of death (EPTL §5-4.1)<br><br><strong style="color:var(--text)">Public hospitals:</strong> notice of claim within 90 days after an administrator is appointed<br><br><strong style="color:var(--text)">Federal providers</strong> (VA and military hospitals, many community health centers): written claim to the agency, generally within 2 years<br><br>The action is brought by the estate administrator, not the family directly. Estate appointment may be required first. <em>Act promptly.</em>'
+    : '<strong style="color:var(--text)">Personal injury:</strong> 2.5 years from the act or omission, or from the last treatment for the same condition<br><br><strong style="color:var(--text)">City and county hospitals:</strong> notice of claim within 90 days; lawsuit within 1 year and 90 days. State hospitals: claim or notice of intention within 90 days<br><br><strong style="color:var(--text)">Federal providers</strong> (VA and military hospitals, many community health centers): written claim to the agency, generally within 2 years<br><br><strong style="color:var(--text)">Wrongful death:</strong> 2 years from date of death<br><br>Later deadlines: foreign object (1 year from discovery), missed cancer diagnosis (Lavern’s Law, up to 7 years), infancy (no more than 10 years). <em>Act promptly.</em>';
 }
 
 function getModeWelcome() {
@@ -123,7 +124,7 @@ async function submitQuestion() {
     appendMessage('ai', markdownToHtml(data.answer));
 
     if (data.cases?.length) renderCases(data.cases);
-    if (data.caseAnalysis)  renderCaseAnalysis(data.caseAnalysis);
+    if (data.caseAnalysis)  renderCaseAnalysis(data.caseAnalysis, data.caseType, data.leadTier);
     showDeadlineNotices(data);
     if (data.contactForm)   offerContactForm();
 
@@ -187,10 +188,12 @@ function showDeadlineNotices(data) {
 let contactShared = false;
 
 function offerContactForm() {
-  if (contactShared || document.querySelector('#conversation .contact-card')) return;
-  const form = document.getElementById('contactFormTemplate').content.firstElementChild.cloneNode(true);
-  form.addEventListener('submit', submitContactForm);
-  document.getElementById('conversation').appendChild(form);
+  if (contactShared) return;
+  const conversation = document.getElementById('conversation');
+  const existing = conversation.querySelector('.contact-card');
+  const form = existing || document.getElementById('contactFormTemplate').content.firstElementChild.cloneNode(true);
+  if (!existing) form.addEventListener('submit', submitContactForm);
+  conversation.appendChild(form);
   form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
@@ -214,6 +217,7 @@ async function submitContactForm(event) {
     const res  = await fetch('/api/contact', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.ok) { errorEl.textContent = data.error || 'Something went wrong. Please try again.'; return; }
+    track('contact_form_submitted', { app: 'malpractice-ai', case_type: data.caseType || 'other', lead_tier: data.leadTier || 'unscored' });
     contactShared = true;
     form.replaceWith(contactDoneMessage());
   } catch {
@@ -267,8 +271,8 @@ function renderCases(cases) {
   card.style.display = 'block';
 }
 
-function renderCaseAnalysis(analysis) {
-  track('case_analysis_viewed', { app: 'malpractice-ai', verdict: analysis.verdict, score: analysis.score });
+function renderCaseAnalysis(analysis, caseType, leadTier) {
+  track('case_analysis_viewed', { app: 'malpractice-ai', case_type: caseType || 'other', lead_tier: leadTier || 'unscored', verdict: analysis.verdict, score: analysis.score });
   const card    = document.getElementById('analysisCard');
   const content = document.getElementById('analysisContent');
 
@@ -350,23 +354,18 @@ function getCookie(name) {
 }
 
 // ─── Restore session ──────────────────────────────────────────────────────────
-(async () => {
+async function restoreConversation() {
+  const requestedSession = sessionId;
   try {
-    const res  = await fetch(`/api/conversations/${sessionId}`);
+    const res  = await fetch(`/api/conversations/${requestedSession}`);
     const data = await res.json();
+    if (sessionId !== requestedSession) return;
     if (data.contact_consent_at) contactShared = true;
     if (!data.history?.length) return;
 
     conversationHistory = data.history;
-    currentMode = data.mode || 'personal';
-
-    if (currentMode === 'estate') {
-      modeToggle.checked = true;
-      document.body.classList.add('estate-mode');
-      personalLbl.classList.remove('active');
-      estateLbl.classList.add('active');
-      updateModeUI();
-    }
+    currentMode = data.mode || currentMode;
+    updateModeUI();
 
     const conv = document.getElementById('conversation');
     conv.innerHTML = '';
@@ -383,7 +382,23 @@ function getCookie(name) {
     else if (data.contactForm) offerContactForm();
     conv.lastElementChild?.scrollIntoView({ behavior: 'smooth' });
   } catch {}
-})();
+}
+updateModeUI();
+if (initialMode === 'estate') {
+  const conv = document.getElementById('conversation');
+  conv.innerHTML = '';
+  appendMessage('ai', getModeWelcome());
+}
+restoreConversation();
+
+document.querySelectorAll('.quick-start').forEach(button => {
+  button.addEventListener('click', () => {
+    track('quick_start_selected', { app: 'malpractice-ai', case_type: button.dataset.caseType || 'other' });
+    const input = document.getElementById('userInput');
+    input.value = button.dataset.question || '';
+    input.focus();
+  });
+});
 
 // ─── Load case types ──────────────────────────────────────────────────────────
 (async () => {

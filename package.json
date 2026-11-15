@@ -6,6 +6,7 @@
                     "start":  "node server.js",
                     "setup-db":  "node setup-db.js",
                     "test:unit":  "node test/index.test.mjs",
+                    "check:shared":  "node check-shared-code.mjs",
                     "test:e2e":  "playwright test",
                     "test:e2e:headed":  "playwright test --headed"
                 },

@@ -564,6 +564,58 @@ function contactWorld({ leadScore = null, alreadyHandedOff = false, firms = [], 
 const CONTACT = { name: '  Jane   Roe ', phone: '(555) 123-4567', bestTime: 'weekday mornings', consent: true };
 const leadDataOf = call => JSON.parse(call.params.find(param => typeof param === 'string' && param.startsWith('{"caseType"')));
 
+test('case summary emails use the stored assessment without the session or visitor messages', async () => {
+  const { buildSummaryEmail } = await import('../summary.js');
+  const email = buildSummaryEmail({
+    session_id: 'secret-session',
+    mode: 'personal',
+    case_type: 'misdiagnosis',
+    history: [
+      { role: 'user', content: 'Jane Roe at 555-123-4567' },
+      { role: 'assistant', content: 'The delay may have caused additional harm.' },
+    ],
+    lead_score: { preview: '<Delayed diagnosis>', score: 84 },
+  }, ['public_hospital', 'federal']);
+  assert.equal(email.subject, 'Your NYCMalpractice.ai case summary');
+  assert.ok(email.html.includes('&lt;Delayed diagnosis&gt;'));
+  assert.ok(email.html.includes('84/100'));
+  assert.ok(email.html.includes('The delay may have caused additional harm.'));
+  assert.ok(email.html.includes('90-day public hospital'));
+  assert.ok(email.html.includes('2-year federal'));
+  assert.ok(email.html.includes('href="https://example.test"'));
+  assert.ok(email.text.includes('https://example.test'));
+  for (const part of [email.html, email.text]) {
+    assert.ok(!part.includes('secret-session'));
+    assert.ok(!part.includes('Jane Roe'));
+    assert.ok(!part.includes('555-123-4567'));
+  }
+});
+
+test('POST /api/summary validates the address and sends a stored assessment', async () => {
+  const handler = async (url, init) => {
+    const query = JSON.parse(init.body).query.replace(/\s+/g, ' ');
+    if (/^SELECT mode, case_type, history, lead_score FROM conversations WHERE session_id/.test(query)) {
+      return rowsResponse([['mode', TEXT], ['case_type', TEXT], ['history', JSONB], ['lead_score', JSONB]],
+        [['personal', 'misdiagnosis', JSON.stringify([{ role: 'assistant', content: 'The delay may have caused additional harm.' }]), JSON.stringify({ preview: 'Delayed diagnosis.', score: 84 })]]);
+    }
+    return jsonResponse(EMPTY_ROWS);
+  };
+  const server = await startServer(app);
+  try {
+    await withoutMail(() => withOutboundHttp(handler, async () => {
+      const invalid = await postJson(server.baseUrl, '/api/summary', { sessionId: 'sess-summary', email: 'not-an-email' });
+      assert.equal(invalid.response.status, 400);
+      assert.equal(invalid.body.error, 'Please enter a valid email address.');
+
+      const sent = await postJson(server.baseUrl, '/api/summary', { sessionId: 'sess-summary', email: 'jane@example.test' });
+      assert.equal(sent.response.status, 200);
+      assert.deepEqual(sent.body, { ok: true });
+    }));
+  } finally {
+    await server.close();
+  }
+});
+
 test('POST /api/contact checks the name, the phone number and the consent', async () => {
   const world = contactWorld({ leadScore: leadScoreOf(84) });
   const server = await startServer(app);
@@ -746,6 +798,7 @@ test('the contact form shows the consent text the server stores, and the policy 
   const policy = readFileSync(new URL('../public/privacy.html', import.meta.url), 'utf8').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
   assert.match(policy, /Nothing about your case goes to a law firm unless you use the contact form and agree to be contacted/);
   assert.match(policy, /Firms pay us for these referrals/);
+  assert.match(policy, /emailed case summary, we use your email address only to deliver that summary and do not save it in our database/);
   assert.doesNotMatch(policy, /implicit consent/);
   assert.doesNotMatch(policy, /We do not sell your data\./);
 });
@@ -847,11 +900,13 @@ test('extractCaseType uses the aux model chain with failover', async () => {
   assert.deepEqual(await extractCaseType('anything', listAnswer), fallback);
 });
 
-test('scoreLead uses the aux model chain with failover', async () => {
+test('scoreLead uses the aux model chain with failover and the current-law notes', async () => {
   const modelsTried = [];
+  let scoringPrompt;
   await withOutboundHttp(async (url, init) => {
     const request = JSON.parse(init.body);
     modelsTried.push(request.model);
+    scoringPrompt = request.messages[0].content;
     if (modelsTried.length === 1) return jsonResponse({ error: { message: 'The model does not exist', code: 'model_not_found' } }, 404);
     return chatCompletion(JSON.stringify(leadScoreOf(84)));
   }, async () => {
@@ -861,6 +916,8 @@ test('scoreLead uses the aux model chain with failover', async () => {
   });
   assert.equal(modelsTried.length, 2);
   assert.equal(modelsTried[0], process.env.OPENAI_MODEL_AUX || 'gpt-4o-mini');
+  assert.match(scoringPrompt, /The Grieving Families Act is not law/);
+  assert.match(scoringPrompt, /It did not change medical malpractice law/);
 });
 
 // ─── New York deadlines ───────────────────────────────────────────────────────
@@ -1117,6 +1174,11 @@ test('blog pages complete their previews and offer a clear next step into chat',
 test('Vercel permanently redirects only the www host to the canonical domain', () => {
   const vercel = JSON.parse(readFileSync(new URL('../vercel.json', import.meta.url), 'utf8'));
   assert.deepEqual(vercel.redirects, [{
+    source: '/',
+    has: [{ type: 'host', value: 'www\\.nycmalpractice\\.ai' }],
+    destination: 'https://nycmalpractice-ai.vercel.app/',
+    permanent: true,
+  }, {
     source: '/:path*',
     has: [{ type: 'host', value: 'www\\.nycmalpractice\\.ai' }],
     destination: 'https://nycmalpractice-ai.vercel.app/:path*',
@@ -4319,4 +4381,25 @@ test('a request is not delivered by hand while its auction runs, and a charge fo
   assert.equal(delivered.result, 0);
   assert.equal(cold.stripe.filter(call => call.url.includes('/v1/payment_intents')).length, 1, 'a second firm was charged after the lead was full');
   assert.equal(cold.stripe.filter(call => call.url.includes('/v1/refunds')).length, 1);
+});
+
+test('generic shared modules match the integrity manifest', async () => {
+  const { sharedCodeMismatches } = await import('../check-shared-code.mjs');
+  assert.deepEqual(sharedCodeMismatches(), []);
+});
+
+test('browser tests disable background services and CI runs every project quality gate', () => {
+  const playwright = readFileSync(new URL('../playwright.config.mjs', import.meta.url), 'utf8');
+  assert.match(playwright, /DISABLE_BACKGROUND_JOBS: '1'/);
+  assert.match(playwright, /OPENAI_API_KEY: 'test-openai-key'/);
+  assert.match(playwright, /DATABASE_URL: 'postgres:\/\/user:pass@localhost:5432\/testdb'/);
+  const server = readFileSync(new URL('../server.js', import.meta.url), 'utf8');
+  assert.match(server, /process\.env\.DISABLE_BACKGROUND_JOBS === '1'/);
+
+  const workflow = readFileSync(new URL('../.github/workflows/test.yml', import.meta.url), 'utf8');
+  assert.match(workflow, /pull_request:/);
+  assert.match(workflow, /branches: \[main\]/);
+  for (const command of ['npm ci', 'npm run check:shared', 'npm run test:unit', 'npx playwright install --with-deps chromium', 'npx playwright test']) {
+    assert.ok(workflow.includes(command), `CI does not run: ${command}`);
+  }
 });

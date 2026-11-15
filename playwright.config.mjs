@@ -1,4 +1,4 @@
-﻿import { defineConfig } from '@playwright/test';
+import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: './e2e',
@@ -20,6 +20,7 @@ export default defineConfig({
     env: {
       PORT: '4178',
       NODE_ENV: 'development',
+      DISABLE_BACKGROUND_JOBS: '1',
       DATABASE_URL: 'postgres://user:pass@localhost:5432/testdb',
       OPENAI_API_KEY: 'test-openai-key',
       APP_URL: 'http://127.0.0.1:4178',

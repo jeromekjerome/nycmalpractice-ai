@@ -6,6 +6,12 @@
   ],
   "redirects": [
     {
+      "source": "/",
+      "has": [{ "type": "host", "value": "www\\.nycmalpractice\\.ai" }],
+      "destination": "https://nycmalpractice-ai.vercel.app/",
+      "permanent": true
+    },
+    {
       "source": "/:path*",
       "has": [{ "type": "host", "value": "www\\.nycmalpractice\\.ai" }],
       "destination": "https://nycmalpractice-ai.vercel.app/:path*",

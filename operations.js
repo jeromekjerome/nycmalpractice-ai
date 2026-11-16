@@ -64,7 +64,7 @@ async function checkFailureBurst() {
 
 // ─── /health/deep ─────────────────────────────────────────────────────────────
 // The newest columns the code needs: a deploy whose database changes were not made fails the check.
-const REQUIRED_COLUMNS = ['firms.card_declined_at', 'leads.decline_reason', 'user_interactions.outcome', 'job_runs.ran_at', 'ai_usage.created_at'];
+const REQUIRED_COLUMNS = ['firms.card_declined_at', 'leads.decline_reason', 'user_interactions.outcome', 'job_runs.ran_at', 'ai_usage.created_at', 'auctions.reminder_sent_at'];
 let deepHealthCache = { at: 0, value: null };
 
 // For an uptime monitor: is the database reachable, does it have the columns the code uses, and did the nightly job

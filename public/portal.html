@@ -20,6 +20,14 @@
     table { width: 100%; border-collapse: collapse; }
     th { text-align: left; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border); }
     td { padding: 0.75rem; font-size: 0.85rem; border-bottom: 1px solid var(--border); }
+    .month-summary { font-size: 0.85rem; color: var(--text); margin-bottom: 0.9rem; }
+    .lead-when { display: block; font-size: 0.72rem; color: var(--muted); margin-top: 0.2rem; }
+    .more-btn { margin-top: 0.75rem; padding: 0.5rem 1rem; background: transparent; border: 1px solid var(--border); border-radius: 8px; color: var(--text); font: inherit; font-size: 0.82rem; cursor: pointer; }
+    .auction-row { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; padding: 0.7rem 0; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
+    .auction-row:last-child { border-bottom: none; }
+    .auction-meta { color: var(--muted); font-size: 0.78rem; }
+    .leading-tag { color: #4ade80; font-weight: 600; }
+    .open-auction-btn { padding: 0.45rem 0.9rem; background: linear-gradient(135deg, var(--accent2), var(--accent)); border: none; border-radius: 8px; color: #fff; font: inherit; font-size: 0.82rem; font-weight: 600; cursor: pointer; }
     .tier-badge { display: inline-block; padding: 0.2rem 0.55rem; border-radius: 6px; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
     .tier-warm    { background: rgba(158,58,90,0.15); color: #c9809a; }
     .tier-hot     { background: rgba(122,32,64,0.2);  color: #9e5070; }
@@ -139,14 +147,23 @@
       </div>
     </div>
 
-    <!-- Leads -->
-    <div class="section-title">Recent Leads</div>
+    <!-- Open auctions the firm was invited to: one that missed the email can still bid. -->
+    <div id="auctionsSection" style="display:none">
+      <div class="section-title">Open Auctions</div>
+      <div class="glass-panel" style="padding:1.25rem;margin-bottom:1.5rem" id="auctionsContainer"></div>
+    </div>
+
+    <!-- Every lead, with refunds and answers: the firm's record of what it bought. -->
+    <div class="section-title">Your Leads</div>
     <div class="glass-panel" style="padding:1.25rem;overflow-x:auto">
+      <p class="month-summary" id="monthSummary"></p>
       <table id="leadsTable">
-        <thead><tr><th>Type</th><th>Tier</th><th>Price</th><th>Status</th><th>Received</th><th></th></tr></thead>
+        <thead><tr><th>Type</th><th>Kind</th><th>Price</th><th>Refund</th><th>Status</th><th>Received</th><th></th></tr></thead>
         <tbody id="leadsBody"></tbody>
       </table>
       <div id="noLeads" style="text-align:center;color:var(--muted);padding:2rem;display:none">No leads yet. You'll be notified when matching leads arrive.</div>
+      <button class="more-btn" id="moreLeadsBtn" style="display:none" onclick="loadMoreLeads()">Show more leads</button>
+      <p style="font-size:0.72rem;color:var(--muted);margin-top:0.75rem">Stripe emails a receipt for each lead charge to your firm's email address.</p>
     </div>
   </div>
 
@@ -274,12 +291,18 @@
         const firm = currentFirm = data.firm || {};
         document.getElementById('firmNameEl').textContent = firm.name || '';
         const leads    = data.leads || [];
-        const total    = leads.length;
+        // Counted from the first page: past 20 leads the counts are shown as at least that many.
+        const more     = data.hasMore ? '+' : '';
         const accepted = leads.filter(l => l.status === 'accepted').length;
         const pending  = leads.filter(l => l.status === 'pending').length;
-        document.getElementById('statTotal').textContent    = total;
-        document.getElementById('statAccepted').textContent = accepted;
+        document.getElementById('statTotal').textContent    = `${leads.length}${more}`;
+        document.getElementById('statAccepted').textContent = `${accepted}${accepted ? more : ''}`;
         document.getElementById('statPending').textContent  = pending;
+        const month = data.month;
+        document.getElementById('monthSummary').textContent = month
+          ? `This month: ${month.leads} lead${month.leads === 1 ? '' : 's'}, ${money(month.charged)} charged, ${money(month.refunded)} refunded.`
+          : '';
+        renderAuctions(data.auctions || []);
         const state = standing(firm);
         document.getElementById('statStatus').textContent   = state.label;
         document.getElementById('statStatus').style.color   = state.ok ? 'var(--success)' : '#f87171';
@@ -311,19 +334,85 @@
           });
         }
 
-        if (leads.length === 0) { document.getElementById('noLeads').style.display = 'block'; return; }
+        if (leads.length === 0) { document.getElementById('noLeads').style.display = 'block'; showMore(false); return; }
         document.getElementById('noLeads').style.display = 'none';
-        const tbody = document.getElementById('leadsBody');
-        tbody.innerHTML = leads.map(l => `
+        document.getElementById('leadsBody').innerHTML = '';
+        appendLeads(leads);
+        showMore(data.hasMore, data.nextOffset);
+    }
+
+    const esc = value => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    const money = value => `$${Number(value || 0).toFixed(2)}`;
+    const day = value => (value ? new Date(value).toLocaleDateString() : '');
+
+    // Each lead: what kind it was, what was refunded, and when it was answered. Every lead opens, accepted ones
+    // too: the 3-day lead link expires, and an accepted client's details are what the firm paid for.
+    function appendLeads(leads) {
+      document.getElementById('leadsBody').insertAdjacentHTML('beforeend', leads.map(l => {
+        const answered = l.status === 'accepted' ? day(l.accepted_at) : l.status === 'declined' ? day(l.declined_at) : '';
+        const refund = Number(l.refund_amount || 0);
+        return `
           <tr>
-            <td>${MALP_LABELS[l.case_type] || l.case_type || '—'}</td>
-            <td><span class="tier-badge tier-${l.tier}">${l.tier}</span></td>
-            <td>$${parseFloat(l.price_paid).toFixed(0)}</td>
-            <td><span class="status-badge status-${l.status}">${l.status}</span></td>
-            <td style="color:var(--muted)">${new Date(l.created_at).toLocaleDateString()}</td>
-            <td>${l.status === 'pending' ? `<a href="lead.html?id=${l.id}&token=${token}" style="font-size:0.78rem;color:var(--accent)">View →</a>` : ''}</td>
-          </tr>
-        `).join('');
+            <td>${esc(MALP_LABELS[l.case_type] || l.case_type || '—')}</td>
+            <td><span class="tier-badge tier-${esc(l.tier)}">${esc(l.tier)}</span><span class="lead-when">${l.from_auction ? 'auction' : 'cold'}</span></td>
+            <td>${money(l.price_paid)}</td>
+            <td>${refund > 0 ? money(refund) : '—'}</td>
+            <td><span class="status-badge status-${esc(l.status)}">${esc(l.status)}</span>${answered ? `<span class="lead-when">${esc(answered)}</span>` : ''}</td>
+            <td style="color:var(--muted)">${esc(day(l.created_at))}</td>
+            <td><a href="lead.html?id=${encodeURIComponent(l.id)}&token=${encodeURIComponent(token)}" style="font-size:0.78rem;color:var(--accent)">View →</a></td>
+          </tr>`;
+      }).join(''));
+    }
+
+    let moreOffset = 0;
+    function showMore(visible, offset) {
+      moreOffset = offset || 0;
+      document.getElementById('moreLeadsBtn').style.display = visible ? '' : 'none';
+    }
+
+    async function loadMoreLeads() {
+      const btn = document.getElementById('moreLeadsBtn');
+      btn.disabled = true;
+      try {
+        const res  = await fetch(`/api/portal?token=${encodeURIComponent(token)}&offset=${moreOffset}`);
+        const data = await res.json();
+        if (!res.ok) { showMessage(data.error || 'Could not load more leads.', true); return; }
+        appendLeads(data.leads || []);
+        showMore(data.hasMore, data.nextOffset);
+      } catch {
+        showMessage('Network error — try again.', true);
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    function renderAuctions(auctions) {
+      document.getElementById('auctionsSection').style.display = auctions.length ? '' : 'none';
+      document.getElementById('auctionsContainer').innerHTML = auctions.map(a => `
+        <div class="auction-row">
+          <div>
+            <strong>Auction #${esc(a.id)}</strong>: ${esc(a.tier)} ${esc(MALP_LABELS[a.caseType] || a.caseType || '')}
+            <div class="auction-meta">Current bid ${money(a.currentBid)} · closes ${esc(new Date(a.closesAt).toLocaleString())}${a.leading ? ' · <span class="leading-tag">you are leading</span>' : ''}</div>
+          </div>
+          <button class="open-auction-btn" data-auction="${esc(a.id)}" onclick="openAuction(this)">Open auction</button>
+        </div>`).join('');
+    }
+
+    async function openAuction(button) {
+      button.disabled = true;
+      try {
+        const res  = await fetch('/api/portal/auction-link', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token, auctionId: button.dataset.auction }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.url) { showMessage(data.error || 'That auction could not be opened.', true); return; }
+        location.href = data.url;
+      } catch {
+        showMessage('Network error — try again.', true);
+      } finally {
+        button.disabled = false;
+      }
     }
 
     if (token) {

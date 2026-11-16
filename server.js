@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { neon } from '@neondatabase/serverless';
 import { answerUserQuestion } from './ask.js';
-import { closeExpiredAuctions, createAuction, deliverColdLead, getAuctionStatus, placeBid, acceptLead, declineLead, notifyOperatorOfContactRequest, notifyOperator, TIER_CONFIG, DECLINE_REASONS, deliverLeadByHand } from './auction.js';
+import { closeExpiredAuctions, createAuction, deliverColdLead, getAuctionStatus, placeBid, acceptLead, declineLead, notifyOperatorOfContactRequest, notifyOperator, TIER_CONFIG, DECLINE_REASONS, deliverLeadByHand, remindClosingAuctions, openAuctionsFor, portalAuctionLink } from './auction.js';
 import { registerFirm, sendVerificationCode, verifyPhoneCode, validateToken, updateFirmSubscription, getFirm, updateFirmProfile, createMagicLink, VerificationLimitError, recentDeclineCounts, linkOpensAuction, linkOpensLead, linkOpensAccount, approveFirm, setSubscriptionStatus, ensureStripeCustomer, changeUnverifiedPhone, setCustomerCard, findFirmByEmail } from './firms.js';
 import { rateLimit } from './rate-limit.js';
 import { alertOperatorOnce, recordInteraction, deepHealth, runSteps, recordJobRun, reportFailedSteps, sendDailyDigest } from './operations.js';
@@ -162,14 +162,17 @@ function cleanClientHistory(raw) {
 
 // Auctions last 2 to 6 hours, but scheduled jobs run only once a day on this hosting plan. So requests from
 // firms and visitors also close any auction past its time, at most once a minute per server instance, and
-// the winner is charged and gets the lead soon after the auction ends.
+// the winner is charged and gets the lead soon after the auction ends. The same sweep sends each auction's
+// closing-soon reminder (remindClosingAuctions).
 let lastAuctionSweep = 0;
 function sweepExpiredAuctions() {
   const inTests = process.env.NODE_ENV === 'test';
   if (inTests && process.env.AUCTION_SWEEP_IN_TESTS !== '1') return Promise.resolve(0);
   if (!inTests && Date.now() - lastAuctionSweep < 60_000) return Promise.resolve(0);
   lastAuctionSweep = Date.now();
-  return closeExpiredAuctions().catch(err => { console.error('Closing expired auctions failed:', err.message); return 0; });
+  const reminders = remindClosingAuctions().catch(err => { console.error('Sending closing reminders failed:', err.message); return 0; });
+  const closing = closeExpiredAuctions().catch(err => { console.error('Closing expired auctions failed:', err.message); return 0; });
+  return Promise.all([closing, reminders]).then(([closed]) => closed);
 }
 
 app.post('/api/ask', limitChat, async (req, res) => {
@@ -716,14 +719,56 @@ app.post('/api/firms/portal-link', limitEmails, async (req, res) => {
   } catch (err) { serverError(req, res, err); }
 });
 
+const PORTAL_PAGE_SIZE = 20;
 app.get('/api/portal', async (req, res) => {
   const tokenData = await validateToken(req.query.token);
   if (!tokenData) return res.status(401).json({ error: 'Invalid or expired link' });
   if (!linkOpensAccount(tokenData)) return res.status(403).json({ error: ACCOUNT_ONLY });
-  await sweepExpiredAuctions();
-  const firm  = await getFirm(tokenData.firm_id);
-  const leads = await sql`SELECT id, case_type, tier, price_paid, status, created_at FROM leads WHERE firm_id = ${tokenData.firm_id} ORDER BY created_at DESC LIMIT 20`;
-  res.json({ firm, leads });
+  // The portal is the firm's record of what it bought: every lead (20 at a time; ?offset= for the next), whether it
+  // came from an auction, what was refunded and when it was answered, and this month's totals. It used to show the
+  // last 20 leads with their prices only.
+  const offset = Math.min(Math.max(parseInt(req.query.offset, 10) || 0, 0), 100_000);
+  if (offset === 0) await sweepExpiredAuctions();   // a lead just won shows at once
+  const rows = await sql`
+    SELECT id, case_type, tier, price_paid, refund_amount, status, decline_reason, (auction_id IS NOT NULL) AS from_auction,
+           created_at, accepted_at, declined_at
+    FROM leads WHERE firm_id = ${tokenData.firm_id}
+    ORDER BY created_at DESC, id DESC
+    LIMIT ${PORTAL_PAGE_SIZE + 1} OFFSET ${offset}
+  `;
+  const page = { leads: rows.slice(0, PORTAL_PAGE_SIZE), hasMore: rows.length > PORTAL_PAGE_SIZE, nextOffset: offset + Math.min(rows.length, PORTAL_PAGE_SIZE) };
+  if (offset > 0) return res.json(page);   // "Show more": the next leads only
+
+  const firm = await getFirm(tokenData.firm_id);
+  // Calendar month in New York. A refund counts in the month the lead was declined, when it is issued.
+  const [month] = await sql`
+    WITH start AS (SELECT date_trunc('month', NOW() AT TIME ZONE 'America/New_York') AT TIME ZONE 'America/New_York' AS at)
+    SELECT count(*) FILTER (WHERE l.created_at >= start.at)::int AS leads,
+           COALESCE(sum(l.price_paid) FILTER (WHERE l.created_at >= start.at), 0) AS charged,
+           COALESCE(sum(l.refund_amount) FILTER (WHERE l.declined_at >= start.at), 0) AS refunded
+    FROM start LEFT JOIN leads l ON l.firm_id = ${tokenData.firm_id}
+    GROUP BY start.at`;
+  const auctions = await openAuctionsFor(tokenData.firm_id);
+  res.json({
+    firm, ...page, auctions,
+    month: { leads: month?.leads || 0, charged: parseFloat(month?.charged || 0), refunded: parseFloat(month?.refunded || 0) },
+  });
+});
+
+// A fresh link to an open auction listed in the portal.
+app.post('/api/portal/auction-link', async (req, res) => {
+  const { token, auctionId } = req.body;
+  const tokenData = await validateToken(token);
+  if (!tokenData) return res.status(401).json({ error: 'Invalid or expired link' });
+  if (!linkOpensAccount(tokenData)) return res.status(403).json({ error: ACCOUNT_ONLY });
+  if (!/^\d{1,12}$/.test(String(auctionId ?? ''))) return res.status(400).json({ error: 'auctionId required' });
+  try {
+    const url = await portalAuctionLink(tokenData.firm_id, auctionId);
+    if (!url) return res.status(404).json({ error: 'That auction has closed, or your firm was not invited to it.' });
+    res.json({ url: url.slice(APP_URL.length) });
+  } catch (err) {
+    serverError(req, res, err);
+  }
 });
 
 app.put('/api/portal/profile', async (req, res) => {

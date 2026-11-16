@@ -4207,7 +4207,7 @@ test('a contact request that fails tells the operator at once, without the visit
 test('/health/deep reports the database, its columns and the nightly job, for an uptime monitor', async () => {
   const previous = process.env.HEALTH_DEEP_CACHE_MS;
   process.env.HEALTH_DEEP_CACHE_MS = '0';
-  const columns = ['firms.card_declined_at', 'leads.decline_reason', 'user_interactions.outcome', 'job_runs.ran_at', 'ai_usage.created_at'];
+  const columns = ['firms.card_declined_at', 'leads.decline_reason', 'user_interactions.outcome', 'job_runs.ran_at', 'ai_usage.created_at', 'auctions.reminder_sent_at'];
   const pgTime = ms => new Date(ms).toISOString().replace('T', ' ').replace('Z', '+00');
   let world = {};
   const handler = async (url, init) => {
@@ -4576,4 +4576,194 @@ test('a firm is emailed when it is first approved, once when its subscription st
   } finally {
     await server.close();
   }
+});
+
+// ─── Round 2, items 24 and 25: the portal as a record, and auction alerts ─────
+
+test('the firm a bid overtakes is emailed a link to bid again, but not a firm raising its own bid', async () => {
+  const { placeBid } = await import('../auction.js');
+  for (const [previousFirm, expected] of [['8', true], ['7', false]]) {
+    const sql = [];
+    const handler = async (url, init) => {
+      const { query, params } = JSON.parse(init.body);
+      const q = query.replace(/\s+/g, ' ').trim();
+      sql.push({ query: q, params });
+      if (/^WITH raised AS \( ?UPDATE auctions SET current_bid/.test(q)) return rowsResponse([['id', INT]], [['1']], 'INSERT');
+      if (/FROM bids b JOIN firms f/.test(q)) {
+        return rowsResponse([['firm_id', INT], ['name', TEXT], ['email', TEXT], ['closes_at', TIMESTAMPTZ], ['tier', TEXT], ['case_type', TEXT]],
+          [[previousFirm, 'Other Firm', 'other@example.test', new Date(Date.now() + 2 * 3600_000).toISOString(), 'hot', 'misdiagnosis']]);
+      }
+      return jsonResponse(EMPTY_ROWS);
+    };
+    const { result, logs } = await capturingLogs(() => withoutMail(() => withOutboundHttp(handler, () => placeBid(9, 7, 410))));
+    assert.deepEqual(result, { ok: true, currentBid: 410, leaderId: 7 });
+    const previous = sql.find(call => /FROM bids b JOIN firms f/.test(call.query));
+    assert.match(previous.query, /b\.amount < \$2/);
+    assert.deepEqual(previous.params.map(String), ['9', '410']);
+    const notice = logs.find(line => /Outbid notice → other@example\.test/.test(line));
+    assert.equal(Boolean(notice), expected, `previous leader ${previousFirm}`);
+    if (expected) {
+      assert.match(notice, /URL: https:\/\/example\.test\/auction\.html\?id=9&token=/);
+      const link = sql.find(call => /^INSERT INTO firm_tokens/.test(call.query));
+      assert.deepEqual([String(link.params[0]), String(link.params[2])], ['8', '9'], 'the link was not scoped to that firm and auction');
+    }
+  }
+});
+
+test('a failed outbid notice does not undo the bid', async () => {
+  const { placeBid } = await import('../auction.js');
+  const handler = async (url, init) => {
+    const q = JSON.parse(init.body).query.replace(/\s+/g, ' ').trim();
+    if (/^WITH raised AS/.test(q)) return rowsResponse([['id', INT]], [['1']], 'INSERT');
+    if (/FROM bids b JOIN firms f/.test(q)) return jsonResponse({ message: 'database unavailable' }, 500);
+    return jsonResponse(EMPTY_ROWS);
+  };
+  const { result, logs } = await capturingLogs(() => withOutboundHttp(handler, () => placeBid(9, 7, 410)));
+  assert.equal(result.ok, true);
+  assert.ok(logs.some(line => /Auction 9: the outbid notice failed/.test(line)));
+});
+
+test('each auction sends one closing reminder, to the invited firms other than the leader', async () => {
+  const { remindClosingAuctions } = await import('../auction.js');
+  const sql = [];
+  let claimed = false;
+  const handler = async (url, init) => {
+    const { query, params } = JSON.parse(init.body);
+    const q = query.replace(/\s+/g, ' ').trim();
+    sql.push({ query: q, params });
+    if (/^UPDATE auctions SET reminder_sent_at = NOW\(\)/.test(q)) {
+      if (claimed) return rowsResponse([['id', INT]], [], 'UPDATE');
+      claimed = true;
+      return rowsResponse([['id', INT], ['closes_at', TIMESTAMPTZ], ['current_bid', 1700], ['current_leader_id', INT], ['tier', TEXT], ['case_type', TEXT]],
+        [['9', new Date(Date.now() + 10 * 60_000).toISOString(), '420.00', '7', 'hot', 'misdiagnosis']], 'UPDATE');
+    }
+    if (/FROM firm_tokens t JOIN firms f/.test(q)) {
+      return rowsResponse([['id', INT], ['name', TEXT], ['email', TEXT]], [['8', 'Firm 8', 'f8@example.test'], ['11', 'Firm 11', 'f11@example.test']]);
+    }
+    return jsonResponse(EMPTY_ROWS);
+  };
+  const { result, logs } = await capturingLogs(() => withoutMail(() => withOutboundHttp(handler, async () => [await remindClosingAuctions(), await remindClosingAuctions()])));
+  assert.deepEqual(result, [2, 0], 'a reminder went twice');
+  const claim = sql.find(call => /^UPDATE auctions SET reminder_sent_at/.test(call.query));
+  assert.match(claim.query, /reminder_sent_at IS NULL/);
+  assert.match(claim.query, /closes_at > NOW\(\) \+ INTERVAL '2 minutes'/);
+  const invited = sql.find(call => /FROM firm_tokens t JOIN firms f/.test(call.query));
+  assert.deepEqual(invited.params.map(String), ['9', '7'], 'the leader was not left out');
+  assert.equal(logs.filter(line => /Closing reminder → f(8|11)@example\.test: auction 9/.test(line)).length, 2);
+});
+
+// The portal's fakes: a portal link for firm 7, its leads, this month's totals and one open auction.
+function portalWorld({ leadCount = 21, invited = true } = {}) {
+  const sql = [];
+  const handler = async (url, init) => {
+    const { query, params } = JSON.parse(init.body);
+    const q = query.replace(/\s+/g, ' ').trim();
+    sql.push({ query: q, params });
+    if (/^SELECT ft\.\*/.test(q)) {
+      const scope = { portal: [null, null], 'auction-9': ['9', null] }[params[0]];
+      return scope
+        ? rowsResponse([['firm_id', INT], ['name', TEXT], ['auction_id', INT], ['lead_id', INT]], [['7', 'Test Firm', scope[0], scope[1]]])
+        : rowsResponse([], []);
+    }
+    if (/FROM leads WHERE firm_id = \$1 ORDER BY created_at DESC, id DESC/.test(q)) {
+      const rows = Array.from({ length: Math.min(leadCount, 21) }, (_, i) => [String(500 - i), 'misdiagnosis', 'cold', '25.00', i === 0 ? '25.00' : null,
+        i === 0 ? 'declined' : 'accepted', i === 0 ? 'not_taking' : null, i % 2 ? 't' : 'f', '2026-11-10 10:00:00+00', i === 0 ? null : '2026-11-11 10:00:00+00', i === 0 ? '2026-11-12 10:00:00+00' : null]);
+      return rowsResponse([['id', INT], ['case_type', TEXT], ['tier', TEXT], ['price_paid', 1700], ['refund_amount', 1700], ['status', TEXT], ['decline_reason', TEXT],
+        ['from_auction', 16], ['created_at', TIMESTAMPTZ], ['accepted_at', TIMESTAMPTZ], ['declined_at', TIMESTAMPTZ]], rows);
+    }
+    if (/^WITH start AS/.test(q)) return rowsResponse([['leads', INT], ['charged', 1700], ['refunded', 1700]], [['3', '75.00', '25.00']]);
+    if (/FROM auctions a JOIN firm_tokens t/.test(q)) {
+      return rowsResponse([['id', INT], ['case_type', TEXT], ['tier', TEXT], ['current_bid', 1700], ['closes_at', TIMESTAMPTZ], ['current_leader_id', INT]],
+        [['9', 'misdiagnosis', 'hot', '420.00', '2030-01-01 00:00:00+00', '7']]);
+    }
+    if (/^SELECT a\.id, a\.closes_at FROM auctions a/.test(q)) {
+      return invited ? rowsResponse([['id', INT], ['closes_at', TIMESTAMPTZ]], [['9', new Date(Date.now() + 3600_000).toISOString()]]) : rowsResponse([], []);
+    }
+    if (/FROM firms WHERE id/.test(q)) return rowsResponse([['id', INT], ['name', TEXT], ['email', TEXT]], [['7', 'Test Firm', 'firm@example.test']]);
+    return jsonResponse(EMPTY_ROWS);
+  };
+  return { sql, handler };
+}
+
+test("the portal lists every lead with its refund and answer, this month's totals, and the firm's open auctions", async () => {
+  const world = portalWorld();
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(world.handler, async () => {
+      const first = await (await fetch(`${server.baseUrl}/api/portal?token=portal`)).json();
+      assert.equal(first.leads.length, 20);
+      assert.equal(first.hasMore, true);
+      assert.equal(first.nextOffset, 20);
+      assert.deepEqual(first.month, { leads: 3, charged: 75, refunded: 25 });
+      assert.equal(first.leads[0].refund_amount, '25.00');
+      assert.equal(first.leads[0].decline_reason, 'not_taking');
+      assert.ok(first.leads[0].declined_at);
+      assert.equal(typeof first.leads[1].from_auction, 'boolean');
+      assert.deepEqual(first.auctions, [{ id: 9, caseType: 'misdiagnosis', tier: 'hot', currentBid: 420, closesAt: first.auctions[0].closesAt, leading: true }]);
+
+      const more = await (await fetch(`${server.baseUrl}/api/portal?token=portal&offset=20`)).json();
+      assert.deepEqual(Object.keys(more).sort(), ['hasMore', 'leads', 'nextOffset']);
+    });
+    const pages = world.sql.filter(call => /FROM leads WHERE firm_id = \$1 ORDER BY/.test(call.query));
+    assert.deepEqual(pages.map(call => call.params.map(String)), [['7', '21', '0'], ['7', '21', '20']]);
+    const month = world.sql.find(call => /^WITH start AS/.test(call.query));
+    assert.match(month.query, /America\/New_York/);
+  } finally {
+    await server.close();
+  }
+});
+
+test('the portal opens an invited, open auction with a fresh link, and nothing else', async () => {
+  const server = await startServer(app);
+  try {
+    const post = (world, payload) => withOutboundHttp(world.handler, () => postJson(server.baseUrl, '/api/portal/auction-link', payload));
+    const invited = portalWorld();
+    const { response, body } = await post(invited, { token: 'portal', auctionId: 9 });
+    assert.equal(response.status, 200);
+    assert.match(body.url, /^\/auction\.html\?id=9&token=[0-9a-f]{64}$/);
+    const link = invited.sql.find(call => /^INSERT INTO firm_tokens/.test(call.query));
+    assert.deepEqual([String(link.params[0]), String(link.params[2])], ['7', '9']);
+    const check = invited.sql.find(call => /^SELECT a\.id, a\.closes_at FROM auctions a/.test(call.query));
+    assert.match(check.query, /EXISTS \(SELECT 1 FROM firm_tokens t WHERE t\.auction_id = a\.id AND t\.firm_id = \$2\)/);
+
+    assert.equal((await post(portalWorld({ invited: false }), { token: 'portal', auctionId: 9 })).response.status, 404);
+    assert.equal((await post(portalWorld(), { token: 'auction-9', auctionId: 9 })).response.status, 403);
+    assert.equal((await post(portalWorld(), { token: 'portal', auctionId: '9; DROP' })).response.status, 400);
+    assert.equal((await post(portalWorld(), { token: 'nope', auctionId: 9 })).response.status, 401);
+  } finally {
+    await server.close();
+  }
+});
+
+test('a lead charge asks Stripe to email the firm a receipt', async () => {
+  const { deliverColdLead } = await import('../auction.js');
+  const charges = [];
+  const handler = async (url, init) => {
+    if (url.includes('/v1/payment_intents')) {
+      charges.push(new URLSearchParams(String(init.body)));
+      return jsonResponse({ id: 'pi_ok', object: 'payment_intent', status: 'succeeded' });
+    }
+    const q = JSON.parse(init.body).query.replace(/\s+/g, ' ').trim();
+    if (/FROM firms WHERE active/.test(q)) {
+      return rowsResponse([['id', INT], ['name', TEXT], ['email', TEXT], ['stripe_customer_id', TEXT], ['stripe_payment_method_id', TEXT]],
+        [['1', 'Firm 1', 'f1@example.test', 'cus_1', 'pm_1']]);
+    }
+    if (/^INSERT INTO leads/.test(q)) return rowsResponse([['id', INT]], [['801']], 'INSERT');
+    return jsonResponse(EMPTY_ROWS);
+  };
+  await capturingLogs(() => withoutMail(() => withOutboundHttp(handler,
+    () => deliverColdLead('sess-receipt', 'misdiagnosis', { score: 60, tier: 'cold' }, { preview: 'A preview.' }))));
+  assert.equal(charges.length, 1);
+  assert.equal(charges[0].get('receipt_email'), 'f1@example.test');
+});
+
+test('the auction page confirms the amount before a binding bid, and the portal shows the record and open auctions', () => {
+  const auction = readFileSync(new URL('../public/auction.html', import.meta.url), 'utf8');
+  assert.match(auction, /id="bidConfirm"/);
+  assert.match(auction, /You agree to pay \$\{money\(confirmedAmount\)\} if you win/);
+  assert.match(auction, /\$\('bidAmount'\)\.addEventListener\('input', cancelBid\)/);
+  const portal = readFileSync(new URL('../public/portal.html', import.meta.url), 'utf8');
+  for (const id of ['auctionsSection', 'monthSummary', 'moreLeadsBtn']) assert.match(portal, new RegExp(`id="${id}"`));
+  assert.match(portal, /\/api\/portal\/auction-link/);
+  assert.match(portal, /<th>Refund<\/th>/);
 });

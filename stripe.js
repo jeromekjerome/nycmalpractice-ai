@@ -74,11 +74,14 @@ export function constructWebhookEvent(body, signature) {
 }
 
 // idempotencyKey: the same charge retried (a second run of the same close) is charged once.
-export async function chargeCustomer({ stripeCustomerId, paymentMethodId, amountDollars, description, metadata, idempotencyKey }) {
+// receiptEmail: Stripe emails the firm a receipt for the charge. Lead charges are not invoices, so the billing
+// portal never lists them; without this the lead email was the firm's only record.
+export async function chargeCustomer({ stripeCustomerId, paymentMethodId, amountDollars, description, metadata, idempotencyKey, receiptEmail }) {
   return getStripe().paymentIntents.create({
     customer: stripeCustomerId, payment_method: paymentMethodId,
     amount: Math.round(amountDollars * 100), currency: 'usd',
     confirm: true, off_session: true, description, metadata,
+    ...(receiptEmail ? { receipt_email: receiptEmail } : {}),
   }, idempotencyKey ? { idempotencyKey } : undefined);
 }
 

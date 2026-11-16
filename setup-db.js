@@ -166,6 +166,22 @@ async function setup() {
   `;
   await sql`CREATE INDEX IF NOT EXISTS idx_job_runs_job ON job_runs(job, ran_at)`;
 
+  await sql`
+    CREATE TABLE IF NOT EXISTS ai_usage (
+      id                 BIGSERIAL PRIMARY KEY,
+      operation          TEXT NOT NULL,
+      model              TEXT NOT NULL,
+      status             TEXT NOT NULL DEFAULT 'reserved',
+      reserved_cost_usd  NUMERIC(12,8) NOT NULL,
+      actual_cost_usd    NUMERIC(12,8),
+      input_tokens       INTEGER NOT NULL DEFAULT 0,
+      output_tokens      INTEGER NOT NULL DEFAULT 0,
+      error_code         TEXT,
+      created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_ai_usage_created ON ai_usage(created_at)`;
+
   // The last decisions found for each case type, used when CourtListener cannot be searched (case-memory.js).
   await sql`
     CREATE TABLE IF NOT EXISTS search_cache (

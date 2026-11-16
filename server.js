@@ -251,6 +251,15 @@ app.post('/api/ask', limitChat, async (req, res) => {
     // An auction being closed alongside this message is finished first: once the reply is sent the function
     // may be suspended, leaving the auction part-way through.
     await beforeReply();
+    if (err.code === 'ai_budget_exceeded' || err.code === 'ai_budget_unavailable') {
+      return res.status(503).json({
+        error: err.code === 'ai_budget_exceeded'
+          ? 'The AI service has reached its spending limit. Please try again later.'
+          : 'The AI service is temporarily unavailable. Please try again later.',
+        code: err.code,
+        retry: true,
+      });
+    }
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -937,11 +946,13 @@ app.get('/api/cron', async (req, res) => {
     const { resetDeclineCounts } = await import('./firms.js');
     // The privacy policy's retention periods: conversations after 90 days, lead records after 3 years (retention.js).
     const { purgeExpiredConversations, purgeExpiredLeadRecords } = await import('./retention.js');
+    const { backupRecords } = await import('./backup.js');
 
     // The deletions the privacy policy promises go first: the steps that charge cards and send email take longest.
     const { results, failed } = await runSteps([
       ['delete old conversations', purgeExpiredConversations],
       ['delete old lead records', purgeExpiredLeadRecords],
+      ['back up business records offsite', backupRecords],
       ['close expired auctions', closeExpiredAuctions],
       ['report stuck auctions', reportStuckAuctions],
       ['decline overdue leads', declineOverdueLeads],
@@ -955,6 +966,7 @@ app.get('/api/cron', async (req, res) => {
       closed: results['close expired auctions'] ?? null,
       declined: results['decline overdue leads'] ?? null,
       purged: { ...(results['delete old conversations'] || {}), ...(results['delete old lead records'] || {}) },
+      backup: results['back up business records offsite']?.status || null,
       failed: failed.map(f => f.step),
     });
   } catch (err) {

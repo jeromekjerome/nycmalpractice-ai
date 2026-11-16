@@ -64,7 +64,7 @@ async function checkFailureBurst() {
 
 // ─── /health/deep ─────────────────────────────────────────────────────────────
 // The newest columns the code needs: a deploy whose database changes were not made fails the check.
-const REQUIRED_COLUMNS = ['firms.card_declined_at', 'leads.decline_reason', 'user_interactions.outcome', 'job_runs.ran_at'];
+const REQUIRED_COLUMNS = ['firms.card_declined_at', 'leads.decline_reason', 'user_interactions.outcome', 'job_runs.ran_at', 'ai_usage.created_at'];
 let deepHealthCache = { at: 0, value: null };
 
 // For an uptime monitor: is the database reachable, does it have the columns the code uses, and did the nightly job
@@ -142,10 +142,14 @@ export async function sendDailyDigest({ failed = [] } = {}) {
       (SELECT count(*) FROM user_interactions WHERE created_at > NOW() - INTERVAL '24 hours' AND gate_status = 'BLOCKED')::int AS blocked,
       (SELECT count(*) FROM conversations WHERE contact_consent_at > NOW() - INTERVAL '24 hours')::int AS requests,
       (SELECT count(*) FROM leads WHERE created_at > NOW() - INTERVAL '24 hours')::int AS leads,
+      (SELECT count(*) FROM ai_usage WHERE created_at > NOW() - INTERVAL '24 hours' AND status = 'ok')::int AS ai_calls,
+      (SELECT COALESCE(SUM(input_tokens), 0) FROM ai_usage WHERE created_at > NOW() - INTERVAL '24 hours')::int AS ai_input_tokens,
+      (SELECT COALESCE(SUM(output_tokens), 0) FROM ai_usage WHERE created_at > NOW() - INTERVAL '24 hours')::int AS ai_output_tokens,
+      (SELECT COALESCE(SUM(actual_cost_usd), 0) FROM ai_usage WHERE created_at > NOW() - INTERVAL '24 hours') AS ai_cost,
       (SELECT count(*) FROM conversations c WHERE c.contact_consent_at > NOW() - INTERVAL '7 days'
          AND NOT EXISTS (SELECT 1 FROM leads l WHERE l.session_id = c.session_id)
          AND NOT EXISTS (SELECT 1 FROM auctions a WHERE a.session_id = c.session_id AND a.status IN ('open', 'closing')))::int AS unplaced`;
-  const row = (label, value) => `<tr><td style="color:#666;padding:4px 12px 4px 0">${label}</td><td><strong>${Number(value) || 0}</strong></td></tr>`;
+  const row = (label, value) => `<tr><td style="color:#666;padding:4px 12px 4px 0">${label}</td><td><strong>${escapeHtml(value ?? 0)}</strong></td></tr>`;
   const html = `
     <div style="font-family:sans-serif;max-width:600px">
       <h2 style="margin-bottom:0.5rem">${SITE}: the last 24 hours</h2>
@@ -156,6 +160,10 @@ export async function sendDailyDigest({ failed = [] } = {}) {
         ${row('Replies the gate blocked', day?.blocked)}
         ${row('Contact requests', day?.requests)}
         ${row('Leads delivered', day?.leads)}
+        ${row('AI calls', day?.ai_calls)}
+        ${row('AI input tokens', day?.ai_input_tokens)}
+        ${row('AI output tokens', day?.ai_output_tokens)}
+        ${row('Estimated AI spend (USD)', `$${Number(day?.ai_cost || 0).toFixed(2)}`)}
         ${row('Requests no firm holds (last 7 days)', day?.unplaced)}
       </table>
       ${day?.unplaced ? `<p>Deliver waiting requests by hand from the <a href="${escapeHtml(APP_URL)}/admin.html">admin page</a>.</p>` : ''}

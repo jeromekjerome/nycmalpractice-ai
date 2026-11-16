@@ -27,6 +27,7 @@ async function setup() {
       specializations          TEXT[],
       service_area             TEXT,
       contact_name             TEXT,
+      terms_accepted_at        TIMESTAMPTZ,
       created_at               TIMESTAMPTZ DEFAULT NOW()
     )
   `;
@@ -147,6 +148,7 @@ async function setup() {
   await sql`ALTER TABLE firms ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ`;           // set by the operator after checking it; no leads before
   await sql`ALTER TABLE firms ADD COLUMN IF NOT EXISTS subscription_status TEXT`;          // Stripe's status: active, past_due, canceled ...
   await sql`ALTER TABLE firms ADD COLUMN IF NOT EXISTS card_declined_at TIMESTAMPTZ`;      // when the firm was last told a lead charge was declined
+  await sql`ALTER TABLE firms ADD COLUMN IF NOT EXISTS terms_accepted_at TIMESTAMPTZ`;     // when the firm agreed to the Terms of Service at sign-up
   await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS decline_reason TEXT`;              // why the firm declined (auction.js DECLINE_REASONS), or 'expired'
   // How each chat message ended, so failures leave a record (operations.js).
   await sql`ALTER TABLE user_interactions ADD COLUMN IF NOT EXISTS outcome TEXT`;         // ok | slow | error

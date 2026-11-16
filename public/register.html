@@ -110,6 +110,12 @@
           <input type="text" id="attorneyRegistration" inputmode="numeric" maxlength="12" placeholder="7 digits">
           <p style="color:var(--muted);font-size:0.78rem;margin-top:0.35rem">We check it in the New York court system's attorney directory before your firm receives leads.</p>
         </div>
+        <div class="form-group" style="margin-top:0.85rem">
+          <label style="display:flex;align-items:flex-start;gap:0.5rem;font-size:0.82rem;cursor:pointer;color:var(--text);line-height:1.4">
+            <input type="checkbox" id="termsConsent" style="margin-top:0.15rem;accent-color:var(--accent)">
+            <span>I agree to the <a href="/terms.html" target="_blank" style="color:var(--text);text-decoration:underline">Terms of Service</a>, including the subscription fee, the lead decline rules and the refund policy.</span>
+          </label>
+        </div>
         <div class="error-msg" id="step1Error"></div>
         <button class="next-btn" onclick="registerFirm()">Continue →</button>
         <!-- A firm already registered, or one coming back to finish, signs in by email and finishes in its portal. -->
@@ -237,9 +243,10 @@
       const attorneyRegistration = document.getElementById('attorneyRegistration').value.trim();
       const errEl   = document.getElementById('step1Error');
       if (!name || !email || !phone || !attorneyName || !attorneyRegistration) { showErr(errEl, 'Please fill in all required fields.'); return; }
+      if (!document.getElementById('termsConsent').checked) { showErr(errEl, 'You must agree to the Terms of Service'); return; }
 
       try {
-        const res  = await fetch('/api/firms/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, email, phone, attorneyName, attorneyRegistration }) });
+        const res  = await fetch('/api/firms/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, email, phone, attorneyName, attorneyRegistration, termsAccepted: true }) });
         const data = await res.json();
         if (data.error) {
           // Already registered: the sign-in link is offered here, rather than only named.

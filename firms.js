@@ -4,9 +4,19 @@ import { neon } from '@neondatabase/serverless';
 import { createCustomer } from './stripe.js';
 import crypto from 'crypto';
 import twilio from 'twilio';
+import nodemailer from 'nodemailer';
 import { PRACTICE_AREAS } from './site.js';
 
 const sql = neon(process.env.DATABASE_URL);
+
+function getTransporter() {
+  if (!process.env.SMTP_USER) return null;
+  return nodemailer.createTransport({
+    host: process.env.SMTP_HOST || 'mail.jwd.nyc', port: parseInt(process.env.SMTP_PORT || '465'), secure: true,
+    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+    connectionTimeout: 10_000, greetingTimeout: 10_000, socketTimeout: 10_000,
+  });
+}
 
 function twilioClient() {
   if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN) return null;
@@ -28,7 +38,7 @@ export async function findFirmByEmail(email) {
   return firm || null;
 }
 
-export async function registerFirm({ name, email, phone, attorneyName = null, attorneyRegistration = null }) {
+export async function registerFirm({ name, email, phone, attorneyName = null, attorneyRegistration = null, termsAccepted = false }) {
   const cleanEmail = normalizeEmail(email);
   const existing = await findFirmByEmail(cleanEmail);
   if (existing) return { firm: existing, isNew: false };
@@ -40,9 +50,10 @@ export async function registerFirm({ name, email, phone, attorneyName = null, at
     stripeCustomerId = customer.id;
   } catch (err) { console.warn('Stripe customer creation failed:', err.message); }
 
+  const termsAcceptedAt = termsAccepted ? new Date() : null;
   const [firm] = await sql`
-    INSERT INTO firms (name, email, phone, stripe_customer_id, attorney_name, attorney_registration)
-    VALUES (${name}, ${cleanEmail}, ${toE164(phone)}, ${stripeCustomerId}, ${attorneyName}, ${attorneyRegistration})
+    INSERT INTO firms (name, email, phone, stripe_customer_id, attorney_name, attorney_registration, terms_accepted_at)
+    VALUES (${name}, ${cleanEmail}, ${toE164(phone)}, ${stripeCustomerId}, ${attorneyName}, ${attorneyRegistration}, ${termsAcceptedAt})
     RETURNING *
   `;
   return { firm, isNew: true };
@@ -234,11 +245,46 @@ export async function recentDeclineCounts(firmId) {
 export async function recordDecline(firmId, isAuction) {
   const counts  = await recentDeclineCounts(firmId);
   const suspend = isAuction && counts.auction >= 3;
-  await sql`
+  if (suspend) console.log(`Firm ${firmId} suspended for 30 days after ${counts.auction} auction declines in 30 days`);
+  const [updated] = await sql`
     UPDATE firms
     SET auction_decline_count = ${counts.auction}, cold_decline_count = ${counts.cold},
         suspended_until = CASE WHEN ${suspend} THEN NOW() + INTERVAL '30 days' ELSE suspended_until END
-    WHERE id = ${firmId}`;
+    WHERE id = ${firmId}
+    RETURNING id, name, email, suspended_until`;
+  if (suspend && updated?.email) {
+    await sendFirmSuspensionEmail(updated, updated.suspended_until).catch(err => console.error(`Suspension email to firm ${firmId} failed:`, err.message));
+  }
+}
+
+// The firm is told when its third auction decline in 30 days suspends it (Terms, section 5).
+export async function sendFirmSuspensionEmail(firm, suspendedUntil) {
+  const t = getTransporter();
+  const untilDate = suspendedUntil
+    ? new Date(suspendedUntil).toLocaleDateString('en-US', { timeZone: 'America/New_York', month: 'long', day: 'numeric', year: 'numeric' })
+    : '30 days from now';
+  const html = `
+    <div style="font-family:sans-serif;max-width:580px;margin:auto">
+      <h2 style="color:#9e3a5a">NYCMalpractice.ai account notice: 30-day suspension</h2>
+      <p>Hi ${firm.name},</p>
+      <p>Your firm account is suspended until <strong>${untilDate}</strong> because it declined 3 auction leads within 30 days (Terms of Service, section 5).</p>
+      <p>Until then:</p>
+      <ul>
+        <li>Your firm will not be invited to auctions or sent new leads.</li>
+        <li>The leads you already have stay in your firm portal.</li>
+        <li>Your billing and account settings are unchanged.</li>
+      </ul>
+      <p>Leads resume automatically on ${untilDate}. To ask for a review, write to legal@nycmalpractice.ai.</p>
+      <p style="color:#999;font-size:12px;margin-top:2rem">NYCMalpractice.ai</p>
+    </div>
+  `;
+  if (!t) { console.log(`[EMAIL MOCK] Suspension notice → ${firm.email}: suspended until ${untilDate}`); return; }
+  await t.sendMail({
+    from:    process.env.SMTP_USER,
+    to:      firm.email,
+    subject: 'NYCMalpractice.ai firm account suspended for 30 days',
+    html,
+  });
 }
 
 // Nightly: declines older than 30 days drop off the firm's counts. This used to set every firm's

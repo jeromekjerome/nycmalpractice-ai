@@ -1312,7 +1312,7 @@ test('the registration steps need their registration token, and a registered ema
   try {
     await withOutboundHttp(world.handler, async () => {
       // Someone who knows a registered firm's email gets neither its number's steps nor a token.
-      const again = await send('/api/firms/register', { name: 'Other', email: 'firm@example.test', phone: '5550000000', attorneyName: 'Pat Lee', attorneyRegistration: '1234567' });
+      const again = await send('/api/firms/register', { name: 'Other', email: 'firm@example.test', phone: '5550000000', attorneyName: 'Pat Lee', attorneyRegistration: '1234567', termsAccepted: true });
       assert.equal(again.status, 409);
       assert.equal(again.body.registrationToken, undefined);
       assert.match(again.body.error, /already registered/);
@@ -3480,7 +3480,7 @@ test('sign-up needs the supervising attorney and a New York registration number,
     }
     return jsonResponse(EMPTY_ROWS);
   };
-  const base = { name: 'Roe & Partners', email: 'intake@roe.example', phone: '(555) 123-4567', attorneyName: 'Jane Roe, Esq.', attorneyRegistration: '123-4567' };
+  const base = { name: 'Roe & Partners', email: 'intake@roe.example', phone: '(555) 123-4567', attorneyName: 'Jane Roe, Esq.', attorneyRegistration: '123-4567', termsAccepted: true };
   const server = await startServer(app);
   try {
     const { logs } = await capturingLogs(() => withoutTexts(() => withoutMail(() => withOutboundHttp(handler, async () => {
@@ -3490,6 +3490,8 @@ test('sign-up needs the supervising attorney and a New York registration number,
         [{ attorneyRegistration: '' }, /registration number/],
         [{ attorneyRegistration: '12AB567' }, /registration number/],
         [{ attorneyRegistration: '123' }, /registration number/],
+        [{ termsAccepted: false }, /Terms of Service/],
+        [{ termsAccepted: undefined }, /Terms of Service/],
       ]) {
         const { response, body } = await postJson(server.baseUrl, '/api/firms/register', { ...base, ...change });
         assert.equal(response.status, 400, JSON.stringify(change));
@@ -3501,7 +3503,8 @@ test('sign-up needs the supervising attorney and a New York registration number,
       assert.equal(body.firmId, 9);
     }))));
     const insert = sql.find(call => /^INSERT INTO firms/.test(call.query));
-    assert.deepEqual(insert.params.slice(4).map(String), ['Jane Roe, Esq.', '1234567']);
+    assert.deepEqual(insert.params.slice(4, 6).map(String), ['Jane Roe, Esq.', '1234567']);
+    assert.ok(insert.params[6] && !Number.isNaN(Date.parse(insert.params[6])), 'when the firm agreed to the Terms was not recorded');
     assert.ok(logs.some(line => /New firm awaiting approval: Roe & Partners/.test(line)), 'the operator was not told');
   } finally {
     await server.close();
@@ -4026,7 +4029,7 @@ test('a firm whose code cannot be texted keeps its sign-up session, and can corr
   const server = await startServer(app);
   try {
     const { logs } = await capturingLogs(() => withoutTexts(() => withoutMail(() => withOutboundHttp(handler, async () => {
-      const { response, body } = await postJson(server.baseUrl, '/api/firms/register', { name: 'Roe & Partners', email: ' Intake@Roe.Example ', phone: '(555) 123-4567', attorneyName: 'Jane Roe, Esq.', attorneyRegistration: '1234567' });
+      const { response, body } = await postJson(server.baseUrl, '/api/firms/register', { name: 'Roe & Partners', email: ' Intake@Roe.Example ', phone: '(555) 123-4567', attorneyName: 'Jane Roe, Esq.', attorneyRegistration: '1234567', termsAccepted: true });
       assert.equal(response.status, 200, 'a failed text ended the sign-up');
       assert.ok(body.registrationToken, 'no sign-up session was given');
       assert.match(body.notice, /could not text a code/);
@@ -4458,4 +4461,119 @@ test('browser tests disable background services and CI runs every project qualit
   assert.match(dependabot, /package-ecosystem: npm/);
   assert.match(dependabot, /package-ecosystem: github-actions/);
   assert.match(dependabot, /interval: weekly/);
+});
+
+// ─── Terms agreement, firm account emails, deadlines on the lead page ─────────
+
+test('a lead stored before deadlines travelled with it gets them from the conversation, and says whether it came from an auction', async () => {
+  const history = [
+    { role: 'user', content: 'My mother was misdiagnosed at Bellevue last year.' },
+    { role: 'assistant', content: 'I am sorry to hear that.' },
+  ];
+  const leadData = { caseType: 'misdiagnosis', mode: 'personal', history, preview: 'Missed diagnosis.', contact: { name: 'Jane Roe', phone: '5551234567' } };
+  const handler = async (url, init) => {
+    const q = JSON.parse(init.body).query.replace(/\s+/g, ' ');
+    if (/FROM firm_tokens/.test(q)) {
+      return rowsResponse([['firm_id', INT], ['name', TEXT], ['cold_decline_count', INT], ['auction_decline_count', INT]], [['7', 'Test Firm', '0', '0']]);
+    }
+    if (/FROM leads WHERE id/.test(q)) {
+      return rowsResponse(
+        [['id', INT], ['status', TEXT], ['case_type', TEXT], ['tier', TEXT], ['price_paid', 1700], ['accept_deadline', TIMESTAMPTZ], ['auction_id', INT], ['lead_data', JSONB]],
+        [['502', 'pending', 'misdiagnosis', 'hot', '25.00', '2030-01-01 00:00:00+00', null, JSON.stringify(leadData)]],
+      );
+    }
+    return jsonResponse(EMPTY_ROWS);
+  };
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(handler, async () => {
+      const response = await fetch(`${server.baseUrl}/api/leads/502?token=firm-token`);
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.auctionId, null);
+      assert.deepEqual(body.leadData.deadlines, ['public_hospital']);
+    });
+  } finally {
+    await server.close();
+  }
+});
+
+test('lead.html shows the short deadlines and marks only an auction lead exclusive', () => {
+  const page = readFileSync(new URL('../public/lead.html', import.meta.url), 'utf8');
+  for (const id of ['distributionBadge', 'deadlinesCard', 'deadlinesList']) assert.match(page, new RegExp(`id="${id}"`));
+  assert.match(page, /public_hospital: \{/);
+  assert.match(page, /federal: \{/);
+  assert.match(page, /const exclusive = Boolean\(data\.auctionId\);/);
+  // A hot lead the operator delivers by hand can go to three firms.
+  assert.doesNotMatch(page, /exclusive = [^;]*tier/);
+});
+
+test('the sign-up page asks the firm to agree to the Terms before it sends anything', () => {
+  const page = readFileSync(new URL('../public/register.html', import.meta.url), 'utf8');
+  assert.match(page, /id="termsConsent"/);
+  assert.match(page, /href="\/terms\.html"/);
+  assert.match(page, /termsAccepted: true/);
+});
+
+test('a firm is emailed when it is first approved, once when its subscription starts, and when it is suspended', async () => {
+  const { recordDecline } = await import('../firms.js');
+  const server = await startServer(app);
+  try {
+    // Approval: emailed the first time only.
+    for (const [approvedAt, expected] of [[null, true], ['2026-11-01 10:00:00+00', false]]) {
+      const { logs } = await capturingLogs(() => withoutMail(() => withOutboundHttp(async (url, init) => {
+        const q = JSON.parse(init.body).query.replace(/\s+/g, ' ').trim();
+        if (/FROM firms WHERE id/.test(q)) {
+          return rowsResponse([['id', INT], ['name', TEXT], ['email', TEXT], ['approved_at', TIMESTAMPTZ]], [['7', 'Roe & Partners', 'intake@roe.example', approvedAt]]);
+        }
+        if (/^UPDATE firms SET approved_at/.test(q)) return rowsResponse([['id', INT], ['name', TEXT]], [['7', 'Roe & Partners']]);
+        return jsonResponse(EMPTY_ROWS);
+      }, async () => {
+        const res = await fetch(`${server.baseUrl}/api/admin/firms/7`, {
+          method: 'PATCH', headers: { 'content-type': 'application/json', 'x-admin-secret': process.env.ADMIN_SECRET }, body: JSON.stringify({ approved: true }),
+        });
+        assert.equal(res.status, 200);
+      })));
+      assert.equal(logs.some(line => /Firm approval email → intake@roe\.example: https:\/\/example\.test\/portal\.html\?token=/.test(line)), expected, `approved_at ${approvedAt}`);
+    }
+
+    // Welcome: once per subscription, so a repeated event sends nothing.
+    const { default: Stripe } = await import('stripe');
+    const payload = JSON.stringify({
+      id: 'evt_welcome', object: 'event', type: 'checkout.session.completed',
+      data: { object: { id: 'cs_welcome', subscription: 'sub_welcome', customer: 'cus_1', metadata: { firmId: '7', app: 'nycmalpractice' } } },
+    });
+    const signature = new Stripe('sk_test_123').webhooks.generateTestHeaderString({ payload, secret: process.env.STRIPE_WEBHOOK_SECRET });
+    for (const [subscriptionOnFile, expected] of [[null, true], ['sub_welcome', false]]) {
+      const { logs } = await capturingLogs(() => withoutMail(() => withOutboundHttp(async (url, init) => {
+        if (url.startsWith('https://api.stripe.com/')) {
+          return jsonResponse({ id: 'sub_welcome', object: 'subscription', status: 'active', default_payment_method: { id: 'pm_1', object: 'payment_method' }, metadata: { firmId: '7', app: 'nycmalpractice' } });
+        }
+        const q = JSON.parse(init.body).query.replace(/\s+/g, ' ').trim();
+        if (/FROM firms WHERE id/.test(q)) {
+          return rowsResponse([['id', INT], ['name', TEXT], ['email', TEXT], ['stripe_customer_id', TEXT], ['stripe_subscription_id', TEXT]],
+            [['7', 'Roe & Partners', 'intake@roe.example', 'cus_1', subscriptionOnFile]]);
+        }
+        if (/^UPDATE firms/.test(q)) return rowsResponse([['id', INT]], [['7']]);
+        return jsonResponse(EMPTY_ROWS);
+      }, async () => {
+        const res = await fetch(`${server.baseUrl}/api/webhooks/stripe`, { method: 'POST', headers: { 'content-type': 'application/json', 'stripe-signature': signature }, body: payload });
+        assert.equal(res.status, 200);
+      })));
+      assert.equal(logs.some(line => /Firm welcome email → intake@roe\.example/.test(line)), expected, `subscription on file ${subscriptionOnFile}`);
+    }
+
+    // Suspension: the third auction decline in 30 days.
+    const { logs } = await capturingLogs(() => withoutMail(() => withOutboundHttp(async (url, init) => {
+      const q = JSON.parse(init.body).query.replace(/\s+/g, ' ').trim();
+      if (/FROM leads WHERE firm_id = \$1 AND status = 'declined'/.test(q)) return rowsResponse([['auction', INT], ['cold', INT]], [['3', '0']]);
+      if (/^UPDATE firms SET auction_decline_count/.test(q)) {
+        return rowsResponse([['id', INT], ['name', TEXT], ['email', TEXT], ['suspended_until', TIMESTAMPTZ]], [['7', 'Roe & Partners', 'intake@roe.example', '2026-12-16 15:00:00+00']]);
+      }
+      return jsonResponse(EMPTY_ROWS);
+    }, () => recordDecline(7, true))));
+    assert.ok(logs.some(line => /Suspension notice → intake@roe\.example: suspended until December 16, 2026/.test(line)), 'the suspension was not emailed');
+  } finally {
+    await server.close();
+  }
 });

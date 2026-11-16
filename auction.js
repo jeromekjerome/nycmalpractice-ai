@@ -133,6 +133,7 @@ async function chargeCard(firm, card, amountDollars, description, metadata, idem
       stripeCustomerId: firm.stripe_customer_id,
       paymentMethodId:  card,
       amountDollars, description, metadata, idempotencyKey,
+      receiptEmail:     firm.email || undefined,
     });
     if (charge?.status === 'succeeded' || charge?.status === 'processing') return { status: 'charged', id: charge.id };
     if (charge?.status === 'requires_action') return { status: 'declined', reason: 'Your bank asked to approve the charge in person, which an automatic lead charge cannot do.' };
@@ -355,7 +356,10 @@ export async function placeBid(auctionId, firmId, amount) {
     INSERT INTO bids (auction_id, firm_id, amount)
     SELECT id, ${firmId}::int, ${value}::numeric FROM raised
     RETURNING id`;
-  if (placed) return { ok: true, currentBid: value, leaderId: firmId };
+  if (placed) {
+    await tellOutbidFirm(auctionId, firmId, value).catch(err => console.error(`Auction ${auctionId}: the outbid notice failed:`, err.message));
+    return { ok: true, currentBid: value, leaderId: firmId };
+  }
 
   // Refused: say why.
   const [auction] = await sql`SELECT status, closes_at, current_bid FROM auctions WHERE id = ${auctionId} LIMIT 1`;
@@ -363,6 +367,110 @@ export async function placeBid(auctionId, firmId, amount) {
   if (auction.status !== 'open') return { ok: false, error: 'Auction is closed' };
   if (new Date(auction.closes_at) <= new Date()) return { ok: false, error: 'Auction has expired' };
   return { ok: false, error: `Minimum bid is $${(parseFloat(auction.current_bid) + 1).toFixed(2)}` };
+}
+
+// A link to bid in one auction, valid until an hour after it closes.
+async function auctionLink(firmId, auctionId, closesAt) {
+  const hoursLeft = Math.max(0, (new Date(closesAt) - Date.now()) / 3_600_000);
+  const token = await createMagicLink(firmId, { auctionId, expiresInHours: Math.ceil(hoursLeft) + 1 });
+  return `${APP_URL}/auction.html?id=${auctionId}&token=${token}`;
+}
+
+const easternTime = value => new Date(value).toLocaleString('en-US', { timeZone: 'America/New_York', dateStyle: 'medium', timeStyle: 'short' });
+
+// The firm that led until this bid is told at once: one that bid and closed the page used to be outbid without
+// knowing. Bids only rise, so the leader before this bid holds the highest bid below it (even if another bid
+// landed meanwhile). A firm that raises its own bid is not told anything.
+async function tellOutbidFirm(auctionId, newLeaderId, newBid) {
+  const [previous] = await sql`
+    SELECT b.firm_id, f.name, f.email, a.closes_at, a.tier, a.case_type
+    FROM bids b JOIN firms f ON f.id = b.firm_id JOIN auctions a ON a.id = b.auction_id
+    WHERE b.auction_id = ${auctionId} AND b.amount < ${newBid}
+    ORDER BY b.amount DESC LIMIT 1`;
+  if (!previous?.email || String(previous.firm_id) === String(newLeaderId)) return;
+  const url = await auctionLink(previous.firm_id, auctionId, previous.closes_at);
+  const t   = getTransporter();
+  if (!t) { console.log(`[EMAIL MOCK] Outbid notice → ${previous.email}: auction ${auctionId} now at $${newBid.toFixed(2)} | URL: ${url}`); return; }
+  await t.sendMail({
+    from:    process.env.SMTP_USER,
+    to:      previous.email,
+    subject: `You've been outbid: malpractice lead auction #${auctionId}`,
+    html: `
+      <div style="font-family:sans-serif;max-width:580px;margin:auto">
+        <h2 style="color:#9e3a5a">You've been outbid</h2>
+        <p>Another firm bid <strong>$${newBid.toFixed(2)}</strong> in auction #${escapeHtml(auctionId)} (${escapeHtml(TIER_CONFIG[previous.tier]?.label || previous.tier)}, ${escapeHtml(caseTypeLabel(previous.case_type))}).</p>
+        <p>It closes ${escapeHtml(easternTime(previous.closes_at))} ET. The next bid must be at least $${(newBid + 1).toFixed(2)}.</p>
+        <p style="margin:1.5rem 0"><a href="${url}" style="background:#9e3a5a;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600">Bid again →</a></p>
+        <p style="color:#999;font-size:12px">Contact details are revealed only to the winning bidder.</p>
+      </div>`,
+  });
+}
+
+// The open auctions a firm was invited to, for its portal: a firm that missed the invitation email can still bid.
+export async function openAuctionsFor(firmId) {
+  const rows = await sql`
+    SELECT DISTINCT a.id, a.case_type, a.tier, a.current_bid, a.closes_at, a.current_leader_id
+    FROM auctions a JOIN firm_tokens t ON t.auction_id = a.id
+    WHERE t.firm_id = ${firmId} AND a.status = 'open' AND a.closes_at > NOW()
+    ORDER BY a.closes_at`;
+  return rows.map(row => ({
+    id: row.id, caseType: row.case_type, tier: row.tier, currentBid: parseFloat(row.current_bid), closesAt: row.closes_at,
+    leading: row.current_leader_id != null && String(row.current_leader_id) === String(firmId),
+  }));
+}
+
+// A fresh link to one of those auctions, from the portal. Only an open auction the firm was invited to.
+export async function portalAuctionLink(firmId, auctionId) {
+  const [auction] = await sql`
+    SELECT a.id, a.closes_at FROM auctions a
+    WHERE a.id = ${auctionId} AND a.status = 'open' AND a.closes_at > NOW()
+      AND EXISTS (SELECT 1 FROM firm_tokens t WHERE t.auction_id = a.id AND t.firm_id = ${firmId})`;
+  return auction ? auctionLink(firmId, auction.id, auction.closes_at) : null;
+}
+
+// Each auction's "closes soon" reminder, sent once to the firms invited to it, other than the one leading.
+// Scheduled jobs run only once a day on this hosting plan, so the requests that close expired auctions
+// (sweepExpiredAuctions in server.js) send these too: with no visit in an auction's last 15 minutes, none goes.
+// An auction within 2 minutes of closing gets none, since there would be no time to act on it.
+export const REMINDER_MINUTES = 15;
+export async function remindClosingAuctions() {
+  const due = await sql`
+    UPDATE auctions SET reminder_sent_at = NOW()
+    WHERE status = 'open' AND reminder_sent_at IS NULL
+      AND closes_at > NOW() + INTERVAL '2 minutes' AND closes_at <= NOW() + make_interval(mins => ${REMINDER_MINUTES})
+    RETURNING id, closes_at, current_bid, current_leader_id, tier, case_type`;
+  let sent = 0;
+  for (const auction of due) {
+    const firms = await sql`
+      SELECT DISTINCT f.id, f.name, f.email FROM firm_tokens t JOIN firms f ON f.id = t.firm_id
+      WHERE t.auction_id = ${auction.id} AND f.active = TRUE AND f.email IS NOT NULL
+        AND (f.suspended_until IS NULL OR f.suspended_until < NOW())
+        AND f.id IS DISTINCT FROM ${auction.current_leader_id}::int`;
+    const t = getTransporter();
+    const bid = parseFloat(auction.current_bid || 0);
+    for (const firm of firms) {
+      try {
+        const url = await auctionLink(firm.id, auction.id, auction.closes_at);
+        if (!t) { console.log(`[EMAIL MOCK] Closing reminder → ${firm.email}: auction ${auction.id} | URL: ${url}`); sent++; continue; }
+        await t.sendMail({
+          from:    process.env.SMTP_USER,
+          to:      firm.email,
+          subject: `Closing soon: malpractice lead auction #${auction.id}`,
+          html: `
+            <div style="font-family:sans-serif;max-width:580px;margin:auto">
+              <h2 style="color:#9e3a5a">Auction #${escapeHtml(auction.id)} closes soon</h2>
+              <p>The ${escapeHtml(TIER_CONFIG[auction.tier]?.label || auction.tier)} ${escapeHtml(caseTypeLabel(auction.case_type))} auction closes ${escapeHtml(easternTime(auction.closes_at))} ET.</p>
+              <p>${auction.current_leader_id != null ? `The current bid is $${bid.toFixed(2)}.` : 'No firm has bid yet.'} The next bid must be at least $${(bid + 1).toFixed(2)}.</p>
+              <p style="margin:1.5rem 0"><a href="${url}" style="background:#9e3a5a;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600">Open the auction →</a></p>
+            </div>`,
+        });
+        sent++;
+      } catch (err) {
+        console.error(`Auction ${auction.id}: the closing reminder to firm ${firm.id} failed:`, err.message);
+      }
+    }
+  }
+  return sent;
 }
 
 export async function getAuctionStatus(auctionId) {

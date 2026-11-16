@@ -82,6 +82,14 @@
                 <input class="bid-input" type="number" id="bidAmount" min="0" step="1" aria-label="Bid amount in dollars">
                 <button class="action-btn" type="submit" id="bidButton">Bid now</button>
               </form>
+              <!-- A winning bid is binding and charged when the auction closes, so the amount is confirmed first. -->
+              <div id="bidConfirm" class="notice" style="display:none;border:1px solid var(--border)">
+                <p id="bidConfirmText" style="margin-bottom:0.6rem"></p>
+                <div class="bid-row">
+                  <button class="action-btn" type="button" id="confirmBidBtn">Confirm bid</button>
+                  <button class="action-btn" type="button" id="changeBidBtn" style="background:transparent;border:1px solid var(--border);color:var(--text)">Change amount</button>
+                </div>
+              </div>
               <div id="bidMessage" role="status"></div>
               <div id="bidHistory" style="margin-top:1rem"></div>
             </section>
@@ -161,6 +169,11 @@
       const input = $('bidAmount');
       input.min = minBid;
       if (!input.value || Number(input.value) < minBid) input.value = minBid;
+      // Another firm bid while this one was confirming: the amount it was about to confirm is no longer enough.
+      if (confirmedAmount != null && confirmedAmount < minBid) {
+        cancelBid();
+        notice(`Another firm bid meanwhile. The minimum is now ${money(minBid)}.`, 'error');
+      }
       $('leadingBadge').style.display = data.isLeading ? '' : 'none';
       secsLeft = Number(data.secsLeft || 0);
       tick();
@@ -212,11 +225,32 @@
       el.classList.toggle('urgent', secsLeft < 300);
     }
 
-    $('bidForm').addEventListener('submit', async event => {
+    // The amount shown in the confirmation is the amount sent: changing the box cancels it.
+    var confirmedAmount = null;   // var: loadAuction, above, reads it
+    function cancelBid() {
+      confirmedAmount = null;
+      $('bidConfirm').style.display = 'none';
+      $('bidButton').style.display = '';
+    }
+    $('bidAmount').addEventListener('input', cancelBid);
+    $('changeBidBtn').addEventListener('click', cancelBid);
+
+    $('bidForm').addEventListener('submit', event => {
       event.preventDefault();
       const amount = Number($('bidAmount').value);
       if (!amount || amount <= 0) { notice('Enter a valid bid amount.', 'error'); return; }
-      const button = $('bidButton');
+      confirmedAmount = Math.round(amount * 100) / 100;
+      $('bidMessage').replaceChildren();
+      $('bidConfirmText').textContent = `You agree to pay ${money(confirmedAmount)} if you win. Winning bids are binding, and your card is charged when the auction closes.`;
+      $('confirmBidBtn').textContent = `Confirm ${money(confirmedAmount)} bid`;
+      $('bidConfirm').style.display = '';
+      $('bidButton').style.display = 'none';
+    });
+
+    $('confirmBidBtn').addEventListener('click', async () => {
+      const amount = confirmedAmount;
+      if (!amount) { cancelBid(); return; }
+      const button = $('confirmBidBtn');
       button.disabled = true;
       try {
         const res  = await fetch(`/api/auctions/${encodeURIComponent(auctionId)}/bid`, {
@@ -233,6 +267,7 @@
         notice('Network error — try again.', 'error');
       } finally {
         button.disabled = false;
+        cancelBid();
       }
     });
 

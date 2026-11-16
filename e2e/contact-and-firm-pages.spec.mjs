@@ -186,6 +186,7 @@ test('the auction page shows the case summary without contact details and places
 
   await page.locator('#bidAmount').fill('250');
   await page.locator('#bidButton').click();
+  await page.locator('#confirmBidBtn').click();   // the amount is confirmed before the bid is sent
   await expect(page.locator('#bidMessage')).toContainText('Bid of $250.00 placed');
   expect(bid).toEqual({ token: 't1', amount: 250 });
 });

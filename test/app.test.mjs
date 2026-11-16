@@ -398,7 +398,7 @@ test('GET /api/cron with the cron secret closes auctions, declines overdue leads
     await withOutboundHttp(world.handler, async () => {
       const response = await fetch(`${server.baseUrl}/api/cron`, { headers: { authorization: `Bearer ${process.env.CRON_SECRET}` } });
       assert.equal(response.status, 200);
-      assert.deepEqual(await response.json(), { ok: true, closed: 0, declined: 0, purged: { conversations: 0, messages: 0, leads: 0, auctions: 0, bids: 0 }, failed: [] });
+      assert.deepEqual(await response.json(), { ok: true, closed: 0, declined: 0, purged: { conversations: 0, messages: 0, leads: 0, auctions: 0, bids: 0 }, backup: 'not_configured', failed: [] });
     });
     const queries = world.calls.sql.map(call => call.query);
     assert.ok(queries.some(query => /FROM auctions WHERE status = 'open' AND closes_at <= NOW\(\)/.test(query)), 'expired auctions were not looked up');
@@ -1184,6 +1184,23 @@ test('Vercel permanently redirects only the www host to the canonical domain', (
     destination: 'https://nycmalpractice-ai.vercel.app/:path*',
     permanent: true,
   }]);
+});
+
+test('Vercel uses the bounded single-function setup and protects static responses', async () => {
+  const vercel = JSON.parse(readFileSync(new URL('../vercel.json', import.meta.url), 'utf8'));
+  assert.equal(vercel.framework, null);
+  assert.equal(vercel.builds, undefined);
+  assert.equal(vercel.routes, undefined);
+  assert.deepEqual(vercel.functions, {
+    'api/*.js': { includeFiles: '{public,rubrics,content}/**', maxDuration: 60 },
+  });
+  assert.deepEqual(vercel.rewrites, [{ source: '/(.*)', destination: '/api' }]);
+  assert.deepEqual(vercel.crons, [{ path: '/api/cron', schedule: '0 7 * * *' }]);
+  const all = vercel.headers.find(rule => rule.source === '/(.*)');
+  const { SECURITY_HEADERS } = await import('../security-headers.js');
+  assert.deepEqual(Object.fromEntries(all.headers.map(({ key, value }) => [key, value])), { ...SECURITY_HEADERS });
+  const { default: entryPoint } = await import('../api/index.js');
+  assert.equal(entryPoint, app);
 });
 
 test('the blog articles state the New York malpractice rules correctly', () => {
@@ -4091,6 +4108,41 @@ test('a fallback to a reasoning model gets the parameters it takes, and a model 
   }
 });
 
+test('the site-wide AI cap returns a calm retry response without calling OpenAI', async () => {
+  const previousTests = process.env.AI_BUDGET_IN_TESTS;
+  const previousCap = process.env.AI_DAILY_CAP_USD;
+  process.env.AI_BUDGET_IN_TESTS = '1';
+  process.env.AI_DAILY_CAP_USD = '0';
+  let providerCalls = 0;
+  const handler = async (url, init) => {
+    if (url.startsWith('https://api.openai.com/')) {
+      providerCalls += 1;
+      return jsonResponse({ choices: [{ message: { content: 'should not run' } }] });
+    }
+    const body = JSON.parse(init.body);
+    if (body.queries) return jsonResponse({ results: [EMPTY_ROWS, EMPTY_ROWS] });
+    return jsonResponse(EMPTY_ROWS);
+  };
+  resetRateLimits();
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(handler, async () => {
+      const { response, body } = await postJson(server.baseUrl, '/api/ask', {
+        question: 'I was hurt.', mode: REVIEW_APP.mode, sessionId: 'sess-budget-cap', history: [],
+      });
+      assert.equal(response.status, 503);
+      assert.equal(body.code, 'ai_budget_exceeded');
+      assert.equal(body.retry, true);
+      assert.match(body.error, /spending limit/);
+    });
+    assert.equal(providerCalls, 0);
+  } finally {
+    if (previousTests === undefined) delete process.env.AI_BUDGET_IN_TESTS; else process.env.AI_BUDGET_IN_TESTS = previousTests;
+    if (previousCap === undefined) delete process.env.AI_DAILY_CAP_USD; else process.env.AI_DAILY_CAP_USD = previousCap;
+    await server.close();
+  }
+});
+
 test('every chat message is recorded with how it ended, and a run of failures tells the operator once', async () => {
   const sql = [];
   let failedOfTen = 1;
@@ -4152,7 +4204,7 @@ test('a contact request that fails tells the operator at once, without the visit
 test('/health/deep reports the database, its columns and the nightly job, for an uptime monitor', async () => {
   const previous = process.env.HEALTH_DEEP_CACHE_MS;
   process.env.HEALTH_DEEP_CACHE_MS = '0';
-  const columns = ['firms.card_declined_at', 'leads.decline_reason', 'user_interactions.outcome', 'job_runs.ran_at'];
+  const columns = ['firms.card_declined_at', 'leads.decline_reason', 'user_interactions.outcome', 'job_runs.ran_at', 'ai_usage.created_at'];
   const pgTime = ms => new Date(ms).toISOString().replace('T', ' ').replace('Z', '+00');
   let world = {};
   const handler = async (url, init) => {
@@ -4399,7 +4451,11 @@ test('browser tests disable background services and CI runs every project qualit
   const workflow = readFileSync(new URL('../.github/workflows/test.yml', import.meta.url), 'utf8');
   assert.match(workflow, /pull_request:/);
   assert.match(workflow, /branches: \[main\]/);
-  for (const command of ['npm ci', 'npm run check:shared', 'npm run test:unit', 'npx playwright install --with-deps chromium', 'npx playwright test']) {
+  for (const command of ['npm ci --ignore-scripts', 'npm audit --audit-level=moderate', 'npm run check:shared', 'npm run test:unit', 'npx playwright install --with-deps chromium', 'npx playwright test']) {
     assert.ok(workflow.includes(command), `CI does not run: ${command}`);
   }
+  const dependabot = readFileSync(new URL('../.github/dependabot.yml', import.meta.url), 'utf8');
+  assert.match(dependabot, /package-ecosystem: npm/);
+  assert.match(dependabot, /package-ecosystem: github-actions/);
+  assert.match(dependabot, /interval: weekly/);
 });

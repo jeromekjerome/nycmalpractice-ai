@@ -60,7 +60,7 @@
       <p>Apart from the referral to law firms described above, we do not sell or share your data, and we never share it for marketing.</p>
 
       <h2>Data Retention</h2>
-      <p>Client session conversations are retained for 90 days after your last message so you can return to your conversation. After that, the conversation and the text of your messages are automatically deleted. Law firm lead records are retained for 3 years for billing and compliance purposes.</p>
+      <p>Client session conversations are retained for 90 days after your last message so you can return to your conversation. After that, the conversation and the text of your messages are automatically deleted. Law firm lead records are retained for 3 years for billing and compliance purposes. When off-site backups are enabled, encrypted backup copies are kept for up to 35 days and then deleted by the storage provider's retention rule; individual records within a backup are not edited.</p>
 
       <h2>Cookies</h2>
       <p>We set session cookies of our own (<code>malpractice_session</code>, <code>malpractice_personal_session</code> and <code>malpractice_estate_session</code>) to restore each claimant conversation across visits and mode switches. They contain only random identifiers — no personal information — and expire after 90 days. We do not use advertising cookies. Our analytics provider keeps its own identifier in your browser, as described under Analytics below.</p>
@@ -74,6 +74,7 @@
         <li><strong>CourtListener:</strong> Case law searches use the CourtListener API (Free Law Project). To find relevant cases, our server sends CourtListener a few search keywords based on your conversation, which can include words you typed. It does not send your IP address or the conversation itself.</li>
         <li><strong>Stripe:</strong> Payment processing for law firm subscriptions. Stripe's privacy policy applies: stripe.com/privacy</li>
         <li><strong>Neon:</strong> Database hosting. Data is stored in Neon's PostgreSQL cloud database with encryption at rest.</li>
+        <li><strong>Off-site backup storage:</strong> When enabled, our S3-compatible storage provider receives encrypted daily copies of firm, lead, auction and bid records so they can be restored after data loss. Login tokens and phone-verification codes are excluded.</li>
         <li><strong>Vercel:</strong> Hosts the site and, like any web host, receives the IP address and browser details of each visit. Vercel's privacy policy applies: vercel.com/legal/privacy-policy</li>
         <li><strong>Mixpanel:</strong> Measures how the site is used, as described under Analytics above. Mixpanel's privacy policy applies: mixpanel.com/legal/privacy-policy</li>
         <li><strong>Google Fonts:</strong> Supplies the typefaces our pages use. Your browser downloads them directly from Google, so Google receives your IP address and browser details when a page loads. Google's privacy policy applies: policies.google.com/privacy</li>

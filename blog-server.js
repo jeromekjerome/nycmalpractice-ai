@@ -1,4 +1,4 @@
-// blog-server.js — Blog routes (/blog and /blog/:slug), routed here by vercel.json.
+// blog-server.js — Blog routes (/blog and /blog/:slug), mounted by server.js.
 // BLOG_BRAND (or APP_BRAND) and APP_URL override the brand name and the canonical base URL.
 import 'dotenv/config';
 import express from 'express';

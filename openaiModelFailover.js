@@ -1,3 +1,5 @@
+import { runWithAiBudget } from './ai-budget.js';
+
 function splitFallbacks(csv = '') {
   return csv
     .split(',')
@@ -63,15 +65,17 @@ export function requestFor(model, request) {
   };
 }
 
-export async function chatCompletionsWithFallback(openai, { models, ...request }) {
+export async function chatCompletionsWithFallback(openai, { models, operation = 'chat.completions', ...request }, { budget = runWithAiBudget } = {}) {
   let lastError;
 
   for (let i = 0; i < models.length; i++) {
     const model = models[i];
     try {
-      return await openai.chat.completions.create(requestFor(model, request));
+      const adapted = requestFor(model, request);
+      return await budget({ operation, model, request: adapted, execute: () => openai.chat.completions.create(adapted) });
     } catch (error) {
       lastError = error;
+      if (error.code === 'ai_budget_exceeded' || error.code === 'ai_budget_unavailable') throw error;
       const hasMoreModels = i < models.length - 1;
       if (!shouldTryFallback(error, hasMoreModels)) throw error;
       console.warn(`[AI] chat.completions failed on "${model}": ${error.message}. Trying fallback...`);
@@ -81,18 +85,17 @@ export async function chatCompletionsWithFallback(openai, { models, ...request }
   throw lastError;
 }
 
-export async function embeddingsWithFallback(openai, { models, ...request }) {
+export async function embeddingsWithFallback(openai, { models, operation = 'embeddings', ...request }, { budget = runWithAiBudget } = {}) {
   let lastError;
 
   for (let i = 0; i < models.length; i++) {
     const model = models[i];
     try {
-      return await openai.embeddings.create({
-        model,
-        ...request,
-      });
+      const adapted = { model, ...request };
+      return await budget({ operation, model, request: adapted, execute: () => openai.embeddings.create(adapted) });
     } catch (error) {
       lastError = error;
+      if (error.code === 'ai_budget_exceeded' || error.code === 'ai_budget_unavailable') throw error;
       const hasMoreModels = i < models.length - 1;
       if (!shouldTryFallback(error, hasMoreModels)) throw error;
       console.warn(`[AI] embeddings failed on "${model}": ${error.message}. Trying fallback...`);
@@ -102,21 +105,22 @@ export async function embeddingsWithFallback(openai, { models, ...request }) {
   throw lastError;
 }
 
-export async function probeChatModelChain(openai, models) {
+export async function probeChatModelChain(openai, models, { budget = runWithAiBudget } = {}) {
   let lastError;
 
   for (const model of models) {
     try {
-      // The same adaptation the real calls get, so the probe reports what a call would find.
-      await openai.chat.completions.create(requestFor(model, {
+      const request = requestFor(model, {
         messages: [{ role: 'user', content: 'health check' }],
         max_tokens: 1,
         temperature: 0,
-      }));
+      });
+      await budget({ operation: 'health.chat', model, request, execute: () => openai.chat.completions.create(request) });
       return buildHealthShape(models, model);
     } catch (error) {
       lastError = error;
       console.warn(`[Health] chat model probe failed on "${model}": ${error.message}`);
+      if (error.code === 'ai_budget_exceeded' || error.code === 'ai_budget_unavailable') break;
     }
   }
 
@@ -124,19 +128,18 @@ export async function probeChatModelChain(openai, models) {
   return buildHealthShape(models, null);
 }
 
-export async function probeEmbeddingModelChain(openai, models) {
+export async function probeEmbeddingModelChain(openai, models, { budget = runWithAiBudget } = {}) {
   let lastError;
 
   for (const model of models) {
     try {
-      await openai.embeddings.create({
-        model,
-        input: 'health check',
-      });
+      const request = { model, input: 'health check' };
+      await budget({ operation: 'health.embedding', model, request, execute: () => openai.embeddings.create(request) });
       return buildHealthShape(models, model);
     } catch (error) {
       lastError = error;
       console.warn(`[Health] embedding model probe failed on "${model}": ${error.message}`);
+      if (error.code === 'ai_budget_exceeded' || error.code === 'ai_budget_unavailable') break;
     }
   }
 
@@ -144,11 +147,11 @@ export async function probeEmbeddingModelChain(openai, models) {
   return buildHealthShape(models, null);
 }
 
-export async function probeAllModelChains(openai, { answerModels, auxModels, embeddingModels }) {
+export async function probeAllModelChains(openai, { answerModels, auxModels, embeddingModels }, options = {}) {
   const [answer, aux, embedding] = await Promise.all([
-    probeChatModelChain(openai, answerModels),
-    probeChatModelChain(openai, auxModels),
-    probeEmbeddingModelChain(openai, embeddingModels),
+    probeChatModelChain(openai, answerModels, options),
+    probeChatModelChain(openai, auxModels, options),
+    probeEmbeddingModelChain(openai, embeddingModels, options),
   ]);
 
   return { answer, aux, embedding };

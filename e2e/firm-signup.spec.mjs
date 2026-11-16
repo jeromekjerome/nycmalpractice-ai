@@ -8,6 +8,7 @@ async function fillStepOne(page) {
   await page.locator('#firmPhone').fill('5551234567');
   await page.locator('#attorneyName').fill('Pat Lee, Esq.');
   await page.locator('#attorneyRegistration').fill('1234567');
+  await page.locator('#termsConsent').check();
   await page.locator('button[onclick="registerFirm()"]').click();
 }
 

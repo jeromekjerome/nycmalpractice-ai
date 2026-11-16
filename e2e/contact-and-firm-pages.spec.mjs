@@ -205,7 +205,12 @@ test('firm sign-up sends its registration token with every later step, and keeps
   await page.locator('#attorneyName').fill('Pat Lee, Esq.');
   await page.locator('#attorneyRegistration').fill('1234567');
   await page.locator('button[onclick="registerFirm()"]').click();
-  await expect.poll(() => sent.register).toMatchObject({ attorneyName: 'Pat Lee, Esq.', attorneyRegistration: '1234567' });
+  // Nothing is sent until the firm agrees to the Terms.
+  await expect(page.locator('#step1Error')).toHaveText('You must agree to the Terms of Service');
+  expect(sent.register).toBeUndefined();
+  await page.locator('#termsConsent').check();
+  await page.locator('button[onclick="registerFirm()"]').click();
+  await expect.poll(() => sent.register).toMatchObject({ attorneyName: 'Pat Lee, Esq.', attorneyRegistration: '1234567', termsAccepted: true });
 
   const digits = page.locator('.otp-digit');
   for (let i = 0; i < 6; i += 1) await digits.nth(i).fill(String(i + 1));

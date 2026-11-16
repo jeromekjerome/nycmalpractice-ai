@@ -39,6 +39,16 @@
     .notice.error { background: rgba(229,92,92,0.1); border: 1px solid rgba(229,92,92,0.3); color: #e55c5c; }
     .notice.success { background: rgba(58,158,104,0.1); border: 1px solid rgba(58,158,104,0.3); color: var(--success); }
     .status-banner { padding: 1rem 1.25rem; margin-bottom: 1rem; font-size: 0.92rem; }
+    .badges { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+    .distribution-badge { display: inline-block; padding: 4px 12px; border-radius: 99px; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.75rem; }
+    .distribution-badge[hidden] { display: none; }
+    .badge-exclusive { background: rgba(58,158,104,0.15); color: #5cc98f; border: 1px solid rgba(58,158,104,0.4); }
+    .badge-shared { background: rgba(240,165,0,0.12); color: #f0a500; border: 1px solid rgba(240,165,0,0.3); }
+    .deadlines-panel { border-left: 4px solid #e55c5c; }
+    .deadlines-panel[hidden] { display: none; }
+    .deadline-item { padding: 0.65rem 0.85rem; border-radius: 8px; background: rgba(229,92,92,0.06); border: 1px solid rgba(229,92,92,0.2); margin-top: 0.6rem; }
+    .deadline-item-title { font-weight: 700; font-size: 0.85rem; color: #e55c5c; margin-bottom: 0.25rem; }
+    .deadline-item-desc { font-size: 0.8rem; color: var(--text); line-height: 1.5; }
 
     /* Compliance audit of the AI's last reply (gatekeeper.js) */
     .gate-card [hidden] { display: none; }
@@ -101,11 +111,21 @@
       <p id="loadingView" style="text-align:center;padding:3rem;color:var(--muted)">Loading lead…</p>
 
       <div id="leadView" style="display:none">
-        <span class="tier-badge" id="tierBadge"></span>
+        <div class="badges">
+          <span class="tier-badge" id="tierBadge"></span>
+          <span class="distribution-badge" id="distributionBadge" hidden></span>
+        </div>
         <h1 class="page-title" id="pageTitle">Malpractice lead</h1>
         <p class="subtitle" id="subtitle"></p>
 
         <div class="glass-panel status-banner" id="statusBanner" style="display:none"></div>
+
+        <!-- Short deadlines the client's own words point to (deadlines.js). -->
+        <section class="glass-panel panel deadlines-panel" id="deadlinesCard" hidden>
+          <h2 class="panel-title" style="color:#e55c5c">Short deadlines to check</h2>
+          <p class="note" style="margin-top:0">Flagged from the client's own words. The match is generous, so confirm it against the facts.</p>
+          <div id="deadlinesList"></div>
+        </section>
 
         <section class="glass-panel panel" id="contactPanel">
           <h2 class="panel-title">Client contact</h2>
@@ -201,6 +221,17 @@
       birth_injury: 'Birth Injury', anesthesia_error: 'Anesthesia Error', hospital_negligence: 'Hospital Negligence',
       nursing_home: 'Nursing Home Neglect', dental: 'Dental Malpractice', other: 'Medical Malpractice',
     };
+    // The deadline codes deadlines.js returns, as the firm should read them.
+    const DEADLINES = {
+      public_hospital: {
+        title: '90-day notice of claim: public hospital',
+        desc: 'The client names a hospital run by New York City, a county or the State. A written notice of claim is due within 90 days (General Municipal Law § 50-e for city and county hospitals; Court of Claims Act § 10 for State hospitals such as SUNY Downstate).',
+      },
+      federal: {
+        title: '2-year federal claim: Federal Tort Claims Act',
+        desc: 'The client names a VA or military hospital, or a community health center whose staff may be deemed federal employees (42 U.S.C. § 233). A written claim to the agency, usually on Standard Form 95, is due within 2 years (28 U.S.C. § 2401(b)), and no lawsuit can follow until the agency denies it or 6 months pass (28 U.S.C. § 2675).',
+      },
+    };
     const DIMENSIONS = [
       ['injury_severity', 'Injury severity'], ['causation_clarity', 'Causation'], ['sol_status', 'Deadline status'],
       ['expert_viability', 'Expert support'], ['damages_magnitude', 'Damages'],
@@ -245,6 +276,22 @@
       $('leadView').style.display = '';
       const info = data.leadData || {};
       $('tierBadge').textContent = `${data.tier || 'cold'} lead`;
+      // Only an auction win is exclusive: a cold lead, a re-offered one and one the operator delivers by hand can
+      // go to up to three firms, whatever its tier.
+      const exclusive = Boolean(data.auctionId);
+      $('distributionBadge').className = `distribution-badge ${exclusive ? 'badge-exclusive' : 'badge-shared'}`;
+      $('distributionBadge').textContent = exclusive ? 'Exclusive Auction Lead' : 'Shared Lead (up to 3 NY firms)';
+      $('distributionBadge').hidden = false;
+      const deadlines = (Array.isArray(info.deadlines) ? info.deadlines : []).filter(code => DEADLINES[code]);
+      $('deadlinesList').replaceChildren(...deadlines.map(code => {
+        const item = document.createElement('div');
+        item.className = 'deadline-item';
+        item.innerHTML = '<div class="deadline-item-title"></div><div class="deadline-item-desc"></div>';
+        item.querySelector('.deadline-item-title').textContent = DEADLINES[code].title;
+        item.querySelector('.deadline-item-desc').textContent = DEADLINES[code].desc;
+        return item;
+      }));
+      $('deadlinesCard').hidden = deadlines.length === 0;
       $('pageTitle').textContent = `${CASE_TYPES[data.caseType] || 'Medical Malpractice'} lead`;
       $('subtitle').textContent = data.status === 'pending'
         ? `Accept or decline within ${data.daysLeft} day${data.daysLeft === 1 ? '' : 's'}. Price paid: $${Number(data.pricePaid || 0).toFixed(2)}.`

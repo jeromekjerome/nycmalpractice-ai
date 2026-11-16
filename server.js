@@ -369,7 +369,7 @@ app.post('/api/contact', limitContact, async (req, res) => {
 // ─── Firm Registration ────────────────────────────────────────────────────────
 // Firm sign-up fields are later shown on the admin page: plain text of a sensible length. A firm name
 // never needs angle brackets, so they are refused outright.
-function signupProblem({ name, email, phone, attorneyName, attorneyRegistration }) {
+function signupProblem({ name, email, phone, attorneyName, attorneyRegistration, termsAccepted }) {
   const cleanName = typeof name === 'string' ? name.trim() : '';
   if (cleanName.length < 2 || cleanName.length > 120 || /[<>\u0000-\u001f\u007f]/.test(cleanName)) return 'Please enter the firm name (up to 120 characters).';
   const cleanEmail = typeof email === 'string' ? email.trim() : '';
@@ -379,6 +379,7 @@ function signupProblem({ name, email, phone, attorneyName, attorneyRegistration 
   const attorney = typeof attorneyName === 'string' ? attorneyName.trim() : '';
   if (attorney.length < 2 || attorney.length > 100 || /[<>\u0000-\u001f\u007f]/.test(attorney)) return "Please enter the supervising attorney's name.";
   if (!/^\d{6,8}$/.test(registrationNumber(attorneyRegistration))) return "Please enter the supervising attorney's New York registration number (7 digits).";
+  if (termsAccepted !== true && termsAccepted !== 'true') return 'You must agree to the Terms of Service to register.';
   return null;
 }
 
@@ -390,12 +391,14 @@ function escapeHtml(value) {
 }
 
 app.post('/api/firms/register', limitSignup, async (req, res) => {
-  const { name, email, phone, attorneyName, attorneyRegistration } = req.body;
+  const { name, email, phone, attorneyName, attorneyRegistration, termsAccepted } = req.body;
   if (!name || !email || !phone) return res.status(400).json({ error: 'name, email, phone required' });
-  const problem = signupProblem({ name, email, phone, attorneyName, attorneyRegistration });
+  const problem = signupProblem({ name, email, phone, attorneyName, attorneyRegistration, termsAccepted });
   if (problem) return res.status(400).json({ error: problem });
   try {
-    const { firm, isNew } = await registerFirm({ name, email, phone, attorneyName: attorneyName.trim(), attorneyRegistration: registrationNumber(attorneyRegistration) });
+    const { firm, isNew } = await registerFirm({
+      name, email, phone, attorneyName: attorneyName.trim(), attorneyRegistration: registrationNumber(attorneyRegistration), termsAccepted: true,
+    });
     if (!isNew) {
       // An existing firm signs in through the link emailed to it, never through this form: otherwise
       // anyone who knew a firm's email could change its profile or billing. The page offers to email the link.
@@ -547,6 +550,15 @@ app.post('/api/webhooks/stripe', async (req, res) => {
           }
           await updateFirmSubscription(firmId, { stripeSubscriptionId: session.subscription, stripePaymentMethodId: details.paymentMethodId, stripeCustomerId, status: details.status });
           console.log(`Firm ${firmId} subscription activated`);
+          // Once per subscription: Stripe can send the same event more than once.
+          if (firm?.email && firm.stripe_subscription_id !== session.subscription && (details.status === 'active' || details.status === 'trialing')) {
+            try {
+              const token = await createMagicLink(firmId, { expiresInHours: 720 });
+              await sendFirmWelcomeEmail(firm, `${APP_URL}/portal.html?token=${token}`);
+            } catch (err) {
+              console.error(`Welcome email to firm ${firmId} failed:`, err.message);
+            }
+          }
         } else {
           console.error(`Checkout session ${session.id} names no firm; subscription ${session.subscription} not activated`);
         }
@@ -638,6 +650,8 @@ app.get('/api/leads/:id', async (req, res) => {
     // A cold lead has no auction: the lead row keeps what the firm bought.
     fullData = { ...lead.lead_data, tier: lead.tier };
   }
+  // Leads stored before deadlines travelled with them get theirs from the conversation.
+  if (fullData && !fullData.deadlines && Array.isArray(fullData.history)) fullData.deadlines = deadlineNotices(fullData.history);
   const daysLeft     = Math.max(0, Math.ceil((new Date(lead.accept_deadline) - new Date()) / (1000 * 60 * 60 * 24)));
   // The same 30-day count declineLead uses, so the policy shown is the one applied.
   const recent       = await recentDeclineCounts(tokenData.firm_id);
@@ -647,7 +661,7 @@ app.get('/api/leads/:id', async (req, res) => {
   const declinePolicy = isAuction
     ? (auctionCount === 1 ? { refundPct: 50, message: '50% refund' } : auctionCount === 2 ? { refundPct: 25, message: '25% refund' } : { refundPct: 0, message: 'No refund + 30-day suspension' })
     : (coldCount <= 3 ? { refundPct: 100, message: 'Full refund' } : { refundPct: 50, message: '50% refund' });
-  res.json({ id: lead.id, status: lead.status, caseType: lead.case_type, tier: lead.tier, pricePaid: parseFloat(lead.price_paid), acceptDeadline: lead.accept_deadline, daysLeft, leadData: fullData, declinePolicy });
+  res.json({ id: lead.id, status: lead.status, caseType: lead.case_type, tier: lead.tier, auctionId: lead.auction_id, pricePaid: parseFloat(lead.price_paid), acceptDeadline: lead.accept_deadline, daysLeft, leadData: fullData, declinePolicy });
 });
 
 app.post('/api/leads/:id/accept', async (req, res) => {
@@ -748,7 +762,19 @@ app.get('/api/admin/firms', async (req, res) => {
 app.patch('/api/admin/firms/:id', async (req, res) => {
   if (!requireAdmin(req, res)) return;
   const { active, approved, specializations, serviceArea, contactName } = req.body;
-  if (typeof approved === 'boolean') await approveFirm(req.params.id, approved);
+  if (typeof approved === 'boolean') {
+    const firmBefore = await getFirm(req.params.id);
+    await approveFirm(req.params.id, approved);
+    // Told once, when first approved.
+    if (approved && !firmBefore?.approved_at && firmBefore?.email) {
+      try {
+        const token = await createMagicLink(req.params.id, { expiresInHours: 720 });
+        await sendFirmApprovalEmail(firmBefore, `${APP_URL}/portal.html?token=${token}`);
+      } catch (err) {
+        console.error(`Approval email to firm ${req.params.id} failed:`, err.message);
+      }
+    }
+  }
   if (typeof active === 'boolean') await sql`UPDATE firms SET active = ${active} WHERE id = ${req.params.id}`;
   if (specializations !== undefined || serviceArea !== undefined || contactName !== undefined) await updateFirmProfile(req.params.id, { specializations, serviceArea, contactName });
   res.json({ ok: true });
@@ -897,6 +923,7 @@ function leadDataFrom(conv, contact) {
   return {
     caseType: conv.case_type, mode: conv.mode, history: conv.history,
     preview: score.preview, score: score.score, dimensions: score.dimensions, scoredAt: score.scoredAt || null,
+    deadlines: deadlineNotices(conv.history),
     // The exact consent travels with the lead, which is kept for 3 years: the conversation that also records
     // it is deleted after 90 days.
     contact,
@@ -921,6 +948,20 @@ async function sendPortalLinkEmail(firm, url) {
   const html = `<div style="font-family:sans-serif;max-width:580px;margin:auto"><h2 style="color:#9e3a5a">Your MalpracticeAI Firm Portal</h2><p>Hi ${firm.name},</p><p>Use the link below to access your firm portal.</p><p style="margin:1.5rem 0"><a href="${url}" style="background:#9e3a5a;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600">Access Your Portal →</a></p><p style="color:#999;font-size:12px">Valid for 30 days. Do not share.</p></div>`;
   if (!t) { console.log(`[EMAIL MOCK] Portal link → ${firm.email}: ${url}`); return; }
   await t.sendMail({ from: process.env.SMTP_USER, to: firm.email, subject: 'Your MalpracticeAI Firm Portal Access Link', html });
+}
+
+async function sendFirmApprovalEmail(firm, url) {
+  const t    = getTransporter();
+  const html = `<div style="font-family:sans-serif;max-width:580px;margin:auto"><h2 style="color:#9e3a5a">Your NYCMalpractice.ai firm account is approved</h2><p>Hi ${escapeHtml(firm.name)},</p><p>We have checked your supervising attorney's New York registration, and your firm account is approved.</p><p>Once your subscription is active, matching leads and auction invitations reach you by email and in your firm portal. You can set your practice areas there.</p><p style="margin:1.5rem 0"><a href="${url}" style="background:#9e3a5a;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600">Open your firm portal →</a></p><p style="color:#999;font-size:12px">This link is valid for 30 days. Do not share it.</p></div>`;
+  if (!t) { console.log(`[EMAIL MOCK] Firm approval email → ${firm.email}: ${url}`); return; }
+  await t.sendMail({ from: process.env.SMTP_USER, to: firm.email, subject: 'Your NYCMalpractice.ai firm account is approved', html });
+}
+
+async function sendFirmWelcomeEmail(firm, url) {
+  const t    = getTransporter();
+  const html = `<div style="font-family:sans-serif;max-width:580px;margin:auto"><h2 style="color:#9e3a5a">Welcome to NYCMalpractice.ai</h2><p>Hi ${escapeHtml(firm.name)},</p><p>Thank you for subscribing. Your $199 a month subscription is active.</p><p>Before any lead is sent, we check your supervising attorney's registration with the New York court system. If that is not done yet, you will get an approval email when it is, and leads start then.</p><p style="margin:1.5rem 0"><a href="${url}" style="background:#9e3a5a;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600">Open your firm portal →</a></p><p style="color:#999;font-size:12px">This link is valid for 30 days. You can change your card or subscription under Billing in your portal.</p></div>`;
+  if (!t) { console.log(`[EMAIL MOCK] Firm welcome email → ${firm.email}: ${url}`); return; }
+  await t.sendMail({ from: process.env.SMTP_USER, to: firm.email, subject: 'Welcome to NYCMalpractice.ai: subscription confirmed', html });
 }
 
 // ─── Cron Endpoints ───────────────────────────────────────────────────────────

@@ -21,7 +21,7 @@
         "marked": "^15.0.0",
         "node-cron": "^4.2.1",
         "nodemailer": "^10.5.0",
-        "openai": "^6.27.0",
+        "openai": "^7.57.0",
         "stripe": "^17.7.0",
         "twilio": "^5.13.1"
     },

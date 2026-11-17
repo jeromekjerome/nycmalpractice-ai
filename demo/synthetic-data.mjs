@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Jerome W. Dewald. All rights reserved.
-// Proprietary and confidential. See LICENSE for terms.
+// Source available for evaluation only; see LICENSE.
 
 // Synthetic people for the demo copy of the site. Every name, number and story here is invented:
 //   - phone numbers are in 555-0100..0199, which North America reserves for fiction;

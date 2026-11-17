@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Jerome W. Dewald. All rights reserved.
-// Proprietary and confidential. See LICENSE for terms.
+// Source available for evaluation only; see LICENSE.
 
 // Plays synthetic patients and families (PERSONAS in demo/synthetic-data.mjs) through the demo site's real chat,
 // one message at a time, then sends the contact form for each, so new leads reach the synthetic firms the way a

@@ -1,23 +1,52 @@
-Copyright (c) 2026 Jerome W. Dewald. All rights reserved.
+NYCMalpractice.ai — Source-Available Evaluation License
 
-PROPRIETARY SOFTWARE LICENSE
+Copyright (c) 2026 Jerome W. Dewald, doing business as AI Strategies NYC.
+All rights reserved.
 
-This software and associated documentation files (the "Software") are the
-exclusive property of Jerome W. Dewald ("Owner"). All rights reserved.
+The source code, documentation, prompts, rubrics and other files in this
+repository (the "Software") are made available so that others can read and
+evaluate the work. Making them visible does not license them for any other use.
 
-RESTRICTIONS:
-- You may not copy, modify, merge, publish, distribute, sublicense, or sell
-  copies of the Software.
-- You may not reverse engineer, decompile, or disassemble the Software.
-- You may not use the Software for commercial purposes without express written
-  permission from the Owner.
+1. WHAT YOU MAY DO
 
-PERMITTED USE:
-- The Owner grants permission to authorized personnel to run and maintain
-  this Software solely for its intended purpose on authorized infrastructure.
+   You may view the Software, and download and run it privately, solely to
+   evaluate the author's work, for example as part of reviewing a job or
+   contract application. You may visit the published demonstration site.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED. IN NO EVENT SHALL THE OWNER BE LIABLE FOR ANY CLAIM, DAMAGES, OR
-OTHER LIABILITY ARISING FROM THE USE OF THE SOFTWARE.
+2. WHAT YOU MAY NOT DO WITHOUT THE OWNER'S PRIOR WRITTEN PERMISSION
 
-For licensing inquiries: hello@jwd.nyc
+   - copy, modify, adapt, translate or create derivative works of the Software,
+     in whole or in part, other than the private copy needed for evaluation;
+   - publish, distribute, sublicense, sell, rent or otherwise make the Software
+     available to anyone else;
+   - deploy or operate the Software, or any service based on it, for any
+     production or commercial purpose;
+   - use the Software, its prompts, rubrics or design to build or improve a
+     competing product or service;
+   - use the Software to train, fine-tune or evaluate a machine-learning model;
+   - remove or alter any copyright, license or attribution notice.
+
+3. NAMES
+
+   This license grants no right to use the names "NYCMalpractice.ai",
+   "NYCInjury.ai", "AI Strategies NYC" or any related name or logo.
+
+4. OTHER PEOPLE'S WORK
+
+   Third-party packages the Software depends on are governed by their own
+   licenses. Court opinions retrieved from CourtListener and statutes cited by
+   the Software are public; this license claims no rights in them.
+
+5. NO WARRANTY
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED. IN NO EVENT SHALL THE OWNER BE LIABLE FOR ANY CLAIM, DAMAGES OR
+   OTHER LIABILITY ARISING FROM THE SOFTWARE OR ITS USE. THE SOFTWARE DOES NOT
+   PROVIDE LEGAL ADVICE.
+
+6. TERMINATION
+
+   Any use outside section 1 ends your permission under this license
+   automatically.
+
+Licensing inquiries: hello@jwd.nyc

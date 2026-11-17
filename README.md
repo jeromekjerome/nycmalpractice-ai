@@ -202,4 +202,6 @@ Set all environment variables in the Vercel dashboard. The nightly job (`/api/cr
 
 ## License
 
-Proprietary. Copyright © 2026 Jerome W. Dewald. All rights reserved. See [LICENSE](LICENSE).
+Source available for evaluation only. Copyright © 2026 Jerome W. Dewald, doing business as AI Strategies NYC.
+All rights reserved: you may read and privately run this code to evaluate the work, and nothing else without written
+permission. See [LICENSE](LICENSE).

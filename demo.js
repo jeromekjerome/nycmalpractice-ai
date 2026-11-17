@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Jerome W. Dewald. All rights reserved.
-// Proprietary and confidential. See LICENSE for terms.
+// Source available for evaluation only; see LICENSE.
 
 // The demo copy of the site (DEMO_MODE=1) runs on its own database of synthetic patients, families, firms and
 // auctions (demo/seed.mjs). Nothing in it may reach a real person, so every email and text it would send is

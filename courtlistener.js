@@ -291,8 +291,8 @@ export async function extractCaseType(text, openai) {
         content: `Classify this NYC malpractice inquiry into one category.
 
 Categories:
-- surgical_error: surgical errors, wrong-site surgery, operating room negligence
-- misdiagnosis: failure to diagnose, delayed diagnosis, missed diagnosis, misread imaging
+- surgical_error: surgical errors, wrong-site surgery, operating room negligence, and any object left in the body during surgery or a procedure (sponge, instrument, needle, guidewire, catheter piece), even when it was found later on a scan
+- misdiagnosis: failure to diagnose, delayed diagnosis, missed diagnosis, misread imaging of an illness or condition (not an object left in the body)
 - medication_error: wrong drug, wrong dose, prescription errors, pharmacy errors
 - birth_injury: birth injuries, cerebral palsy, Erb's palsy, obstetric malpractice
 - anesthesia_error: anesthesia complications, awareness under anesthesia

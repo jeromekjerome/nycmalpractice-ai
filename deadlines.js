@@ -6,6 +6,9 @@
 // own words name one, the page shows that deadline beside the reply. Only the visitor's messages are
 // read, because the replies themselves name Bellevue as an example. A false alarm costs a sentence of
 // reading; a missed one can cost the claim, so the names are matched generously.
+// A kind of hospital the visitor says it was not ("private, not a city hospital", "it wasn't state-run") is not
+// matched: the generous match used to warn of a 90-day notice for exactly the hospital the visitor ruled out.
+const NOT_SAID = "(?<!(?:\\bnot|n['’]t|\\bnever)\\s+(?:(?:at|in|to)\\s+)?(?:(?:a|an|the)\\s+)?)";
 const PUBLIC_HOSPITAL_NAMES = [
   'nyc\\s*health\\s*(?:\\+|and|&)\\s*hospitals', 'health\\s*(?:\\+|and|&)\\s*hospitals', 'h\\s*\\+\\s*h', 'hhc',
   'bellevue', 'kings\\s+county\\s+(?:hospital|medical)', 'elmhurst', 'jacobi', 'harlem\\s+hospital',
@@ -15,7 +18,7 @@ const PUBLIC_HOSPITAL_NAMES = [
   'carter\\s+(?:specialty|hospital|rehab)', 'gotham\\s+health',
   'suny\\s+downstate', 'downstate\\s+(?:medical|hospital|health)', 'university\\s+hospital\\s+of\\s+brooklyn', 'stony\\s+brook\\s+(?:university|hospital|medicine)',
   'suny\\s+upstate', 'upstate\\s+(?:university|medical)', 'nassau\\s+university\\s+medical', 'erie\\s+county\\s+medical', 'westchester\\s+medical\\s+center',
-  '(?:public|city|municipal|county|state)[\\s-]+(?:run\\s+)?(?:hospital|clinic|nursing\\s+home)', '(?:city|county|state)[\\s-]+run',
+  NOT_SAID + '(?:public|city|municipal|county|state)[\\s-]+(?:run\\s+)?(?:hospital|clinic|nursing\\s+home)', NOT_SAID + '(?:city|county|state)[\\s-]+run',
 ];
 const PUBLIC_HOSPITAL = new RegExp('(?<![\\p{L}\\p{N}])(?:' + PUBLIC_HOSPITAL_NAMES.join('|') + ')(?![\\p{L}\\p{N}])', 'iu');
 

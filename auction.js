@@ -242,7 +242,7 @@ export async function deliverColdLead(sessionId, caseType, scoreData, leadData, 
     if (delivered + uncertain >= maxFirms) break;
     // Charged first: a firm whose card is missing or declined does not get the lead, and the next one is tried.
     const key = `cold-${sessionId}-${firm.id}`;
-    const charge = await chargeFirm(firm, TIER_CONFIG.cold.reserve, `Cold malpractice lead — ${caseType}`, { sessionId, firmId: String(firm.id) }, key);
+    const charge = await chargeFirm(firm, TIER_CONFIG.cold.reserve, `Cold malpractice lead — ${caseTypeLabel(caseType)}`, { sessionId, firmId: String(firm.id) }, key);
     if (charge.status === 'unknown') {
       await notifyOperator(`Cold lead: charge to firm ${firm.id} has an unknown outcome`,
         `<p>Stripe did not confirm or refuse the $${TIER_CONFIG.cold.reserve} charge to firm ${escapeHtml(firm.id)} for a cold lead (session ${escapeHtml(sessionId)}, idempotency key ${escapeHtml(charge.key || key)}). The firm was not sent the lead. Check Stripe, then deliver the lead or refund the charge by hand.</p>`);
@@ -513,7 +513,7 @@ export async function closeAuction(auctionId) {
     if (firm.suspended_until && new Date(firm.suspended_until) > new Date()) continue;
     const amount = parseFloat(bid.amount);
     const key = `auction-${auctionId}-${firm.id}`;
-    const charge = await chargeFirm(firm, amount, `Malpractice lead auction — ${auction.tier} / ${auction.case_type}`,
+    const charge = await chargeFirm(firm, amount, `Malpractice lead auction — ${TIER_CONFIG[auction.tier]?.label || auction.tier}, ${caseTypeLabel(auction.case_type)}`,
       { auctionId: String(auctionId), firmId: String(firm.id) }, key);
     if (charge.status === 'unknown') {
       await notifyOperator(`Auction #${auctionId}: charge to firm ${firm.id} has an unknown outcome`,
@@ -761,7 +761,7 @@ export async function deliverLeadByHand({ sessionId, firmId, price, type, leadDa
   // The price is in the key, so delivering again at another price is a new charge rather than one Stripe refuses.
   const key = `manual-${sessionId}-${firm.id}-${Math.round(price * 100)}`;
   if (price > 0) {
-    const charge = await chargeFirm(firm, price, `Malpractice lead delivered by the operator — ${type || 'other'}`, { sessionId, firmId: String(firm.id) }, key);
+    const charge = await chargeFirm(firm, price, `Malpractice lead delivered by the operator — ${caseTypeLabel(type)}`, { sessionId, firmId: String(firm.id) }, key);
     if (charge.status === 'unknown') return { ok: false, status: 502, error: `Stripe did not confirm the charge (idempotency key ${charge.key || key}). Check Stripe before trying again.` };
     if (charge.status !== 'charged') return { ok: false, status: 402, error: `The firm could not be charged: ${charge.reason}` };
     chargeId = charge.id;
@@ -821,7 +821,7 @@ async function sendLeadDeliveryEmail(firm, leadId, token, leadData, scoreData, t
   const t          = getTransporter();
   const html = `<div style="font-family:sans-serif;max-width:640px;margin:auto"><h2 style="color:#9e3a5a">✅ New Malpractice Lead — ${tierConfig.label}</h2><p>You have <strong>3 days</strong> to accept or decline.</p><p>Amount charged: $${Number(amountCharged ?? tierConfig.reserve).toFixed(2)}</p><p><strong>Preview:</strong><br>${escapeHtml(scoreData.lead_preview || scoreData.preview || '')}</p><p><a href="${url}" style="background:#9e3a5a;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600">View Lead →</a></p></div>`;
   if (!t) { console.log(`[EMAIL MOCK] Lead delivery → ${firm.email}`); return; }
-  await t.sendMail({ from: process.env.SMTP_USER, to: firm.email, subject: `✅ New Malpractice Lead: ${tierConfig.label} — ${data?.caseType || 'Medical Malpractice'}`, html });
+  await t.sendMail({ from: process.env.SMTP_USER, to: firm.email, subject: `✅ New Malpractice Lead: ${tierConfig.label} — ${caseTypeLabel(data?.caseType)}`, html });
 }
 
 async function notifyAllFirms(auction) {

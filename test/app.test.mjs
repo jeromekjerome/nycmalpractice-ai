@@ -4935,3 +4935,52 @@ test('every page says when it is the demo copy, and only the live site reports t
   assert.match(banner, /fetch\('\/api\/site-mode'\)/);
   assert.match(readFileSync(new URL('../blog-server.js', import.meta.url), 'utf8'), /process\.env\.CANONICAL_URL/);
 });
+
+// ─── What the demo's persona run showed ───────────────────────────────────────
+
+test('a hospital the visitor says was not public raises no 90-day notice, and one that was still does', () => {
+  const say = text => deadlineNotices([{ role: 'user', content: text }]);
+  for (const text of ['The hospital is private, not a city hospital.', "It wasn't a state hospital, it was NYU Langone.",
+    'The clinic is not city-run.', 'It was never at a public hospital, always private.']) {
+    assert.deepEqual(say(text), [], text);
+  }
+  for (const text of ['It was a city hospital in the Bronx.', 'I was treated at Bellevue.', 'They moved me to a county hospital.',
+    'Not the ER doctor, the surgeon at the city hospital.']) {
+    assert.deepEqual(say(text), ['public_hospital'], text);
+  }
+});
+
+test('an object left in the body is classified as a surgical error, not a missed diagnosis', () => {
+  const source = readFileSync(new URL('../courtlistener.js', import.meta.url), 'utf8');
+  assert.match(source, /- surgical_error: [^\n]*object left in the body[^\n]*guidewire/);
+  assert.match(source, /- misdiagnosis: [^\n]*\(not an object left in the body\)/);
+});
+
+test('firms read plain case labels in lead emails and on Stripe receipts, never internal codes', async () => {
+  const { deliverColdLead } = await import('../auction.js');
+  const sql = [];
+  const charges = [];
+  const handler = async (url, init) => {
+    if (url.includes('/v1/payment_intents')) {
+      charges.push(new URLSearchParams(String(init.body)));
+      return jsonResponse({ id: 'pi_ok', object: 'payment_intent', status: 'succeeded' });
+    }
+    const { query, params } = JSON.parse(init.body);
+    const q = query.replace(/\s+/g, ' ').trim();
+    sql.push({ query: q, params });
+    if (/FROM firms WHERE active/.test(q)) {
+      return rowsResponse([['id', INT], ['name', TEXT], ['email', TEXT], ['stripe_customer_id', TEXT], ['stripe_payment_method_id', TEXT]],
+        [['1', 'Hartwell & Ocampo LLP', 'intake@hartwell.example', 'cus_1', 'pm_1']]);
+    }
+    if (/^INSERT INTO leads/.test(q)) return rowsResponse([['id', INT]], [['801']], 'INSERT');
+    return jsonResponse(EMPTY_ROWS);
+  };
+  await withSettings({ DEMO_MODE: '1' }, () => capturingLogs(() => withOutboundHttp(handler,
+    () => deliverColdLead('sess-labels', 'surgical_error', { score: 60, tier: 'cold' }, { caseType: 'surgical_error', preview: 'A preview.' }))));
+  assert.equal(charges[0].get('description'), 'Cold malpractice lead — surgical error');
+  const email = sql.find(call => /^INSERT INTO demo_outbox/.test(call.query) && /New Malpractice Lead/.test(call.params[2]));
+  assert.ok(email, 'the lead email was not sent');
+  assert.equal(email.params[2], '✅ New Malpractice Lead: Cold — surgical error');
+  const source = readFileSync(new URL('../auction.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /chargeFirm\([^)]*\$\{(?:caseType|auction\.case_type|type \|\| 'other')\}/, 'a charge description still shows the raw case type');
+});

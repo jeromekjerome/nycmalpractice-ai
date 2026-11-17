@@ -9,7 +9,9 @@ import { securityHeaders } from './security-headers.js';
 const app = express();
 app.use(securityHeaders);
 const BRAND    = process.env.BLOG_BRAND || process.env.APP_BRAND || 'NYCMalpractice.ai';
-const BASE_URL = APP_URL;
+// Links and canonical addresses name the live site. The demo copy (demo.js) sets CANONICAL_URL to it, so search
+// engines treat the live pages as the originals.
+const BASE_URL = (process.env.CANONICAL_URL || APP_URL).replace(/\/+$/, '');
 
 app.get('/sitemap.xml', (_req, res) => {
   res.type('application/xml').send(sitemapXML(getBlogPosts(), BASE_URL));

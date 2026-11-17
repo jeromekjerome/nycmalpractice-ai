@@ -1,10 +1,13 @@
 // Copyright (c) 2026 Jerome W. Dewald. All rights reserved.
 import Stripe from 'stripe';
 import { APP_URL, APP_ID } from './site.js';
+import { isDemo } from './demo.js';
 
 // Requests go through fetch, so the tests can answer them offline.
 let client = null;
 function getStripe() {
+  // The demo copy charges synthetic firms with Stripe's test cards only.
+  if (isDemo() && /^(sk|rk)_live_/.test(process.env.STRIPE_SECRET_KEY || '')) throw new Error('The demo refuses a live Stripe key; use a test key (sk_test_...).');
   client ||= new Stripe(process.env.STRIPE_SECRET_KEY, { httpClient: Stripe.createFetchHttpClient() });
   return client;
 }

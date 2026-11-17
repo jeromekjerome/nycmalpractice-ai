@@ -77,3 +77,18 @@ test("the portal opens every lead, shows refunds, answers and this month's total
   await expect(page).toHaveURL(/\/auction\.html\?id=9&token=fresh-token$/);
   expect(linkFor).toEqual({ token: 'portal-token', auctionId: '9' });
 });
+
+test('the demo copy says so on every page, and the live configuration shows nothing', async ({ page }) => {
+  // This server is not the demo: the page asks, hears no, and shows nothing.
+  const answered = page.waitForResponse(res => new URL(res.url()).pathname === '/api/site-mode');
+  await page.goto('/terms.html');
+  expect(await (await answered).json()).toEqual({ demo: false });
+  await expect(page.locator('#demoBanner')).toHaveCount(0);
+
+  await page.route(url => url.pathname === '/api/site-mode', route => route.fulfill(json({ demo: true })));
+  for (const path of ['/terms.html', '/register.html', '/blog']) {
+    await page.goto(path, { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('#demoBanner'), path).toContainText('every patient, family, firm and charge here is synthetic');
+    await expect(page.locator('#demoBanner a')).toHaveAttribute('href', '/demo/outbox');
+  }
+});

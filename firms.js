@@ -6,10 +6,12 @@ import crypto from 'crypto';
 import twilio from 'twilio';
 import nodemailer from 'nodemailer';
 import { PRACTICE_AREAS } from './site.js';
+import { isDemo, demoMailer, demoTexter } from './demo.js';
 
 const sql = neon(process.env.DATABASE_URL);
 
 function getTransporter() {
+  if (isDemo()) return demoMailer;   // the demo copy keeps its mail in the demo outbox
   if (!process.env.SMTP_USER) return null;
   return nodemailer.createTransport({
     host: process.env.SMTP_HOST || 'mail.jwd.nyc', port: parseInt(process.env.SMTP_PORT || '465'), secure: true,
@@ -19,6 +21,7 @@ function getTransporter() {
 }
 
 function twilioClient() {
+  if (isDemo()) return demoTexter;   // and its texts
   if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN) return null;
   return twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 }

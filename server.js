@@ -20,6 +20,7 @@ import { mentionsPublicHospital, deadlineNotices } from './deadlines.js';
 import { buildSummaryEmail } from './summary.js';
 import { toPublicEvaluation, isHitlVerificationComplete, HITL_ATTESTATION_KEYS, loadRubric, loadCurrentLawNotes } from './gatekeeper.js';
 import blogApp from './blog-server.js';
+import { isDemo, demoMailer, outboxMessages, outboxPage } from './demo.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -50,6 +51,8 @@ let modelHealthRefreshPromise = null;
 // Standard browser protections on every response (security-headers.js). The API no longer answers other
 // websites: the open CORS policy let any site call it, and the pages call it from this site.
 app.use(securityHeaders);
+// The demo copy (demo.js) is kept out of search results; its pages name the live site as the original.
+app.use((_req, res, next) => { if (isDemo()) res.set('X-Robots-Tag', 'noindex, nofollow'); next(); });
 app.use('/api/webhooks/stripe', express.raw({ type: 'application/json' }));
 app.use(express.json());
 app.use(express.static(join(__dirname, 'public')));
@@ -979,6 +982,7 @@ function leadDataFrom(conv, contact) {
 }
 
 function getTransporter() {
+  if (isDemo()) return demoMailer;   // the demo copy keeps its mail in the demo outbox
   if (!process.env.SMTP_USER) return null;
   return nodemailer.createTransport({
     host: process.env.SMTP_HOST || 'mail.jwd.nyc', port: parseInt(process.env.SMTP_PORT || '465'), secure: true, auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
@@ -1088,6 +1092,19 @@ function gatekeeperHealth() {
     return 'rubrics_unavailable';
   }
 }
+
+// Whether this is the demo copy: the pages ask (site-mode.js), on any host but the live site, and say so.
+app.get('/api/site-mode', (_req, res) => res.json({ demo: isDemo() }));
+
+// The emails and texts the demo copy would have sent. Only the demo has one.
+app.get('/demo/outbox', async (req, res) => {
+  if (!isDemo()) return res.status(404).send('Not found');
+  try {
+    res.type('html').send(outboxPage(await outboxMessages(100)));
+  } catch (err) {
+    serverError(req, res, err);
+  }
+});
 
 app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'malpractice-ai', gatekeeper: gatekeeperHealth() }));
 // For an uptime monitor: the database, its columns and the nightly job (operations.js). 503 when any is wrong.

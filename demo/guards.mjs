@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Jerome W. Dewald. All rights reserved.
-// Proprietary and confidential. See LICENSE for terms.
+// Source available for evaluation only; see LICENSE.
 
 // What keeps the demo tools away from real people. The seed writes only to a database that is not the live one and
 // is empty or already marked as the demo; the persona runner talks only to a site that says it is the demo copy.

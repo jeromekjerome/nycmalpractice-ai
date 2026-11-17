@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Jerome W. Dewald. All rights reserved.
-// Proprietary and confidential. See LICENSE for terms.
+// Source available for evaluation only; see LICENSE.
 
 // citator.js — Deterministic legal citation & authority verifier.
 //

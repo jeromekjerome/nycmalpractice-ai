@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Jerome W. Dewald. All rights reserved.
-// Proprietary and confidential. See LICENSE for terms.
+// Source available for evaluation only; see LICENSE.
 
 // Fills the demo database with synthetic firms, conversations, auctions and leads (demo/synthetic-data.mjs), so the
 // demo copy of the site can be shown end to end without a real patient or a real firm in it.

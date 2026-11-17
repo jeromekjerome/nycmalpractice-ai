@@ -4767,3 +4767,171 @@ test('the auction page confirms the amount before a binding bid, and the portal 
   assert.match(portal, /\/api\/portal\/auction-link/);
   assert.match(portal, /<th>Refund<\/th>/);
 });
+
+// ─── The demo copy (demo.js, demo/) ───────────────────────────────────────────
+
+// Runs fn with DEMO_MODE (and any other settings) set, then puts them back.
+async function withSettings(settings, fn) {
+  const saved = Object.fromEntries(Object.keys(settings).map(key => [key, process.env[key]]));
+  Object.assign(process.env, settings);
+  try {
+    return await fn();
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  }
+}
+
+test('the demo copy keeps every email and text in its outbox and sends none', async () => {
+  const { sendVerificationCode } = await import('../firms.js');
+  const sql = [];
+  const handler = async (url, init) => {
+    const { query, params } = JSON.parse(init.body);
+    const q = query.replace(/\s+/g, ' ').trim();
+    sql.push({ query: q, params });
+    if (/^SELECT phone FROM firms WHERE id/.test(q)) return rowsResponse([['phone', TEXT]], [['+12125550101']]);
+    if (/FROM firms WHERE id/.test(q)) return rowsResponse([['id', INT], ['name', TEXT], ['email', TEXT], ['approved_at', TIMESTAMPTZ]], [['7', 'Hartwell & Ocampo LLP', 'intake@hartwell.example', null]]);
+    if (/^UPDATE firms SET approved_at/.test(q)) return rowsResponse([['id', INT], ['name', TEXT]], [['7', 'Hartwell & Ocampo LLP']]);
+    return jsonResponse(EMPTY_ROWS);
+  };
+  const server = await startServer(app);
+  try {
+    await withSettings({ DEMO_MODE: '1', TWILIO_ACCOUNT_SID: 'AC_test', TWILIO_AUTH_TOKEN: 'secret' }, () => withOutboundHttp(handler, async () => {
+      assert.equal(await sendVerificationCode(7), true);
+      const res = await fetch(`${server.baseUrl}/api/admin/firms/7`, {
+        method: 'PATCH', headers: { 'content-type': 'application/json', 'x-admin-secret': process.env.ADMIN_SECRET }, body: JSON.stringify({ approved: true }),
+      });
+      assert.equal(res.status, 200);
+    }));
+  } finally {
+    await server.close();
+  }
+  const outbox = sql.filter(call => /^INSERT INTO demo_outbox/.test(call.query));
+  const text = outbox.find(call => call.params[0] === 'sms');
+  assert.ok(text, 'the verification code was not kept in the outbox');
+  assert.equal(text.params[1], '+12125550101');
+  const code = sql.find(call => /^INSERT INTO phone_codes/.test(call.query)).params[1];
+  assert.ok(text.params[3].includes(code), 'the text in the outbox is not the code that was stored');
+  const email = outbox.find(call => call.params[0] === 'email');
+  assert.ok(email, 'the approval email was not kept in the outbox');
+  assert.deepEqual([email.params[1], email.params[2]], ['intake@hartwell.example', 'Your NYCMalpractice.ai firm account is approved']);
+  assert.match(email.params[3], /portal\.html\?token=/);
+  assert.ok(sql.some(call => /^CREATE TABLE IF NOT EXISTS demo_outbox/.test(call.query)));
+});
+
+test('the demo routes exist only in the demo copy, which keeps out of search results', async () => {
+  const handler = async (url, init) => {
+    const q = JSON.parse(init.body).query.replace(/\s+/g, ' ').trim();
+    if (/FROM demo_outbox ORDER BY/.test(q)) {
+      return rowsResponse([['id', INT], ['channel', TEXT], ['recipient', TEXT], ['subject', TEXT], ['body', TEXT], ['created_at', TIMESTAMPTZ]], [
+        ['2', 'email', 'intake@hartwell.example', 'Outbid <b>now</b>', '<p>Bid again: <a href="https://demo.example/auction.html?id=9&token=t">link</a></p><script>alert(1)</script>', '2026-11-16 20:00:00+00'],
+        ['1', 'sms', '+12125550101', null, 'Your MalpracticeAI verification code: 123456', '2026-11-16 19:00:00+00'],
+      ]);
+    }
+    return jsonResponse(EMPTY_ROWS);
+  };
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(handler, async () => {
+      const live = await fetch(`${server.baseUrl}/api/site-mode`);
+      assert.deepEqual(await live.json(), { demo: false });
+      assert.equal(live.headers.get('x-robots-tag'), null);
+      assert.equal((await fetch(`${server.baseUrl}/demo/outbox`)).status, 404);
+
+      await withSettings({ DEMO_MODE: '1' }, async () => {
+        const demo = await fetch(`${server.baseUrl}/api/site-mode`);
+        assert.deepEqual(await demo.json(), { demo: true });
+        assert.equal(demo.headers.get('x-robots-tag'), 'noindex, nofollow');
+        const page = await fetch(`${server.baseUrl}/demo/outbox`);
+        assert.equal(page.status, 200);
+        const html = await page.text();
+        // An email is shown in a frame that runs no scripts; its subject is text, not markup.
+        assert.match(html, /<iframe sandbox="allow-popups allow-popups-to-escape-sandbox" srcdoc="/);
+        assert.doesNotMatch(html, /<script>alert/);
+        assert.match(html, /Outbid &lt;b&gt;now&lt;\/b&gt;/);
+        assert.match(html, /Your MalpracticeAI verification code: 123456/);
+      });
+    });
+  } finally {
+    await server.close();
+  }
+});
+
+test('the demo copy refuses a live Stripe key', async () => {
+  const { chargeCustomer } = await import('../stripe.js');
+  await withSettings({ DEMO_MODE: '1', STRIPE_SECRET_KEY: 'sk_live_not_a_real_key' }, async () => {
+    await assert.rejects(chargeCustomer({ stripeCustomerId: 'cus_1', paymentMethodId: 'pm_1', amountDollars: 25, description: 'demo' }), /live Stripe key/);
+  });
+});
+
+test('the demo tools refuse the live database, a live Stripe key and the live site', async () => {
+  const { databaseRefusal, stripeKeyRefusal, siteRefusal } = await import('../demo/guards.mjs');
+  const live = 'postgresql://app:secret@ep-live-123.us-east-2.aws.neon.tech/neondb?sslmode=require';
+  assert.match(databaseRefusal(undefined, live), /Set DEMO_DATABASE_URL/);
+  assert.match(databaseRefusal(live, live), /is the live database/);
+  // The pooled host name is the same database.
+  assert.match(databaseRefusal('postgresql://app:secret@ep-live-123-pooler.us-east-2.aws.neon.tech/neondb', live), /is the live database/);
+  assert.equal(databaseRefusal('postgresql://demo:pw@ep-demo-456.us-east-2.aws.neon.tech/neondb', live), null);
+  assert.match(stripeKeyRefusal('sk_live_abc'), /live Stripe key/);
+  assert.match(stripeKeyRefusal('rk_live_abc'), /live Stripe key/);
+  assert.match(stripeKeyRefusal('pk_test_abc'), /test key/);
+  assert.equal(stripeKeyRefusal('sk_test_abc'), null);
+  assert.equal(stripeKeyRefusal(undefined), null);
+  for (const host of ['https://nycmalpractice-ai.vercel.app', 'https://nycmalpractice.ai', 'https://www.nycmalpractice.ai/']) assert.match(siteRefusal(host), /live site/);
+  assert.match(siteRefusal('not a url'), /demo site/);
+  assert.equal(siteRefusal('https://nycmalpractice-demo.vercel.app'), null);
+  // The runner also checks the site itself says it is the demo, and the seed checks the database is marked as one.
+  const runner = readFileSync(new URL('../demo/run-personas.mjs', import.meta.url), 'utf8');
+  assert.match(runner, /\/api\/site-mode/);
+  const seed = readFileSync(new URL('../demo/seed.mjs', import.meta.url), 'utf8');
+  assert.match(seed, /demo_environment/);
+  assert.match(seed, /has data and is not marked as the demo/);
+  assert.doesNotMatch(seed, /process\.env\.DATABASE_URL\b(?!:)/, 'the seed reads DATABASE_URL');
+});
+
+test('the demo data is unmistakably synthetic and matches the app', async () => {
+  const { FIRMS, CASES, PERSONAS, DEMO_TIERS } = await import('../demo/synthetic-data.mjs');
+  const { TIER_CONFIG } = await import('../auction.js');
+  const { PRACTICE_AREAS } = await import('../site.js');
+  for (const [tier, config] of Object.entries(TIER_CONFIG)) {
+    assert.deepEqual(DEMO_TIERS[tier], { reserve: config.reserve, auctionHours: config.auctionHours }, tier);
+  }
+  const people = [...FIRMS, ...CASES.map(c => c.contact).filter(Boolean), ...PERSONAS.map(p => p.contact)];
+  for (const person of people) {
+    // 555-0100 to 555-0199 is reserved for fiction; .example domains can never be registered.
+    assert.match(String(person.phone).replace(/\D/g, '').slice(-7), /^55501\d\d$/, person.name);
+    if (person.email) assert.match(person.email, /@[a-z0-9.-]+\.example$/, person.name);
+  }
+  for (const firm of FIRMS) {
+    assert.match(firm.registration, /^DEMO-\d{4}$/);
+    for (const area of firm.areas) assert.ok(PRACTICE_AREAS.includes(area), `${firm.name}: ${area}`);
+  }
+  for (const item of CASES) {
+    assert.ok(PRACTICE_AREAS.includes(item.caseType), item.key);
+    if (item.tier) assert.ok(item.score >= TIER_CONFIG[item.tier].minScore && item.score <= TIER_CONFIG[item.tier].maxScore, `${item.key}: score ${item.score} is not ${item.tier}`);
+    for (const [key] of item.bids || []) assert.ok(FIRMS.some(firm => firm.key === key), `${item.key}: bidder ${key}`);
+  }
+  // The cases meant to show the short deadlines do.
+  const history = key => CASES.find(c => c.key === key).history.map(([role, content]) => ({ role, content }));
+  assert.deepEqual(deadlineNotices(history('retained-sponge')), ['public_hospital']);
+  assert.deepEqual(deadlineNotices(history('va-misread')), ['federal']);
+  assert.deepEqual(deadlineNotices(history('chest-pain')), []);
+});
+
+const LIVE_ONLY_ANALYTICS = /\.includes\(location\.hostname\)\) \{\n\s*\(function\(f,b\)\{if\(!b\.__SV\)[^\n]*\n\s*mixpanel\.init\([^\n]*\n\s*\}/;
+test('every page says when it is the demo copy, and only the live site reports to analytics', () => {
+  for (const file of readdirSync(new URL('../public/', import.meta.url)).filter(name => name.endsWith('.html'))) {
+    const page = readFileSync(new URL(`../public/${file}`, import.meta.url), 'utf8');
+    assert.match(page, /<script src="\/site-mode\.js" defer><\/script>/, file);
+    // The whole loader is skipped off the live site: skipping only init left a stub without track(), which broke the chat.
+    if (page.includes('mixpanel.init(')) assert.match(page, LIVE_ONLY_ANALYTICS, file);
+  }
+  const blog = readFileSync(new URL('../blog.js', import.meta.url), 'utf8');
+  assert.match(blog, /site-mode\.js/);
+  assert.match(blog, LIVE_ONLY_ANALYTICS);
+  const banner = readFileSync(new URL('../public/site-mode.js', import.meta.url), 'utf8');
+  assert.match(banner, /'nycmalpractice-ai\.vercel\.app'/);
+  assert.match(banner, /fetch\('\/api\/site-mode'\)/);
+  assert.match(readFileSync(new URL('../blog-server.js', import.meta.url), 'utf8'), /process\.env\.CANONICAL_URL/);
+});

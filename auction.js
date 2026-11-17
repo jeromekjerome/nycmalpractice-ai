@@ -9,6 +9,7 @@ import { buildModelList, chatCompletionsWithFallback } from './openaiModelFailov
 import { renderCurrentLawForPrompt } from './gatekeeper.js';
 import { APP_URL, MAX_FIRMS_PER_LEAD, caseTypeLabel } from './site.js';
 import { randomInt } from 'node:crypto';
+import { isDemo, demoMailer } from './demo.js';
 
 const sql    = neon(process.env.DATABASE_URL);
 // Each AI call is cut off after 30 seconds and retried once; it could wait 10 minutes.
@@ -803,6 +804,7 @@ function escapeHtml(value) {
 }
 
 function getTransporter() {
+  if (isDemo()) return demoMailer;   // the demo copy keeps its mail in the demo outbox
   if (!process.env.SMTP_USER) return null;
   return nodemailer.createTransport({
     host: process.env.SMTP_HOST || 'mail.jwd.nyc', port: 465, secure: true, auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },

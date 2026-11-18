@@ -4922,9 +4922,24 @@ test('the demo data is unmistakably synthetic and matches the app', async () => 
   }
   // The cases meant to show the short deadlines do.
   const history = key => CASES.find(c => c.key === key).history.map(([role, content]) => ({ role, content }));
-  assert.deepEqual(deadlineNotices(history('retained-sponge')), ['public_hospital']);
+  assert.deepEqual(deadlineNotices(history('wrong-knee')), ['public_hospital']);
   assert.deepEqual(deadlineNotices(history('va-misread')), ['federal']);
   assert.deepEqual(deadlineNotices(history('chest-pain')), []);
+});
+
+test('the demo has one sponge case: the patient a walkthrough follows live, not a seeded one', async () => {
+  const { CASES, PERSONAS } = await import('../demo/synthetic-data.mjs');
+  const marisol = PERSONAS.find(persona => persona.key === 'marisol-sponge');
+  assert.ok(marisol, 'the persona a walkthrough follows is missing');
+  assert.equal(marisol.messages.length, 4, 'the contact form is offered on the fourth message');
+  assert.match(marisol.messages.join(' '), /Bellevue/);
+  assert.match(marisol.messages.join(' '), /sponge/);
+  // She names a city hospital, so her own words bring up the 90-day notice of claim and nothing else.
+  assert.deepEqual(deadlineNotices(marisol.messages.map(content => ({ role: 'user', content }))), ['public_hospital']);
+  // No seeded case puts a second sponge on the admin page, in a portal or in an auction.
+  for (const item of CASES) {
+    assert.doesNotMatch(`${item.preview} ${item.history.map(([, text]) => text).join(' ')}`, /sponge/i, `${item.key} is a second sponge case`);
+  }
 });
 
 const LIVE_ONLY_ANALYTICS = /\.includes\(location\.hostname\)\) \{\n\s*\(function\(f,b\)\{if\(!b\.__SV\)[^\n]*\n\s*mixpanel\.init\([^\n]*\n\s*\}/;

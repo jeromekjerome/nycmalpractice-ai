@@ -59,18 +59,20 @@ export const CASES = [
     ],
   },
   {
-    key: 'retained-sponge', caseType: 'surgical_error', mode: 'personal', tier: 'hot', score: 86,
+    // A city hospital, so the 90-day notice of claim shows. (The sponge left at Bellevue is the persona
+    // 'marisol-sponge' below, whose conversation happens live; no seeded case repeats her story.)
+    key: 'wrong-knee', caseType: 'surgical_error', mode: 'personal', tier: 'hot', score: 86,
     dimensions: { injury_severity: 8, causation_clarity: 10, sol_status: 7, expert_viability: 9, damages_magnitude: 7 },
-    preview: 'Surgical sponge found in the abdomen 5 weeks after a hysterectomy at Bellevue; second surgery, infection. Public hospital: 90-day notice of claim applies.',
+    preview: 'Arthroscopy performed on the wrong knee at Jacobi Medical Center three weeks ago; the correct knee still needs surgery and the patient cannot work. Public hospital: 90-day notice of claim applies.',
     contact: { name: 'Danielle Okoro', phone: '6465550112', email: 'd.okoro@mail.example', bestTime: 'After 5 pm' },
     outcome: 'auction-open', closesInMinutes: 12, invite: ['hartwell', 'brightline', 'delacroix'], bids: [['delacroix', 230]],
     history: [
-      ['user', 'I had a hysterectomy at Bellevue in September. For weeks I had fever and pain, and a CT scan last month showed a sponge left inside me.'],
-      ['assistant', "I'm sorry. That sounds painful and upsetting. Did you need another operation to remove it?"],
-      ['user', 'Yes, they operated again to take it out and I had an abdominal infection afterwards. I was in the hospital another 9 days and missed a month of work.'],
-      ['assistant', 'A sponge or instrument left in the body is one of the clearer kinds of surgical error. Because Bellevue is run by NYC Health + Hospitals, a written notice of claim is generally due within 90 days of the incident (General Municipal Law 50-e), which is much sooner than the usual deadline. For a foreign object, New York also allows a lawsuit within one year of discovering it (CPLR 214-a).'],
-      ['user', 'Nobody told me about a 90-day deadline. The surgery was about two months ago.'],
-      ['assistant', 'Then time is short, and a lawyer should look at this right away. Would you like to be put in touch with a New York malpractice attorney?'],
+      ['user', 'I had arthroscopic surgery at Jacobi Medical Center three weeks ago. It was supposed to be on my left knee and they operated on my right one.'],
+      ['assistant', "I'm sorry. That must have been a shock to wake up to. Has the correct knee been operated on since?"],
+      ['user', 'Not yet. Now the right knee is swollen and painful and I still need the surgery on the left. I drive a delivery van and I cannot work.'],
+      ['assistant', 'Operating on the wrong part of the body is one of the clearer kinds of surgical error. Because Jacobi is run by NYC Health + Hospitals, a written notice of claim is generally due within 90 days of the incident (General Municipal Law 50-e), which is much sooner than the usual deadline of 2 years and 6 months (CPLR 214-a).'],
+      ['user', 'Nobody told me about a 90-day deadline. The surgery was three weeks ago.'],
+      ['assistant', 'Then there is still time, but not much, and a lawyer should look at this soon. Would you like to be put in touch with a New York malpractice attorney?'],
       ['user', 'Yes please, as soon as possible.'],
       ['assistant', 'You can use the contact form below this reply. Nothing is sent to a firm until you agree.'],
     ],
@@ -225,6 +227,18 @@ export const PERSONAS = [
       'I have not seen that surgeon or that hospital since 2018. I just never got around to doing anything about it.',
       'Is it too late to sue?',
       'I would still like to talk to someone.',
+    ],
+  },
+  {
+    // The patient a walkthrough of the demo follows from her first message to the firm that accepts her case.
+    // She names a city hospital, so the 90-day notice of claim appears beside the reply.
+    key: 'marisol-sponge', mode: 'personal',
+    contact: { name: 'Marisol Vega', phone: '6465550125', email: 'marisol.vega@mail.example', bestTime: 'Evenings' },
+    messages: [
+      'I had a hysterectomy at Bellevue about two months ago. Ever since I have had a fever and pain that would not go away.',
+      'Last week a CT scan showed a surgical sponge left inside me. They operated again to take it out, I got an infection, and I was in the hospital nine more days.',
+      'I have missed a month of work and I have all my records. Do I have a case, and is there a deadline?',
+      'Yes. I would like to speak with a lawyer.',
     ],
   },
 ];

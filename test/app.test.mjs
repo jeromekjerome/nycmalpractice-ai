@@ -968,6 +968,14 @@ test('the deadlines shown to visitors are stated correctly', () => {
   assert.match(page('disclaimer.html'), /never beyond 10 years after the malpractice/);
 });
 
+test('the About page gives the foreign-object and minor-patient deadlines the disclaimer gives', () => {
+  const about = readFileSync(new URL('../public/about.html', import.meta.url), 'utf8');
+  assert.doesNotMatch(about, /No statute of limitations when a foreign object|no limit/i, 'the About page still says a foreign-object claim has no deadline');
+  assert.match(about, /within 1 year of its discovery/, 'the About page does not give the foreign-object deadline');
+  assert.doesNotMatch(about, /does not run against a minor/i, 'the About page still says the deadline never runs against a minor');
+  assert.match(about, /never beyond 10 years after the malpractice/, 'the About page does not give the ten-year limit for minors');
+});
+
 // ─── Privacy policy ───────────────────────────────────────────────────────────
 
 test('the privacy policy describes the analytics and outside services the pages use', () => {

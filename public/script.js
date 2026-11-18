@@ -23,6 +23,24 @@ let conversationHistory = [];
 let currentMode = initialMode;
 let isLoading   = false;
 
+// The assessment card is built here, not in index.html: until a reply brings an assessment it has nothing to show,
+// and the page as served should carry no heading over an empty section. It stays hidden until renderCaseAnalysis.
+document.getElementById('analysisCard').innerHTML = `
+  <div class="card-header">
+    <span class="card-icon">📊</span>
+    <span class="card-title">Case Analysis</span>
+  </div>
+  <div id="analysisContent"></div>
+  <form id="summaryForm" class="summary-form">
+    <label for="summaryEmail">Email my summary</label>
+    <div class="summary-fields">
+      <input id="summaryEmail" name="email" type="email" autocomplete="email" maxlength="254" placeholder="you@example.com" required>
+      <button id="summarySubmit" type="submit">Send</button>
+    </div>
+    <p class="summary-note">Includes your assessment and deadline warnings. No session ID is included.</p>
+    <p id="summaryStatus" class="summary-status" role="status"></p>
+  </form>`;
+
 const summaryForm   = document.getElementById('summaryForm');
 const summaryEmail  = document.getElementById('summaryEmail');
 const summarySubmit = document.getElementById('summarySubmit');
@@ -261,10 +279,11 @@ function appendThinking() {
   return div;
 }
 
+// The cited-decisions card is built whole, heading and list together, and only when a reply brings decisions:
+// index.html carries no cases section, so nothing reads as an empty one.
 function renderCases(cases) {
   const card = document.getElementById('casesCard');
-  const list = document.getElementById('casesList');
-  list.innerHTML = cases.map(c => `
+  const items = cases.map(c => `
     <div class="case-item">
       <div class="case-name">
         ${c.absoluteUrl ? `<a href="${escHtml(c.absoluteUrl)}" target="_blank" rel="noopener">${escHtml(c.caseName)}</a>` : escHtml(c.caseName)}
@@ -273,6 +292,12 @@ function renderCases(cases) {
       ${c.snippet ? `<div class="case-snippet">${escHtml(c.snippet)}</div>` : ''}
     </div>
   `).join('');
+  card.innerHTML = `
+    <div class="card-header">
+      <span class="card-icon">📋</span>
+      <span class="card-title">Relevant NY Cases</span>
+    </div>
+    <div class="cases-list" id="casesList">${items}</div>`;
   card.style.display = 'block';
 }
 

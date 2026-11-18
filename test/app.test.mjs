@@ -4984,3 +4984,53 @@ test('firms read plain case labels in lead emails and on Stripe receipts, never 
   const source = readFileSync(new URL('../auction.js', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /chargeFirm\([^)]*\$\{(?:caseType|auction\.case_type|type \|\| 'other')\}/, 'a charge description still shows the raw case type');
 });
+
+// ─── What the pages say ───────────────────────────────────────────────────────
+
+// A page as a reader gets it who neither runs its script nor applies its styles: a search crawler, a link
+// preview, a reviewer's tool.
+const pageText = name => readFileSync(new URL(`../public/${name}`, import.meta.url), 'utf8')
+  .replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<!--[\s\S]*?-->/g, ' ')
+  .replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
+
+test('every page that describes leads reaching firms says nothing is shared until the visitor asks', () => {
+  // What visitors are promised, in the same words on the home page and the About page.
+  const PROMISE = 'Nothing goes to a firm unless you ask.';
+  assert.ok(pageText('index.html').includes(PROMISE), 'the home page no longer makes the promise');
+  assert.ok(pageText('about.html').includes(PROMISE), 'the About page does not repeat the home page\'s promise');
+
+  // What firms are told: where the About page and the sign-up page describe how leads are delivered, they give
+  // the condition they are delivered on. /api/contact is the only way a lead is made, and it refuses without the
+  // consent box. (The firm terms are a contract with their own effective date and are not covered here.)
+  const CONDITION = 'Every lead comes from a person who used the contact form, asked to be contacted and agreed to share their details';
+  for (const name of ['about.html', 'register.html']) {
+    const text = pageText(name);
+    assert.match(text, /cold lead/i, `${name} no longer describes cold leads: drop it from this test`);
+    assert.ok(text.includes(CONDITION), `${name} describes how leads reach firms without saying they come only from people who asked and agreed`);
+  }
+
+  // The About page's account of the marketplace gives the condition before it describes any delivery.
+  const about = pageText('about.html');
+  const marketplace = about.slice(about.indexOf('For Law Firms'));
+  assert.ok(marketplace.includes(CONDITION) && marketplace.indexOf(CONDITION) < marketplace.search(/auction/i),
+    'the About page describes the auction and direct delivery before it says the person must have asked');
+});
+
+test('the About page names who built the site and says its builder is not an attorney', () => {
+  const about = pageText('about.html');
+  assert.match(about, /built by Jerome W\. Dewald/);
+  assert.match(about, /AI Strategies NYC/);
+  assert.match(about, /Jerome is not an attorney/);
+});
+
+test('the home page has no section that stays empty until a reply arrives', () => {
+  // These cards have nothing to show before the conversation produces it. They used to be in the page's HTML,
+  // hidden by a style, so a reader that applies no styles saw the heading "Relevant NY Cases" over nothing and a
+  // "Case Analysis" that was only an email form.
+  const text = pageText('index.html');
+  const script = readFileSync(new URL('../public/script.js', import.meta.url), 'utf8');
+  for (const heading of ['Relevant NY Cases', 'Case Analysis', 'Email my summary']) {
+    assert.ok(!text.includes(heading), `the home page's HTML carries "${heading}" before there is anything under it`);
+    assert.ok(script.includes(heading), `script.js no longer builds "${heading}" when there is something to show`);
+  }
+});

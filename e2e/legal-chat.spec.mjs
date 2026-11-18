@@ -75,7 +75,43 @@ test('personal mode renders case guidance and supporting cards', async ({ page }
   await expect(page.locator('#conversation .msg-ai').last()).toContainText('timeline and provider records');
   await expect(page.locator('#casesList')).toContainText('Patient v. Hospital');
   await expect(page.locator('#analysisContent')).toContainText('limitations period may be approaching');
+  // each card arrives whole: its heading with its content
+  await expect(page.locator('#casesCard')).toBeVisible();
+  await expect(page.locator('#casesCard .card-title')).toHaveText('Relevant NY Cases');
+  await expect(page.locator('#casesList .case-item')).toHaveCount(1);
+  await expect(page.locator('#analysisCard .card-title')).toHaveText('Case Analysis');
+  await expect(page.locator('#summaryForm')).toBeVisible();
   expect(askPayload.mode).toBe('personal');
+});
+
+test('before a reply brings decisions there is no cases section, in the page as served or as shown', async ({ page }) => {
+  await mockSession(page);
+  await mockCaseTypes(page);
+  await page.route('**/api/ask', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ answer: 'Thank you. When did the surgery take place?', cases: [] }),
+  }));
+
+  // As a reader gets it who runs no script and applies no style: no heading over an empty section.
+  const served = await (await page.request.get('/')).text();
+  expect(served).not.toContain('Relevant NY Cases');
+  expect(served).not.toContain('Case Analysis');
+  expect(served).not.toContain('Email my summary');
+
+  // As a visitor sees it, before the first message...
+  await page.goto('/');
+  await expect(page.locator('#caseTypesList li').first()).toHaveText('Failure to Diagnose');
+  await expect(page.locator('#casesCard')).toBeHidden();
+  await expect(page.locator('#analysisCard')).toBeHidden();
+  await expect(page.locator('body')).not.toContainText('Relevant NY Cases');
+
+  // ...and after a reply that cites no decisions.
+  await page.locator('#userInput').fill('I had surgery last year and something went wrong.');
+  await page.locator('#userInput').press('Enter');
+  await expect(page.locator('#conversation .msg-ai').last()).toContainText('When did the surgery take place?');
+  await expect(page.locator('#casesCard')).toBeHidden();
+  await expect(page.locator('body')).not.toContainText('Relevant NY Cases');
 });
 
 test('a visitor can email the assessment without putting the session in the return link', async ({ page }) => {

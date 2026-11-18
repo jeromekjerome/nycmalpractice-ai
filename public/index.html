@@ -106,32 +106,11 @@
         <!-- Sidebar -->
         <div class="sidebar-col">
 
-          <!-- Case Analysis -->
-          <div class="glass-panel sidebar-card" id="analysisCard" style="display:none">
-            <div class="card-header">
-              <span class="card-icon">📊</span>
-              <span class="card-title">Case Analysis</span>
-            </div>
-            <div id="analysisContent"></div>
-            <form id="summaryForm" class="summary-form">
-              <label for="summaryEmail">Email my summary</label>
-              <div class="summary-fields">
-                <input id="summaryEmail" name="email" type="email" autocomplete="email" maxlength="254" placeholder="you@example.com" required>
-                <button id="summarySubmit" type="submit">Send</button>
-              </div>
-              <p class="summary-note">Includes your assessment and deadline warnings. No session ID is included.</p>
-              <p id="summaryStatus" class="summary-status" role="status"></p>
-            </form>
-          </div>
-
-          <!-- Case Law -->
-          <div class="glass-panel sidebar-card" id="casesCard" style="display:none">
-            <div class="card-header">
-              <span class="card-icon">📋</span>
-              <span class="card-title">Relevant NY Cases</span>
-            </div>
-            <div class="cases-list" id="casesList"></div>
-          </div>
+          <!-- The assessment card and the cited-decisions card. Both are empty here on purpose: script.js builds
+               each one, heading and all, when the conversation has something to put in it. A heading with nothing
+               under it reads as a broken page to anything that does not apply the page's styles. -->
+          <div class="glass-panel sidebar-card" id="analysisCard" style="display:none"></div>
+          <div class="glass-panel sidebar-card" id="casesCard" style="display:none"></div>
 
           <!-- Case Types -->
           <div class="glass-panel sidebar-card">

@@ -4965,6 +4965,21 @@ test('fast-forwarding a demo auction touches one open auction, in a database mar
   assert.match(writes[0], /^UPDATE auctions SET closes_at = NOW\(\) - INTERVAL '1 minute' WHERE id = \$\{auctionId\} AND status = 'open'/);
 });
 
+test('the demo facts tool only reads: nothing is written to the database and nothing is changed at Stripe', () => {
+  const tool = readFileSync(new URL('../demo/auction-facts.mjs', import.meta.url), 'utf8');
+  assert.doesNotMatch(tool, /process\.env\.DATABASE_URL\b(?!:)/, 'the tool reads DATABASE_URL');
+  assert.match(tool, /databaseRefusal\(/, 'the tool does not refuse the live database');
+  assert.match(tool, /stripeKeyRefusal\(/, 'the tool does not refuse a live Stripe key');
+  assert.match(tool, /demo_environment/, 'the tool does not check the database is marked as the demo');
+  const sqlAndCalls = tool.replace(/^\s*\/\/.*$/gm, '');
+  assert.doesNotMatch(sqlAndCalls, /\b(UPDATE|DELETE|INSERT|TRUNCATE|DROP|ALTER|CREATE)\b/, 'the facts tool writes to the database');
+  assert.doesNotMatch(sqlAndCalls, /stripe\.\w+(\.\w+)*\.(create|update|del|confirm|capture|cancel)\(/, 'the facts tool changes something at Stripe');
+  // It reads no client: the people in the demo are synthetic, but a record of a payment needs none of them.
+  for (const query of sqlAndCalls.match(/SELECT[^`]*FROM conversations/g) || []) {
+    assert.doesNotMatch(query, /\b(name|phone|email|history|best_time)\b/, 'the facts tool reads a client\'s contact details or words');
+  }
+});
+
 test('the demo data is unmistakably synthetic and matches the app', async () => {
   const { FIRMS, CASES, PERSONAS, DEMO_TIERS } = await import('../demo/synthetic-data.mjs');
   const { TIER_CONFIG } = await import('../auction.js');

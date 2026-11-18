@@ -67,4 +67,14 @@ DEMO_DATABASE_URL=postgres://...demo...  node demo/fast-forward.mjs <auction num
 A hot auction runs four hours. This moves one open auction's closing time into the past, so the next request to the
 demo site closes it: the leading firm's test card is charged and the lead is delivered, as when an auction runs out
 on its own. It changes that one row and nothing else, only in a database the seed has marked as the demo, and it
-refuses the live database.
+refuses the live database. The site looks for run-out auctions at most once a minute, so allow it that long.
+
+## The record of one auction
+
+```
+DEMO_DATABASE_URL=postgres://...demo...  STRIPE_SECRET_KEY=sk_test_...  node demo/auction-facts.mjs <auction number>
+```
+
+Prints, as JSON, how the auction was scored, who bid, what the winner was charged, and the payment as Stripe holds
+it (with `livemode: false`), plus what the AI calls have cost since the demo was last seeded. It only reads, and it
+prints no client's name, contact details or words.

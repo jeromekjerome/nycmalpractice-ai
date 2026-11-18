@@ -57,3 +57,14 @@ node demo/run-personas.mjs https://<demo address> [persona keys] [--pace=65]
 Sends the `PERSONAS` in `synthetic-data.mjs` to the demo's real chat one message at a time, then sends each contact
 form. The live AI replies, scores and routes each lead. It runs only against a site whose `/api/site-mode` says it
 is the demo. `--pace` is the wait between messages in seconds; CourtListener allows 5 calls a minute.
+
+## Closing an auction early
+
+```
+DEMO_DATABASE_URL=postgres://...demo...  node demo/fast-forward.mjs <auction number>
+```
+
+A hot auction runs four hours. This moves one open auction's closing time into the past, so the next request to the
+demo site closes it: the leading firm's test card is charged and the lead is delivered, as when an auction runs out
+on its own. It changes that one row and nothing else, only in a database the seed has marked as the demo, and it
+refuses the live database.

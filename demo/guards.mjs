@@ -37,3 +37,15 @@ export function siteRefusal(baseUrl) {
   if (LIVE_HOSTS.includes(parsed.hostname)) return 'That is the live site. The persona runner talks only to the demo copy.';
   return null;
 }
+
+/**
+ * Why an auction must not be fast-forwarded, or null. `marked` is whether the database carries the demo marker the
+ * seed writes; `auction` is the row with that number, if there is one.
+ */
+export function fastForwardRefusal({ marked, auctionId, auction }) {
+  if (!marked) return 'This database is not marked as the demo. Refusing to touch it.';
+  if (!Number.isInteger(auctionId) || auctionId <= 0) return 'Give the auction\'s number, e.g. node demo/fast-forward.mjs 12';
+  if (!auction) return `There is no auction ${auctionId} in the demo.`;
+  if (auction.status !== 'open') return `Auction ${auctionId} is ${auction.status}, not open.`;
+  return null;
+}

@@ -4898,6 +4898,25 @@ test('the demo tools refuse the live database, a live Stripe key and the live si
   assert.doesNotMatch(seed, /process\.env\.DATABASE_URL\b(?!:)/, 'the seed reads DATABASE_URL');
 });
 
+test('fast-forwarding a demo auction touches one open auction, in a database marked as the demo, and nothing else', async () => {
+  const { fastForwardRefusal } = await import('../demo/guards.mjs');
+  const open = { id: 12, status: 'open' };
+  assert.equal(fastForwardRefusal({ marked: true, auctionId: 12, auction: open }), null);
+  assert.match(fastForwardRefusal({ marked: false, auctionId: 12, auction: open }), /not marked as the demo/);
+  assert.match(fastForwardRefusal({ marked: true, auctionId: 12, auction: undefined }), /no auction 12/);
+  assert.match(fastForwardRefusal({ marked: true, auctionId: 12, auction: { id: 12, status: 'closed' } }), /is closed, not open/);
+  for (const bad of [NaN, 0, -3, 1.5, '12', undefined]) assert.match(fastForwardRefusal({ marked: true, auctionId: bad, auction: open }), /Give the auction's number/, String(bad));
+
+  const tool = readFileSync(new URL('../demo/fast-forward.mjs', import.meta.url), 'utf8');
+  assert.doesNotMatch(tool, /process\.env\.DATABASE_URL\b(?!:)/, 'the tool reads DATABASE_URL');
+  assert.match(tool, /databaseRefusal\(/, 'the tool does not refuse the live database');
+  assert.match(tool, /fastForwardRefusal\(/);
+  // Its one write names the auction and requires it to be open; it has no other UPDATE, DELETE, INSERT or TRUNCATE.
+  const writes = tool.match(/\b(UPDATE|DELETE|INSERT|TRUNCATE|DROP|ALTER)\b[^`]*/g) || [];
+  assert.equal(writes.length, 1, writes.join(' | '));
+  assert.match(writes[0], /^UPDATE auctions SET closes_at = NOW\(\) - INTERVAL '1 minute' WHERE id = \$\{auctionId\} AND status = 'open'/);
+});
+
 test('the demo data is unmistakably synthetic and matches the app', async () => {
   const { FIRMS, CASES, PERSONAS, DEMO_TIERS } = await import('../demo/synthetic-data.mjs');
   const { TIER_CONFIG } = await import('../auction.js');

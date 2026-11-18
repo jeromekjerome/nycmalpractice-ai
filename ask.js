@@ -90,8 +90,11 @@ export async function answerUserQuestion({ question, mode = 'personal', sessionI
   // replies, so counting every message ran steps 1, 3, 5 and skipped steps 2 and 4.
   const turn = history.filter(h => h.role === 'user').length + 1;
 
-  const fullText       = history.map(h => h.content).join(' ') + ' ' + question;
-  const classification = (await extractCaseType(fullText, openai)) || {};
+  // The case type is decided from everything the visitor has said, and nothing else. The AI's own replies are left
+  // out: they are several times longer, and they crowded the visitor's words out of what the classifier was shown,
+  // so a fact given in the second message (a sponge left inside) was lost by the third.
+  const visitorText    = [...history.filter(h => h.role === 'user').map(h => h.content), question].join(' ');
+  const classification = (await extractCaseType(visitorText, openai)) || {};
   const caseType       = Object.hasOwn(CASE_TYPE_NAMES, classification.type) ? classification.type : 'other';
 
   // The classifier's terms only. The visitor's own message is never the query: it can hold a name

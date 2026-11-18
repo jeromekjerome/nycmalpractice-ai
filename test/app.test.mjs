@@ -900,6 +900,54 @@ test('extractCaseType uses the aux model chain with failover', async () => {
   assert.deepEqual(await extractCaseType('anything', listAnswer), fallback);
 });
 
+test('the case type is decided from everything the visitor has said, not from the two ends of the transcript', async () => {
+  // A visitor often gives the fact that decides the case type in a later message. The classifier used to be shown
+  // the first and last 300 characters of the whole transcript, the AI's replies included. By the third message the
+  // deciding fact had dropped out of what it saw, and a sponge left inside a patient was filed as a failure to
+  // diagnose: the wrong case law for the assessment and the wrong label on the lead.
+  clearSearchCache();
+  const world = fakeWorld({ classification: { type: 'surgical_error', terms: 'retained surgical sponge' } });
+  const server = await startServer(app);
+  const reply = `I am so sorry. ${'That must have been very hard to go through. '.repeat(12)}${DISCLAIMER}`;
+  const history = [
+    { role: 'user', content: 'I had a hysterectomy at Bellevue about two months ago. Ever since I have had a fever and pain that would not go away.' },
+    { role: 'assistant', content: reply },
+    { role: 'user', content: 'Last week a CT scan showed a surgical sponge left inside me. They operated again to take it out.' },
+    { role: 'assistant', content: reply },
+    { role: 'user', content: 'I have missed a month of work and I have all my records. Do I have a case?' },
+    { role: 'assistant', content: reply },
+  ];
+  const question = 'Yes. I would like to speak with a lawyer.';
+  try {
+    await withOutboundHttp(world.handler, async () => {
+      const { response } = await postJson(server.baseUrl, '/api/ask', { question, mode: 'personal', sessionId: 'sess-late-fact', history });
+      assert.equal(response.status, 200);
+      const classify = world.calls.openai.find(call => call.kind === 'classify');
+      const shown = String(classify.request.messages[0].content).split('Text: ')[1];
+      for (const { content } of history.filter(message => message.role === 'user')) assert.ok(shown.includes(content), `the classifier was not shown: "${content}"`);
+      assert.ok(shown.includes(question), 'the classifier was not shown the latest message');
+      assert.ok(!shown.includes('That must have been very hard'), 'the classifier was shown the AI\'s own replies');
+    });
+  } finally {
+    await server.close();
+  }
+});
+
+test('extractCaseType reads a long account whole, and keeps both ends of one too long to send', async () => {
+  const seen = [];
+  const openai = { chat: { completions: { create: async request => { seen.push(String(request.messages[0].content).split('Text: ')[1]); return { choices: [{ message: { content: '{"type":"other","terms":"x"}' } }] }; } } } };
+  // 3,000 characters with the deciding fact in the middle: all of it is read.
+  const account = `${'a'.repeat(1500)} a sponge was left inside me ${'b'.repeat(1470)}`;
+  await extractCaseType(account, openai);
+  assert.ok(seen[0].includes('a sponge was left inside me'), 'the middle of a 3,000-character account was dropped');
+  assert.equal(seen[0].length, account.length);
+  // Beyond the limit the two ends are kept: what happened first, and what is being asked now.
+  const tooLong = `OPENING ${'c'.repeat(9000)} LATEST`;
+  await extractCaseType(tooLong, openai);
+  assert.ok(seen[1].startsWith('OPENING') && seen[1].endsWith('LATEST'));
+  assert.ok(seen[1].length < tooLong.length && seen[1].length <= 4010);
+});
+
 test('scoreLead uses the aux model chain with failover and the current-law notes', async () => {
   const modelsTried = [];
   let scoringPrompt;

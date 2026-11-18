@@ -274,11 +274,13 @@ async function searchScope(queries, paramsFor, limit, scope, deadline, state) {
 }
 
 const CLASSIFIER_FALLBACK = { type: 'other', terms: 'medical malpractice standard of care' };
-const CLASSIFIER_TEXT_LIMIT = 600;
+// About a thousand tokens for the small model: a few cents per thousand conversations. It was 600 characters, which
+// a visitor's second message could already pass, and what was cut was the middle of the account.
+const CLASSIFIER_TEXT_LIMIT = 4000;
 
 export async function extractCaseType(text, openai) {
-  // The conversation is passed oldest first. A long one keeps both ends: the opening message says
-  // what happened, the latest one says what is being asked now.
+  // The visitor's messages are passed oldest first, and read whole. Only an account longer than the limit is cut,
+  // and then it keeps both ends: the opening says what happened, the latest message what is being asked now.
   const whole = String(text ?? '');
   const half = CLASSIFIER_TEXT_LIMIT / 2;
   const excerpt = whole.length > CLASSIFIER_TEXT_LIMIT ? `${whole.slice(0, half)} … ${whole.slice(-half)}` : whole;

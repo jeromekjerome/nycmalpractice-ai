@@ -33,6 +33,8 @@ import * as app from './app.mjs';
 const REPLY_SLOWEST_TENTH_LIMIT_MS = 10_000;
 const SMALL_SLOWEST_TENTH_LIMIT_MS = 4_000;
 const LEAD_SCORE_TOLERANCE = 3;
+// The site gives a turn up after this long and asks the visitor to send the message again.
+const TURN_DEADLINE_MS = 45_000;
 const LABEL = /^[A-Za-z0-9][A-Za-z0-9.-]*$/;
 
 // ─── Counting ─────────────────────────────────────────────────────────────────
@@ -48,6 +50,15 @@ const keyOf = turn => `${turn.visitor}:${turn.turn}`;
 const rate = (list, test) => (list.length ? list.filter(test).length / list.length : 1);
 const visitorsIn = run => new Set(run.turns.map(turn => turn.visitor)).size || 1;
 const costOf = (calls, price) => calls.reduce((sum, call) => sum + price(call.model, call.inputTokens ?? 0, call.outputTokens ?? 0), 0);
+// The calls that were refused or never answered, by what they failed on: "429 x2, Request timed out. x1".
+function failureSummary(failures) {
+  const counts = new Map();
+  for (const failure of failures) {
+    const what = String(failure.status ?? failure.error ?? 'unknown');
+    counts.set(what, (counts.get(what) ?? 0) + 1);
+  }
+  return [...counts].map(([what, count]) => `${what} x${count}`).join(', ');
+}
 // A reply is served and passed: an empty reply is no reply, whatever the gate said of it.
 const passedFinally = turn => turn.gateStatus === 'PASSED' && Boolean(turn.served);
 
@@ -67,6 +78,10 @@ export function replyStats(run, { price, visitors = VISITORS, adapter = app } = 
   const seminar = run.turns.filter(isSeminar);
   // The reply job's own calls: the drafts and the rewrites, which go to the same chain.
   const replyCalls = (run.calls ?? []).filter(call => replyJobs.includes(call.job));
+  // And those of its calls that were refused or never answered. Each still took the time it took, so a call that
+  // ran out of time counts as slow.
+  const failures = (run.failed ?? []).filter(failure => replyJobs.includes(failure.job));
+  const replyTimes = [...replyCalls, ...failures].map(call => call.ms);
   return {
     turns: run.turns.length,
     firstPassRate: rate(run.turns, turn => turn.firstPassCompliant === true),
@@ -77,9 +92,17 @@ export function replyStats(run, { price, visitors = VISITORS, adapter = app } = 
     emptyFirstDrafts: run.turns.filter(turn => !turn.error && !turn.firstDraft).length,
     failedTurns: run.turns.filter(turn => turn.error).length,
     cutOff: replyCalls.filter(call => call.finish === 'length').length,
-    replyMedianMs: percentile(replyCalls.map(call => call.ms), 0.5),
-    replySlowestTenthMs: percentile(replyCalls.map(call => call.ms), 0.9),
-    // The whole turn, as the visitor waits for it: the reply, the side analyses and the grading.
+    // A first draft the model grader did not grade (its answer could not be used, or never came) was passed or
+    // failed by code alone. An empty draft is failed in code and is never sent to the grader.
+    ungradedFirstDrafts: run.turns.filter(turn => !turn.error && turn.firstDraft && turn.evaluator !== 'llm').length,
+    retriedTurns: run.turns.filter(turn => (turn.attempts ?? 1) > 1).length,
+    turnsOverDeadline: run.turns.filter(turn => turn.ms > TURN_DEADLINE_MS).length,
+    replyCallsFailed: failures.length,
+    replyCallFailures: failureSummary(failures),
+    replyMedianMs: percentile(replyTimes, 0.5),
+    replySlowestTenthMs: percentile(replyTimes, 0.9),
+    // The whole turn: the reply, the side analyses, the grading and any rewrite. It leaves out the classification
+    // and the search, which come first on the site.
     turnMedianMs: percentile(run.turns.map(turn => turn.ms), 0.5),
     turnSlowestTenthMs: percentile(run.turns.map(turn => turn.ms), 0.9),
     costPerConversation: replyCalls.length ? costOf(replyCalls, price) / visitorsIn(run) : 0,
@@ -113,11 +136,23 @@ export function agreement(run, reference, pick, applies = () => true) {
   return rate(compared, turn => pick(turn) === reference.get(keyOf(turn)));
 }
 
-// How well today's model agrees with itself: each run against the answer its other runs give most often, and
-// the worst of them. A candidate is measured the same way, against runs it took no part in.
+// How well today's model agrees with itself: how often two of its runs give the same answer, for the pair of
+// runs that agrees least. The order the runs are given in changes nothing. With fewer than two runs it is not
+// known, and null says so.
+//
+// A candidate is measured against the answer today's runs give most often (majority), a steadier mark than any
+// one run, so today's own model would score a little above this figure on the candidate's measure. The bar asks
+// a candidate for at least this figure.
 export function selfAgreement(runs, pick, applies = () => true) {
-  if (runs.length < 2) return 1;
-  return Math.min(...runs.map((run, i) => agreement(run, majority(runs.filter((_, j) => j !== i), pick), pick, applies)));
+  if (runs.length < 2) return null;
+  let least = 1;
+  for (let i = 0; i < runs.length; i++) {
+    for (let j = i + 1; j < runs.length; j++) {
+      const other = new Map(runs[j].turns.map(turn => [keyOf(turn), pick(turn)]));
+      least = Math.min(least, agreement(runs[i], other, pick, applies));
+    }
+  }
+  return least;
 }
 
 /**
@@ -132,6 +167,9 @@ export function smallStats(run, reference, baselineAverageLeadScore, { price, vi
   const cardDue = turn => !isSeminar(turn) && turn.turn >= due.caseCard;
   const calls = run.calls ?? [];
   const smallCalls = calls.filter(call => smallJobs.includes(call.job));
+  // Small-job calls that were refused or never answered. They are counted apart from unusable answers: such a
+  // call is made again, and it may be the account's rate limit that refused it and not the model.
+  const failures = (run.failed ?? []).filter(failure => smallJobs.includes(failure.job));
   const answered = run.turns.filter(turn => !turn.error);
 
   // Was there a usable answer each time one was due?
@@ -143,23 +181,30 @@ export function smallStats(run, reference, baselineAverageLeadScore, { price, vi
     // Every answer that had to be a JSON object, the classifier's and the seminar score's among them: the app
     // falls back quietly when those two cannot be read, so only the call itself shows it.
     ...smallCalls.filter(call => typeof call.json === 'boolean').map(call => call.json),
-    ...(run.failed ?? []).filter(failure => smallJobs.includes(failure.job)).map(() => false),
   ];
 
   const jobs = {};
   for (const job of smallJobs) {
     const made = smallCalls.filter(call => call.job === job);
-    if (!made.length) continue;
+    const failed = failures.filter(failure => failure.job === job);
+    if (!made.length && !failed.length) continue;
+    // A call that failed is timed with its job, for as long as it took.
+    const times = [...made, ...failed].map(call => call.ms);
     jobs[job] = {
       calls: made.length,
-      medianMs: percentile(made.map(call => call.ms), 0.5),
-      slowestTenthMs: percentile(made.map(call => call.ms), 0.9),
+      failed: failed.length,
+      medianMs: percentile(times, 0.5),
+      slowestTenthMs: percentile(times, 0.9),
       jsonValid: rate(made.filter(call => typeof call.json === 'boolean'), call => call.json),
     };
   }
   const slowest = Object.entries(jobs).sort(([, a], [, b]) => b.slowestTenthMs - a.slowestTenthMs)[0] ?? null;
 
-  const scores = run.turns.map(turn => turn.leadScore).filter(score => typeof score === 'number');
+  // A score a model wrote as text ("80") is still a score: left out, the average would be of fewer leads, or of
+  // none, and the lead-score rule would pass with nothing judged.
+  const scores = run.turns.map(turn => turn.leadScore)
+    .filter(score => (typeof score === 'number' || (typeof score === 'string' && score.trim() !== '')) && Number.isFinite(Number(score)))
+    .map(Number);
   const averageLeadScore = scores.length ? scores.reduce((sum, score) => sum + score, 0) / scores.length : null;
   // The calls made while grading the known-bad drafts are no part of a conversation.
   const inConversations = calls.slice(0, run.knownBadFromCall ?? calls.length).filter(call => smallJobs.includes(call.job));
@@ -173,7 +218,9 @@ export function smallStats(run, reference, baselineAverageLeadScore, { price, vi
     leadScoreShift: averageLeadScore === null || typeof baselineAverageLeadScore !== 'number' ? null : averageLeadScore - baselineAverageLeadScore,
     knownBadCaught: (run.knownBad ?? []).filter(entry => entry.caught).map(entry => entry.key),
     failedTurns: run.turns.filter(turn => turn.error).length,
-    medianMs: percentile(smallCalls.map(call => call.ms), 0.5),
+    failedCalls: failures.length,
+    failedCallSummary: failureSummary(failures),
+    medianMs: percentile([...smallCalls, ...failures].map(call => call.ms), 0.5),
     slowestTenthMs: slowest ? slowest[1].slowestTenthMs : null,
     slowestJob: slowest ? slowest[0] : null,
     jobs,
@@ -209,11 +256,20 @@ export function replyBar(stats, baselines) {
       reason: typeof stats.replySlowestTenthMs === 'number'
         ? `the slowest tenth of its replies takes ${seconds(stats.replySlowestTenthMs)}, over the ${seconds(REPLY_SLOWEST_TENTH_LIMIT_MS)} allowed`
         : 'none of its replies was timed' },
+    // Not a rule of the design's bar but a condition of the measurement: pass rates mean what they say only when
+    // the model grader graded every first draft.
+    { key: 'graded', ok: !(stats.ungradedFirstDrafts > 0),
+      reason: `${stats.ungradedFirstDrafts} first drafts were graded by code alone because the model grader's answer did not come or could not be used, so this run is not a full measurement` },
   ]);
 }
 
 // A small-job model against today's model's agreement with itself and the known-bad drafts today's model catches.
 export function smallBar(stats, baselineSelf, baselineCaught) {
+  // With no run of today's model, or only one, there is nothing to hold a candidate to.
+  if (!baselineSelf) return { ok: false, reasons: ["there is no small-job run of today's model to set it beside"], failed: ['baseline'] };
+  if ([baselineSelf.typeAgreement, baselineSelf.tierAgreement, baselineSelf.verdictAgreement].some(value => typeof value !== 'number')) {
+    return { ok: false, reasons: ["today's small-job model was run once, so how well it agrees with itself is not known"], failed: ['baseline'] };
+  }
   const missed = baselineCaught.filter(key => !stats.knownBadCaught.includes(key));
   const agreed = (key, name, value, floor) => ({
     key, ok: value >= floor, reason: `gives the same ${name} as today's on ${percent(value)}, under today's own ${percent(floor)}`,
@@ -229,6 +285,50 @@ export function smallBar(stats, baselineSelf, baselineCaught) {
     { key: 'speed', ok: typeof stats.slowestTenthMs !== 'number' || stats.slowestTenthMs <= SMALL_SLOWEST_TENTH_LIMIT_MS,
       reason: `the slowest tenth of its ${stats.slowestJob ?? 'slowest job'} calls takes ${seconds(stats.slowestTenthMs)}, over the ${seconds(SMALL_SLOWEST_TENTH_LIMIT_MS)} allowed` },
   ]);
+}
+
+// The runs a report is given must be what their flags say they are, or its tables would be wrong with no sign of
+// it. Returns what is wrong, one line each; an empty list means the runs can be set beside one another.
+export function checkRuns({ app: appName, baseline, smallBaseline = [], replies = [], smalls = [] }) {
+  const problems = [];
+  const today = baseline[0];
+  const todays = new Set(baseline.map(run => run.label));
+  const seen = new Set();
+  const each = (runs, check) => {
+    for (const run of runs) {
+      if (run.app !== appName) problems.push(`${run.label} was run on ${run.app}, not ${appName}`);
+      if (!run.finishedAt) problems.push(`${run.label} is a run that was stopped part-way`);
+      check(run);
+      if (seen.has(run.label)) problems.push(`${run.label} is given twice`);
+      seen.add(run.label);
+    }
+  };
+  const isSmall = run => run.mode === 'small';
+  const todaysModels = run => run.answer === today.answer && run.aux === today.aux;
+  const notTodays = run => `${run.label} used ${run.answer} with ${run.aux}, not today's ${today.answer} with ${today.aux}`;
+  const draftsFromToday = run => {
+    if (!todays.has(run.from)) problems.push(`${run.label} took its drafts from ${run.from}, which is not one of today's runs`);
+  };
+
+  each(baseline, run => {
+    if (isSmall(run)) problems.push(`${run.label} is a small-job run, given as a reply run`);
+    else if (!todaysModels(run)) problems.push(notTodays(run));
+  });
+  each(replies, run => {
+    if (isSmall(run)) problems.push(`${run.label} is a small-job run, given as a reply run`);
+    else if (run.aux !== today.aux) problems.push(`${run.label} was graded by ${run.aux}, not today's ${today.aux}`);
+  });
+  each(smallBaseline, run => {
+    if (!isSmall(run)) problems.push(`${run.label} is not a small-job run`);
+    else if (!todaysModels(run)) problems.push(notTodays(run));
+    else draftsFromToday(run);
+  });
+  each(smalls, run => {
+    if (!isSmall(run)) problems.push(`${run.label} is not a small-job run`);
+    else if (run.answer !== today.answer) problems.push(`${run.label} had its rewrites written by ${run.answer}, not today's ${today.answer}`);
+    else draftsFromToday(run);
+  });
+  return problems;
 }
 
 // ─── The page ─────────────────────────────────────────────────────────────────
@@ -275,11 +375,11 @@ export function renderReport({ app: appName, date, baseline, smallBaseline, repl
     tier: majority(smallBaseline, turn => turn.leadTier),
     verdict: majority(smallBaseline, turn => turn.firstPassCompliant),
   };
-  const baselineSelf = {
+  const baselineSelf = smallBaseline.length ? {
     typeAgreement: selfAgreement(smallBaseline, turn => turn.classifiedType),
     tierAgreement: selfAgreement(smallBaseline, turn => turn.leadTier, leadDue),
     verdictAgreement: selfAgreement(smallBaseline, turn => turn.firstPassCompliant),
-  };
+  } : null;
   const baselineLeadScore = mean(smallBaseline.map(run => smallStats(run, reference, null, context).averageLeadScore).filter(score => score !== null));
   const everyRunCaught = smallBaseline.length
     ? (smallBaseline[0].knownBad ?? []).map(entry => entry.key).filter(key => smallBaseline.every(run => (run.knownBad ?? []).some(entry => entry.key === key && entry.caught)))
@@ -302,15 +402,26 @@ export function renderReport({ app: appName, date, baseline, smallBaseline, repl
 
   // An app with no seminar has no seminar column.
   const hasSeminar = adapter.SEMINAR_MODES.length > 0;
+  const failedCell = (count, summary) => (count ? `${count} (${summary})` : 0);
   out.push('## Reply models', '');
   out.push(table(
-    ['Run', 'Model', 'First draft passes', 'Passes after the rewrite', ...(hasSeminar ? ['Seminar passes'] : []), 'First drafts with a case that could not be anchored', 'Empty first drafts', 'Turns that failed',
-      'Replies cut off', 'A reply takes (middle)', 'A reply takes (slowest tenth)', 'The visitor waits (middle)', 'The visitor waits (slowest tenth)', 'Replies cost, a conversation', 'Bar'],
+    ['Run', 'Model', 'First draft passes', 'Passes after the rewrite', ...(hasSeminar ? ['Seminar passes'] : []), 'First drafts with a case that could not be anchored', 'Empty first drafts', 'Replies cut off', 'Bar'],
     [...baseReply, ...candidateReply].map(({ run, stats, bar }) => [
-      run.label, run.answer, percent(stats.firstPassRate), percent(stats.finalPassRate), ...(hasSeminar ? [percent(stats.seminarFinalPassRate)] : []), stats.unanchoredFirstDrafts, stats.emptyFirstDrafts, stats.failedTurns,
-      stats.cutOff, seconds(stats.replyMedianMs), seconds(stats.replySlowestTenthMs), seconds(stats.turnMedianMs), seconds(stats.turnSlowestTenthMs), money(stats.costPerConversation), barCell(bar),
+      run.label, run.answer, percent(stats.firstPassRate), percent(stats.finalPassRate), ...(hasSeminar ? [percent(stats.seminarFinalPassRate)] : []), stats.unanchoredFirstDrafts, stats.emptyFirstDrafts, stats.cutOff, barCell(bar),
     ]),
   ), '');
+
+  out.push("### Each reply model's time, cost and trouble", '');
+  out.push(table(
+    ['Run', 'Model', 'A reply takes (middle)', 'A reply takes (slowest tenth)', 'A whole turn takes (middle)', 'A whole turn takes (slowest tenth)', 'Turns over 45 seconds', 'Turns that failed', 'Turns sent twice',
+      'First drafts the model grader did not grade', 'Reply calls that failed', 'Replies cost, a conversation'],
+    [...baseReply, ...candidateReply].map(({ run, stats }) => [
+      run.label, run.answer, seconds(stats.replyMedianMs), seconds(stats.replySlowestTenthMs), seconds(stats.turnMedianMs), seconds(stats.turnSlowestTenthMs), stats.turnsOverDeadline, stats.failedTurns, stats.retriedTurns,
+      stats.ungradedFirstDrafts, failedCell(stats.replyCallsFailed, stats.replyCallFailures), money(stats.costPerConversation),
+    ]),
+  ), '');
+  out.push('A whole turn is the reply, the side analyses, the grading and any rewrite. It does not count the classification and the search for case law, which come first on the site and add a second or two; the site gives a turn up after 45 seconds. '
+    + 'A reply call that failed is timed for as long as it took, so one that ran out of time counts as slow.', '');
 
   out.push('## Small-job models', '');
   if (!baseSmall.length && !candidateSmall.length) {
@@ -318,21 +429,27 @@ export function renderReport({ app: appName, date, baseline, smallBaseline, repl
   } else {
     out.push(table(
       ['Run', 'Model', 'A usable answer when one was due', "Same case type as today's", "Same lead tier as today's", "Same first verdict as today's", 'Average lead score', 'Known-bad drafts caught',
-        'Slowest job (slowest tenth)', 'Small jobs cost, a conversation', 'Bar'],
+        'Slowest job (slowest tenth)', 'Small-job calls that failed', 'Small jobs cost, a conversation', 'Bar'],
       [...baseSmall, ...candidateSmall].map(({ run, stats, bar }) => [
-        run.label, run.aux, percent(stats.jsonValidRate), percent(stats.typeAgreement), percent(stats.tierAgreement), percent(stats.verdictAgreement),
+        run.label, run.aux, percent(stats.jsonValidRate), ...[stats.typeAgreement, stats.tierAgreement, stats.verdictAgreement].map(value => (smallBaseline.length ? percent(value) : 'nothing to compare with')),
         stats.averageLeadScore === null ? 'none scored' : `${stats.averageLeadScore.toFixed(1)}${typeof stats.leadScoreShift === 'number' ? ` (${stats.leadScoreShift >= 0 ? '+' : ''}${stats.leadScoreShift.toFixed(1)})` : ''}`,
         `${stats.knownBadCaught.length} of ${(run.knownBad ?? []).length}`,
-        stats.slowestJob ? `${stats.slowestJob}, ${seconds(stats.slowestTenthMs)}` : 'not timed', money(stats.costPerConversation), barCell(bar),
+        stats.slowestJob ? `${stats.slowestJob}, ${seconds(stats.slowestTenthMs)}` : 'not timed', failedCell(stats.failedCalls, stats.failedCallSummary), money(stats.costPerConversation), barCell(bar),
       ]),
     ), '');
-    out.push(`Today's model agrees with its own other runs on ${percent(baselineSelf.typeAgreement)} of case types, ${percent(baselineSelf.tierAgreement)} of lead tiers and ${percent(baselineSelf.verdictAgreement)} of first verdicts (its worst run). `
-      + `Its average lead score is ${baselineLeadScore === null ? 'not known' : baselineLeadScore.toFixed(1)}. It catches these known-bad drafts in every run: ${everyRunCaught.length ? everyRunCaught.join(', ') : 'none'}.`, '');
+    if (smallBaseline.length >= 2) {
+      out.push(`Today's small-job model, run ${smallBaseline.length} times, gives itself the same answer on ${percent(baselineSelf.typeAgreement)} of case types, ${percent(baselineSelf.tierAgreement)} of lead tiers and ${percent(baselineSelf.verdictAgreement)} of first verdicts, `
+        + "for the pair of its runs that agrees least. A candidate is held to those figures. It is measured against the answer today's runs give most often, a steadier mark than any one run, so today's own model would score a little above its own figures. "
+        + `Today's average lead score is ${baselineLeadScore === null ? 'not known' : baselineLeadScore.toFixed(1)}. Today's model catches these known-bad drafts in every run: ${everyRunCaught.length ? everyRunCaught.join(', ') : 'none'}.`, '');
+    } else {
+      out.push(`Today's small-job model was run ${smallBaseline.length === 1 ? 'once' : 'not at all'}, so how well it agrees with itself is not known and no candidate can be held to it.`, '');
+    }
+    out.push('A usable answer is counted each time one was due: the grade of a draft, a lead score, a case card, and every answer that had to be JSON. A call that was refused or never answered is counted apart, in its own column, with what it failed on: such a call is made again, and it may be the account that was refused and not the model.', '');
 
     out.push("### Each small job's time", '');
     out.push(table(
-      ['Run', 'Model', 'Job', 'Calls', 'Middle', 'Slowest tenth', 'Answers that were JSON'],
-      [...baseSmall, ...candidateSmall].flatMap(({ run, stats }) => Object.entries(stats.jobs).map(([job, timed]) => [run.label, run.aux, job, timed.calls, seconds(timed.medianMs), seconds(timed.slowestTenthMs), percent(timed.jsonValid)])),
+      ['Run', 'Model', 'Job', 'Calls answered', 'Calls that failed', 'Middle', 'Slowest tenth', 'Answers that were JSON'],
+      [...baseSmall, ...candidateSmall].flatMap(({ run, stats }) => Object.entries(stats.jobs).map(([job, timed]) => [run.label, run.aux, job, timed.calls, timed.failed, seconds(timed.medianMs), seconds(timed.slowestTenthMs), percent(timed.jsonValid)])),
     ), '');
   }
 
@@ -423,8 +540,9 @@ export function renderReport({ app: appName, date, baseline, smallBaseline, repl
 
   out.push("## Where a small-job candidate differs from today's usual answer", '');
   if (!candidateSmall.length) out.push('No small-job candidate was measured.', '');
+  else if (!smallBaseline.length) out.push("There is no small-job run of today's model to compare a candidate with.", '');
   const shown = value => (value === null || value === undefined ? 'none' : String(value));
-  for (const { run } of candidateSmall) {
+  for (const { run } of smallBaseline.length ? candidateSmall : []) {
     const differences = [];
     for (const turn of run.turns) {
       const key = keyOf(turn);
@@ -535,8 +653,10 @@ async function main() {
   }
   // The price table is the app's own, and its file opens the database client as it loads: it is given the
   // measurement's address, which no database answers at. The report reads files and asks nothing of anyone.
+  // A price table in the local settings is set to nothing, not removed: the app loads the local settings as it
+  // starts, and that fills in whatever is not set.
   process.env.DATABASE_URL = MEASURE_DATABASE_URL;
-  delete process.env.OPENAI_MODEL_RATES_JSON;
+  process.env.OPENAI_MODEL_RATES_JSON = '';
   const { estimateAiCost } = await import('../ai-budget.js');
 
   let runs;
@@ -544,6 +664,12 @@ async function main() {
     runs = Object.fromEntries(['baseline', 'smallBaseline', 'replies', 'smalls', 'samples'].map(name => [name, args[name].map(readRun)]));
   } catch (error) {
     console.error(`report: ${error.message}`);
+    return 1;
+  }
+  const problems = checkRuns({ app: app.APP, ...runs });
+  if (problems.length) {
+    console.error('report: these runs cannot be set beside one another:');
+    for (const problem of problems) console.error(`  ${problem}`);
     return 1;
   }
   const now = new Date();

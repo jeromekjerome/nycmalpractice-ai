@@ -10,12 +10,12 @@
     "summary.js": "3f0193b77af9bb06bf020557fd5f783638aa3229ce23df59dde3acdfa18cb509",
     "test/helpers.mjs": "da2246c473511dfbf46e40ececed852ddda7e4bd691d940d111c01555aff0802",
     "test/runner.mjs": "aab9f55bde4a107ce843a5c28842e587e052aca7acce429a09811ebfc8fe56eb",
-    "test/model-shaping.test.mjs": "be3a0b69c2c61c9262266d787c4351417941bca75e21128c5ca8441635505305",
+    "test/model-shaping.test.mjs": "b51759c10b466f49437c9ebe2a20a5e19f4bb017b72f9adf9a9ffee797f24572",
     "test/prices.test.mjs": "b1b53cfbb2af2671f077296a67a0cbbd6ec68ee918e6dd8687d7953b95a7019e",
     "measure/guard-fetch.mjs": "03e117330d3babb86b51ac967a72d74324b55a585c22713a8bd187e34aba6c04",
-    "measure/run.mjs": "15e1d97d09c4960111761f27a4f8612c0ddbf8e23f39978e682d81c14bbd6c8b",
+    "measure/run.mjs": "9abe588699f0adbaa6d9c88b566ccfb2e5219588745c13cf0f9817eb2c85b4be",
     "measure/probe-shapes.mjs": "05219dcb7e8ca06a57823378a0c581a9dfe1ab6e3da8ef0885ad01abdf7d2b93",
-    "measure/report.mjs": "9f35d6fa1318b01f079035de015bc377e3f05d1a164eafb5f86892fbed066b68",
-    "test/measure.test.mjs": "dbb498a035e787e786a16dfccf20acd9230ed9701c65387545fb493b3e142d94"
+    "measure/report.mjs": "13b77c9c51b28e481a6ffc8af48e61ca58f2c3cd7ce74d0f137f3b25a2ba83dc",
+    "test/measure.test.mjs": "0cb636c426b03cb139c45198797da9f60c1ef0641e31521b7a825e3405e214d2"
   }
 }

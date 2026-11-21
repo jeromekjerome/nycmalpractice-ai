@@ -69,14 +69,15 @@ const STAND_INS = {
   DAILY_DIGEST: 'off',
 };
 
-// Settings that would change what a run measures if the local .env happened to hold them.
-const CLEARED = ['AI_BUDGET_IN_TESTS', 'OPENAI_MODEL_RATES_JSON', 'DEMO_MODE', 'DEMO_DATABASE_URL'];
-
 // The settings a run gives the app, applied before any app module is imported.
 //   NODE_ENV=test       keeps the spending cap, which lives in the database, out of the run
 //   DATABASE_URL        an address no database answers at
 //   GATEKEEPER_MODE=llm the model grader, which a test environment would otherwise leave out
 //   the two chains      one model each, named as its own fallback, so that no other model can answer
+//   the last four       settings that would change what a run is if the local .env held them (the spending cap
+//                       switched on in a test environment, another price table, a demo copy of the site). They
+//                       are set to nothing, not removed: the app loads the local .env as it starts, and that
+//                       fills in whatever is not set.
 export function environmentFor({ answer, aux }) {
   return {
     NODE_ENV: 'test',
@@ -88,14 +89,17 @@ export function environmentFor({ answer, aux }) {
     OPENAI_MODEL_AUX: aux,
     OPENAI_MODEL_AUX_FALLBACKS: aux,
     ...STAND_INS,
+    AI_BUDGET_IN_TESTS: '',
+    OPENAI_MODEL_RATES_JSON: '',
+    DEMO_MODE: '',
+    DEMO_DATABASE_URL: '',
   };
 }
 
 // What is kept of one turn. `type` is the kind of claim the reply was written for (from the packet);
-// `classifiedType` is what this run's small model made of the same conversation, in a small-job run.
-export { CLEARED as CLEARED_SETTINGS };
-
-export function turnRecord({ visitor, turn, ms, type, result, classifiedType = null, error = null }) {
+// `classifiedType` is what this run's small model made of the same conversation, in a small-job run;
+// `attempts` is kept when the turn had to be sent more than once.
+export function turnRecord({ visitor, turn, ms, type, result, classifiedType = null, error = null, attempts = 1 }) {
   const evaluation = result?.evaluation ?? null;
   // The first attempt is the model's own draft; later attempts are rewrites.
   const first = evaluation?.attempts?.[0] ?? null;
@@ -121,6 +125,7 @@ export function turnRecord({ visitor, turn, ms, type, result, classifiedType = n
     leadScore: result?.leadScore?.score ?? null,
     leadVerdict: result?.leadScore != null && typeof result.leadScore === 'object',
     caseCard: result?.caseAnalysis != null && typeof result.caseAnalysis === 'object',
+    ...(attempts > 1 ? { attempts } : {}),
     ...(error ? { error } : {}),
   };
 }
@@ -197,9 +202,9 @@ async function play({ app, label, visitor, history, question, packet, draft, now
     const started = now();
     try {
       const result = await app.reply(structuredClone(args));
-      return { result, ms: now() - started, error: null };
+      return { result, ms: now() - started, error: null, attempts: attempt };
     } catch (error) {
-      if (attempt === 2) return { result: null, ms: now() - started, error: withoutKeys(error?.message || error) };
+      if (attempt === 2) return { result: null, ms: now() - started, error: withoutKeys(error?.message || error), attempts: attempt };
     }
   }
 }
@@ -288,7 +293,7 @@ export async function measure({ args, app, visitors, knownBad, store, guard, pac
         const classifiedType = mode === 'small'
           ? await app.classify(structuredClone(history), question).then(classified => classified.type, () => null)
           : null;
-        record = turnRecord({ visitor: visitor.key, turn, ms: played.ms, type: packet.type, result: played.result, classifiedType, error: played.error });
+        record = turnRecord({ visitor: visitor.key, turn, ms: played.ms, type: packet.type, result: played.result, classifiedType, error: played.error, attempts: played.attempts });
         run.turns.push(record);
         made.set(key, record);
         save();
@@ -453,7 +458,6 @@ async function main() {
 
   // The order matters: the settings, then the guard, and only then anything of the app.
   Object.assign(process.env, environmentFor(args));
-  for (const name of CLEARED) delete process.env[name];
   const app = await import('./app.mjs');
   // Only a recording run has any business with CourtListener.
   const guard = installGuard({ allowHosts: args.mode === 'record' ? ['api.openai.com', 'www.courtlistener.com'] : ['api.openai.com'], jobOf: app.jobOf });

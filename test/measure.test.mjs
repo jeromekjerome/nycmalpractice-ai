@@ -8,11 +8,15 @@
 // adapter, so that nothing here depends on which app is running it. What is particular to an app (its adapter,
 // its visitors, its known-bad drafts) is tested in measure-app.test.mjs.
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from './runner.mjs';
 import { installGuard, MEASURE_DATABASE_URL, withoutKeys } from '../measure/guard-fetch.mjs';
-import { parseArgs, environmentFor, CLEARED_SETTINGS, turnRecord, allowanceDecision, courtListenerPace, estimateCost, measure } from '../measure/run.mjs';
+import { parseArgs, environmentFor, turnRecord, allowanceDecision, courtListenerPace, estimateCost, measure } from '../measure/run.mjs';
 import { outcome, probeLine, probeRequests } from '../measure/probe-shapes.mjs';
-import { replyStats, smallStats, majority, agreement, selfAgreement, replyBar, smallBar, parseReportArgs, renderReport, renderSamples } from '../measure/report.mjs';
+import { replyStats, smallStats, majority, agreement, selfAgreement, replyBar, smallBar, checkRuns, parseReportArgs, renderReport, renderSamples } from '../measure/report.mjs';
 import { estimateAiCost } from '../ai-budget.js';
 import { isReasoningModel } from '../openaiModelFailover.js';
 
@@ -154,7 +158,8 @@ test('the runner refuses a run it cannot name, a mode it does not know, and a sm
 
 test('a measurement run points the app at no database, one answer model and one small model, and holds no other service\'s keys', () => {
   const settings = environmentFor({ answer: 'gpt-6.2-sol', aux: 'gpt-6-luna' });
-  const { NODE_ENV, DATABASE_URL, GATEKEEPER_MODE, GATEKEEPER_COURTLISTENER_LOOKUP, OPENAI_MODEL_ANSWER, OPENAI_MODEL_ANSWER_FALLBACKS, OPENAI_MODEL_AUX, OPENAI_MODEL_AUX_FALLBACKS, ...standIns } = settings;
+  const { NODE_ENV, DATABASE_URL, GATEKEEPER_MODE, GATEKEEPER_COURTLISTENER_LOOKUP, OPENAI_MODEL_ANSWER, OPENAI_MODEL_ANSWER_FALLBACKS, OPENAI_MODEL_AUX, OPENAI_MODEL_AUX_FALLBACKS,
+    AI_BUDGET_IN_TESTS, OPENAI_MODEL_RATES_JSON, DEMO_MODE, DEMO_DATABASE_URL, ...standIns } = settings;
   assert.deepEqual({ NODE_ENV, DATABASE_URL, GATEKEEPER_MODE, GATEKEEPER_COURTLISTENER_LOOKUP, OPENAI_MODEL_ANSWER, OPENAI_MODEL_ANSWER_FALLBACKS, OPENAI_MODEL_AUX, OPENAI_MODEL_AUX_FALLBACKS }, {
     NODE_ENV: 'test',
     DATABASE_URL: 'postgres://measure:measure@measure.invalid/none',
@@ -172,9 +177,41 @@ test('a measurement run points the app at no database, one answer model and one 
   assert.match(standIns.TWILIO_ACCOUNT_SID, /^AC/);
   assert.match(standIns.SMTP_HOST, /\.invalid$/);
   assert.equal('OPENAI_API_KEY' in settings || 'COURTLISTENER_TOKEN' in settings, false);
-  // Settings that would change what a run is: the spending cap switched on in a test environment, another price
-  // table, a demo copy of the site.
-  assert.deepEqual(CLEARED_SETTINGS, ['AI_BUDGET_IN_TESTS', 'OPENAI_MODEL_RATES_JSON', 'DEMO_MODE', 'DEMO_DATABASE_URL']);
+  // Settings that would change what a run is (the spending cap switched on in a test environment, another price
+  // table, a demo copy of the site) are set to nothing. They are not removed: the app loads the local settings
+  // file as it starts, and that fills in whatever is not set.
+  assert.deepEqual({ AI_BUDGET_IN_TESTS, OPENAI_MODEL_RATES_JSON, DEMO_MODE, DEMO_DATABASE_URL }, { AI_BUDGET_IN_TESTS: '', OPENAI_MODEL_RATES_JSON: '', DEMO_MODE: '', DEMO_DATABASE_URL: '' });
+});
+
+test('the settings a run gives the app are still there after the app has loaded the local settings file', () => {
+  // In a folder with a settings file of its own, a second process applies a run's settings, loads the app's
+  // database file (which loads the settings file of the folder it is run from), and says what it then holds.
+  const folder = mkdtempSync(join(tmpdir(), 'measure-settings-'));
+  try {
+    writeFileSync(join(folder, '.env'), [
+      'DATABASE_URL=postgres://real:real@db.example.test/live', 'AI_BUDGET_IN_TESTS=1', 'OPENAI_MODEL_RATES_JSON={"gpt-4o":[0,0]}', 'DEMO_MODE=1',
+      'DEMO_DATABASE_URL=postgres://demo:demo@db.example.test/demo', 'NODE_ENV=production', 'GATEKEEPER_MODE=deterministic', 'OPENAI_MODEL_ANSWER=gpt-4o',
+      'STRIPE_SECRET_KEY=sk_live_from_the_file', 'ONLY_IN_THE_FILE=read',
+    ].join('\n'));
+    const names = ['DATABASE_URL', 'AI_BUDGET_IN_TESTS', 'OPENAI_MODEL_RATES_JSON', 'DEMO_MODE', 'DEMO_DATABASE_URL', 'NODE_ENV', 'GATEKEEPER_MODE', 'OPENAI_MODEL_ANSWER', 'STRIPE_SECRET_KEY', 'ONLY_IN_THE_FILE'];
+    const script = [
+      `import { environmentFor } from ${JSON.stringify(new URL('../measure/run.mjs', import.meta.url).href)};`,
+      "Object.assign(process.env, environmentFor({ answer: 'gpt-6.2-sol', aux: 'gpt-6-luna' }));",
+      `await import(${JSON.stringify(new URL('../db.js', import.meta.url).href)});`,
+      `console.log('HELD ' + JSON.stringify(Object.fromEntries(${JSON.stringify(names)}.map(name => [name, process.env[name]]))));`,
+    ].join('\n');
+    const printed = execFileSync(process.execPath, ['--input-type=module', '-e', script], { cwd: folder, env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot }, encoding: 'utf8' });
+    const held = JSON.parse(printed.split('\n').find(line => line.startsWith('HELD ')).slice(5));
+    assert.deepEqual(held, {
+      // The file was read: what only it holds is there.
+      ONLY_IN_THE_FILE: 'read',
+      // And nothing a run sets was changed by it.
+      DATABASE_URL: MEASURE_DATABASE_URL, AI_BUDGET_IN_TESTS: '', OPENAI_MODEL_RATES_JSON: '', DEMO_MODE: '', DEMO_DATABASE_URL: '',
+      NODE_ENV: 'test', GATEKEEPER_MODE: 'llm', OPENAI_MODEL_ANSWER: 'gpt-6.2-sol', STRIPE_SECRET_KEY: 'sk_test_measure',
+    });
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
 });
 
 test("a turn is recorded with the gate's first verdict, its unanchored citations and what was served", () => {
@@ -206,6 +243,9 @@ test("a turn is recorded with the gate's first verdict, its unanchored citations
   });
   const ungated = turnRecord({ visitor: 'v', turn: 1, ms: 9, type: 'slip', result: { answer: 'text', evaluation: null } });
   assert.deepEqual([ungated.gateStatus, ungated.firstPassCompliant, ungated.served], [null, false, 'text']);
+  // A turn that had to be sent twice says so; one sent once says nothing of it.
+  assert.equal(turnRecord({ visitor: 'v', turn: 1, ms: 9, type: 'slip', result, attempts: 2 }).attempts, 2);
+  assert.equal('attempts' in turnRecord({ visitor: 'v', turn: 1, ms: 9, type: 'slip', result, attempts: 1 }), false);
 });
 
 // CourtListener's usage report, with what is left for the day, the hour and the minute.
@@ -446,6 +486,7 @@ test('a turn that fails is tried once more, and one that fails twice is kept as 
   assert.deepEqual(run.turns.map(turn => [turn.visitor, turn.turn, turn.served, turn.error ?? null]), [
     ['ann', 1, 'reply to: first from ann', null], ['ann', 2, '', 'the model did not answer'], ['ben', 1, 'reply to: first from ben', null],
   ]);
+  assert.deepEqual(run.turns.map(turn => turn.attempts ?? 1), [2, 2, 1]);
 });
 
 test('a small-job run grades the drafts of the run it copies, classifies each turn, and is shown the drafts that are wrong on purpose', async () => {
@@ -516,6 +557,7 @@ test('a reply that came back empty counts as failed, and the slowest tenth is th
   assert.equal(stats.turnSlowestTenthMs, 9000);
   assert.equal(stats.seminarFinalPassRate, 1);
   assert.equal(stats.costPerConversation, 0);
+  assert.deepEqual([stats.replyCallsFailed, stats.replyCallFailures, stats.ungradedFirstDrafts, stats.retriedTurns, stats.turnsOverDeadline], [0, '', 0, 0, 0]);
   // No reply call was kept, so the reply job's own time is not known. That is not the same as no time at all.
   assert.equal(stats.replyMedianMs, null);
   assert.equal(stats.replySlowestTenthMs, null);
@@ -524,9 +566,9 @@ test('a reply that came back empty counts as failed, and the slowest tenth is th
 test('a reply model is timed on its own calls and costed on its own jobs, and its seminar turns are counted apart', () => {
   const run = { answer: 'gpt-6.2-sol', aux: 'gpt-4o-mini',
     turns: [
-      turn({ turn: 1 }),
-      turn({ turn: 2, firstDraft: '', firstPassCompliant: false }),
-      turn({ visitor: 'seminar-auto', turn: 1 }),
+      turn({ turn: 1, evaluator: 'deterministic_fallback' }),
+      turn({ turn: 2, firstDraft: '', firstPassCompliant: false, evaluator: 'deterministic' }),
+      turn({ visitor: 'seminar-auto', turn: 1, attempts: 2, ms: 50_000 }),
       turn({ visitor: 'seminar-auto', turn: 2, gateStatus: 'BLOCKED', firstPassCompliant: false }),
       turn({ visitor: 'seminar-auto', turn: 3, gateStatus: null, firstPassCompliant: false, served: '', error: 'timed out' }),
     ],
@@ -535,6 +577,11 @@ test('a reply model is timed on its own calls and costed on its own jobs, and it
       { model: 'gpt-6.2-sol', job: 'reply', inputTokens: 0, outputTokens: 0, ms: 4000, finish: 'length' },
       { model: 'gpt-6.2-sol', job: 'rewrite', inputTokens: 0, outputTokens: 0, ms: 12000, finish: 'stop' },
       { model: 'gpt-4o-mini', job: 'grade', inputTokens: 1_000_000, outputTokens: 0, ms: 60000 },
+    ],
+    failed: [
+      { model: 'gpt-6.2-sol', job: 'reply', status: 429, ms: 300 },
+      { model: 'gpt-6.2-sol', job: 'reply', error: 'Request timed out.', ms: 30_000 },
+      { model: 'gpt-4o-mini', job: 'grade', status: 500, ms: 50 },
     ] };
   const stats = replyStats(run, context);
   assert.equal(stats.finalPassRate, 3 / 5);
@@ -542,9 +589,18 @@ test('a reply model is timed on its own calls and costed on its own jobs, and it
   assert.equal(stats.emptyFirstDrafts, 1);
   assert.equal(stats.failedTurns, 1);
   assert.equal(stats.cutOff, 1);
-  // The grader's minute is no part of the reply job's time.
+  // The grader's minute is no part of the reply job's time; a reply call that failed is, for as long as it took:
+  // 300, 2000, 4000, 12000 and the 30 seconds of the one that timed out.
   assert.equal(stats.replyMedianMs, 4000);
-  assert.equal(stats.replySlowestTenthMs, 12000);
+  assert.equal(stats.replySlowestTenthMs, 30_000);
+  // What would otherwise go unseen: reply calls that failed, a first draft the model grader never graded (an empty
+  // draft is not sent to it, so that one is not counted), a turn that had to be sent twice, and a turn that took
+  // longer than the 45 seconds the site waits.
+  assert.equal(stats.replyCallsFailed, 2);
+  assert.equal(stats.replyCallFailures, '429 x1, Request timed out. x1');
+  assert.equal(stats.ungradedFirstDrafts, 1);
+  assert.equal(stats.retriedTurns, 1);
+  assert.equal(stats.turnsOverDeadline, 1);
   // gpt-6.2-sol at 2 and 10: 2.00 in and 1.00 out, over two visitors. The small model's 0.15 belongs to the small jobs.
   close(stats.costPerConversation, 1.5);
 });
@@ -565,13 +621,18 @@ test("agreement is measured against the answer today's model gives most often, a
   assert.equal(agreement({ turns: [turn({ leadTier: null })] }, new Map([['rear-end-red-light:1', null]]), t => t.leadTier), 1);
   assert.equal(agreement({ turns: [turn({ leadTier: 'hot' })] }, new Map([['rear-end-red-light:1', null]]), t => t.leadTier), 0);
 
-  // Today's model against itself: each run against what its other runs say most often, and the worst of the three.
+  // Today's model against itself: how often two of its runs give the same answer, for the pair that agrees least.
   const four = types => ({ turns: types.map((type, i) => turn({ turn: i + 1, type })) });
-  // A against B and C agrees on 3 of 4; B against A and C on 3 of 4; C against A and B on 2 of 4.
-  assert.equal(selfAgreement([four(['x', 'x', 'x', 'x']), four(['x', 'x', 'x', 'y']), four(['x', 'x', 'y', 'y'])], t => t.type), 0.5);
+  const [a, b, c] = [four(['x', 'x', 'x', 'x']), four(['x', 'x', 'x', 'y']), four(['x', 'x', 'y', 'y'])];
+  // A and B agree on 3 of 4, B and C on 3 of 4, A and C on 2 of 4. The order the runs are named in changes nothing.
+  for (const order of [[a, b, c], [a, c, b], [b, a, c], [b, c, a], [c, a, b], [c, b, a]]) assert.equal(selfAgreement(order, t => t.type), 0.5);
+  assert.equal(selfAgreement([a, b], t => t.type), 0.75);
   assert.equal(selfAgreement([four(['x', 'y']), four(['x', 'y']), four(['x', 'y'])], t => t.type), 1);
-  // One run has nothing to be compared with.
-  assert.equal(selfAgreement([four(['x'])], t => t.type), 1);
+  // Only the turns the third argument lets through are compared.
+  assert.equal(selfAgreement([a, b, c], t => t.type, t => t.turn <= 2), 1);
+  // One run has nothing to be compared with: how well the model agrees with itself is then not known.
+  assert.equal(selfAgreement([a], t => t.type), null);
+  assert.equal(selfAgreement([], t => t.type), null);
 });
 
 test("a small-job model is judged on usable answers, agreement with today's, the lead score, the drafts it catches and each job's own time", () => {
@@ -583,7 +644,7 @@ test("a small-job model is judged on usable answers, agreement with today's, the
   const run = { answer: 'gpt-4o', aux: 'gpt-6-luna', knownBadFromCall: 5,
     turns: [
       turn({ turn: 1, classifiedType: 'auto' }),
-      turn({ turn: 2, classifiedType: 'slip', leadTier: 'hot', leadScore: 80, leadVerdict: true }),
+      turn({ turn: 2, classifiedType: 'slip', leadTier: 'hot', leadScore: '80', leadVerdict: true }),
       turn({ turn: 3, classifiedType: 'auto', leadTier: 'warm', leadScore: 60, leadVerdict: true, caseCard: false, firstPassCompliant: false }),
       turn({ visitor: 'seminar-auto', turn: 1, classifiedType: 'auto', evaluator: 'deterministic_fallback' }),
     ],
@@ -600,9 +661,13 @@ test("a small-job model is judged on usable answers, agreement with today's, the
   };
   const stats = smallStats(run, reference, 65, context);
   // The checks: the grader's answer usable on each of 4 turns (3 were); a lead score there on turns 2 and 3 (both);
-  // a case card there on turn 3 (it was not); five answers that had to be JSON (4 were); one small-job call that
-  // failed outright. 9 of 13. The seminar turn is due neither a lead score nor a case card.
-  close(stats.jsonValidRate, 9 / 13);
+  // a case card there on turn 3 (it was not); five answers that had to be JSON (4 were). 9 of 12. The seminar turn is
+  // due neither a lead score nor a case card.
+  close(stats.jsonValidRate, 9 / 12);
+  // A small-job call that failed outright is counted apart, with what it failed on: it may be the account's rate
+  // limit and not the model, and the call is made again. The answer model's failed call is no small job.
+  assert.equal(stats.failedCalls, 1);
+  assert.equal(stats.failedCallSummary, '429 x1');
   assert.equal(stats.typeAgreement, 3 / 4);
   assert.equal(stats.tierAgreement, 1 / 2);
   assert.equal(stats.verdictAgreement, 1);
@@ -610,9 +675,11 @@ test("a small-job model is judged on usable answers, agreement with today's, the
   assert.equal(stats.leadScoreShift, 5);
   assert.deepEqual(stats.knownBadCaught, ['asks-for-phone']);
   // Each job is timed on its own calls, and the rule is applied to the slowest of the jobs.
-  assert.deepEqual(stats.jobs.classify, { calls: 2, medianMs: 500, slowestTenthMs: 700, jsonValid: 1 });
-  assert.deepEqual(stats.jobs.grade, { calls: 3, medianMs: 3000, slowestTenthMs: 5000, jsonValid: 2 / 3 });
-  assert.deepEqual(Object.keys(stats.jobs), ['classify', 'grade']);
+  assert.deepEqual(stats.jobs.classify, { calls: 2, failed: 0, medianMs: 500, slowestTenthMs: 700, jsonValid: 1 });
+  assert.deepEqual(stats.jobs.grade, { calls: 3, failed: 0, medianMs: 3000, slowestTenthMs: 5000, jsonValid: 2 / 3 });
+  // A call that failed is timed with its job, for as long as it took.
+  assert.deepEqual(stats.jobs.leadScore, { calls: 0, failed: 1, medianMs: 10, slowestTenthMs: 10, jsonValid: 1 });
+  assert.deepEqual(Object.keys(stats.jobs), ['classify', 'leadScore', 'grade']);
   assert.equal(stats.slowestTenthMs, 5000);
   assert.equal(stats.slowestJob, 'grade');
   // gpt-6-luna at 0.10 and 0.50, before the known-bad drafts: 0.10 in and 0.50 out, over two visitors.
@@ -628,6 +695,10 @@ test("the reply bar is today's worst run, and ten seconds for the slowest tenth 
   assert.deepEqual(failed.failed, ['finalPass', 'unanchored', 'seminar', 'speed']);
   // A run with no reply call to time has not shown its speed.
   assert.deepEqual(replyBar({ finalPassRate: 1, unanchoredFirstDrafts: 0, seminarFinalPassRate: 1, replySlowestTenthMs: null }, baselines).failed, ['speed']);
+  // A run in which the model grader did not grade every first draft is not a full measurement, whatever it scored.
+  const halfGraded = replyBar({ finalPassRate: 1, unanchoredFirstDrafts: 0, seminarFinalPassRate: 1, replySlowestTenthMs: 1000, ungradedFirstDrafts: 2 }, baselines);
+  assert.deepEqual(halfGraded.failed, ['graded']);
+  assert.match(halfGraded.reasons[0], /2 first drafts were graded by code alone/);
 });
 
 test("the small-job bar wants usable answers every time, today's own agreement, a steady lead score, every draft today's model catches, and four seconds", () => {
@@ -637,6 +708,11 @@ test("the small-job bar wants usable answers every time, today's own agreement, 
   assert.equal(failed.ok, false);
   assert.equal(failed.reasons.length, 6);
   assert.deepEqual(failed.failed, ['json', 'type', 'verdict', 'leadScore', 'knownBad', 'speed']);
+  // With no small-job run of today's model, or only one, there is nothing to hold a candidate to: it does not pass.
+  assert.deepEqual(smallBar(pass, null, []).failed, ['baseline']);
+  const once = smallBar(pass, { typeAgreement: null, tierAgreement: null, verdictAgreement: null }, []);
+  assert.deepEqual(once.failed, ['baseline']);
+  assert.match(once.reasons[0], /run once/);
   // With no lead scored at all there is no shift to judge, and that is not a failure of the lead score rule.
   assert.deepEqual(smallBar({ ...pass, leadScoreShift: null }, { typeAgreement: 0.9, tierAgreement: 0.8, verdictAgreement: 0.85 }, []).failed, []);
 });
@@ -650,6 +726,35 @@ test('the report command is told which runs are which, and refuses what it canno
   assert.throws(() => parseReportArgs(['--baseline', 'base-1']), /--app/);
   assert.throws(() => parseReportArgs(['--app', 'nycinjury', '--baseline', 'base-1,../x']), /label/);
   assert.throws(() => parseReportArgs(['--app', 'nycinjury', '--baseline', 'base-1', '--fast']), /--fast/);
+});
+
+test('the report refuses runs that are not what their flags say', () => {
+  const made = (label, over = {}) => ({ app: 'nycinjury', label, mode: 'reply', answer: 'gpt-4o', aux: 'gpt-4o-mini', turns: [], finishedAt: '2026-11-20T20:10:00.000Z', ...over });
+  const good = {
+    app: 'nycinjury',
+    baseline: [made('base-1', { mode: 'record' }), made('base-2')],
+    smallBaseline: [made('small-base-1', { mode: 'small', from: 'base-1' })],
+    replies: [made('reply-sol', { answer: 'gpt-6.2-sol' })],
+    smalls: [made('small-luna', { mode: 'small', aux: 'gpt-6-luna', from: 'base-1' })],
+  };
+  assert.deepEqual(checkRuns(good), []);
+  assert.deepEqual(checkRuns({ ...good, smallBaseline: [], replies: [], smalls: [] }), []);
+  const first = over => checkRuns({ ...good, ...over })[0];
+  // Another app's run; a "today's" run that used another model; a reply run graded by another small model.
+  assert.match(first({ replies: [made('reply-sol', { answer: 'gpt-6.2-sol', app: 'nycmalpractice' })] }), /reply-sol was run on nycmalpractice, not nycinjury/);
+  assert.match(first({ baseline: [good.baseline[0], made('base-2', { answer: 'gpt-4.1' })] }), /base-2 used gpt-4\.1 with gpt-4o-mini, not today's gpt-4o with gpt-4o-mini/);
+  assert.match(first({ replies: [made('reply-sol', { answer: 'gpt-6.2-sol', aux: 'gpt-6-luna' })] }), /reply-sol was graded by gpt-6-luna, not today's gpt-4o-mini/);
+  // A small-job run among the reply runs, and the other way about.
+  assert.match(first({ replies: [good.smalls[0]] }), /small-luna is a small-job run, given as a reply run/);
+  assert.match(first({ smalls: [good.replies[0]] }), /reply-sol is not a small-job run/);
+  assert.match(first({ baseline: [good.smallBaseline[0]] }), /small-base-1 is a small-job run, given as a reply run/);
+  // A small-job run whose drafts are not today's, or were not written by today's reply model.
+  assert.match(first({ smalls: [made('small-luna', { mode: 'small', aux: 'gpt-6-luna', from: 'reply-sol' })] }), /small-luna took its drafts from reply-sol, which is not one of today's runs/);
+  assert.match(first({ smalls: [made('small-luna', { mode: 'small', answer: 'gpt-6.2-sol', aux: 'gpt-6-luna', from: 'base-1' })] }), /small-luna had its rewrites written by gpt-6\.2-sol, not today's gpt-4o/);
+  assert.match(first({ smallBaseline: [made('small-base-1', { mode: 'small', aux: 'gpt-6-luna', from: 'base-1' })] }), /small-base-1 used gpt-4o with gpt-6-luna, not today's gpt-4o with gpt-4o-mini/);
+  // The same run named twice, and a run that was stopped part-way.
+  assert.match(first({ replies: [good.replies[0], good.replies[0]] }), /reply-sol is given twice/);
+  assert.match(first({ replies: [made('reply-sol', { answer: 'gpt-6.2-sol', finishedAt: undefined })] }), /reply-sol is a run that was stopped part-way/);
 });
 
 // Runs small enough to read: one visitor with three turns and one seminar student with one.
@@ -687,7 +792,7 @@ test('the report sets each run beside the bar, names what passes cheapest first,
   const text = renderReport({ app: 'nycinjury', date: '2026-11-20', baseline, smallBaseline, replies, smalls, notes: ['gpt-5.4-nano is retired on 1 April 2027.'], ...context });
 
   assert.match(text, /^# Model measurement for nycinjury, 2026-11-20\n/);
-  for (const heading of ['## Reply models', '## Small-job models', "### Each small job's time", '### The drafts that are wrong on purpose', '## What passes', '## What a conversation costs', "## Where a small-job candidate differs from today's usual answer", '## Cheap first, stronger on a block', '## Notes']) {
+  for (const heading of ['## Reply models', "### Each reply model's time, cost and trouble", '## Small-job models', "### Each small job's time", '### The drafts that are wrong on purpose', '## What passes', '## What a conversation costs', "## Where a small-job candidate differs from today's usual answer", '## Cheap first, stronger on a block', '## Notes']) {
     assert.ok(text.includes(`\n${heading}\n`), `the report has no "${heading}"`);
   }
   // Every table is whole: each row has as many cells as its heading.
@@ -716,6 +821,8 @@ test('the report sets each run beside the bar, names what passes cheapest first,
   assert.match(differs, /small-nano.*rear-end-red-light, turn 2.*case type slip, where today's says auto/s);
   assert.match(differs, /lead tier warm, where today's says hot/);
   assert.match(text, /gpt-5\.4-nano is retired on 1 April 2027\./);
+  assert.match(text, /does not count the classification and the search/);
+  assert.match(text, /the pair of its runs that agrees least/);
   assert.doesNotMatch(text, /undefined|NaN|\[object/);
 
   // An app with no seminar has no seminar column, and nothing is said of one.
@@ -725,6 +832,13 @@ test('the report sets each run beside the bar, names what passes cheapest first,
   for (const [i, line] of plain.split('\n').entries()) {
     if (/^\|[-| :]+\|$/.test(line)) assert.equal(plain.split('\n')[i + 1].split('|').length, plain.split('\n')[i - 1].split('|').length, plain.split('\n')[i + 1]);
   }
+
+  // Small-job candidates with no run of today's small model beside them: none passes, and nothing is said to differ or not.
+  const unheld = renderReport({ app: 'nycinjury', date: '2026-11-20', baseline, smallBaseline: [], replies: [], smalls, notes: [], ...context });
+  assert.doesNotMatch(unheld.split('\n').find(line => line.startsWith('| small-luna |')), /\| passes \|$/);
+  assert.match(unheld, /No small-job candidate passes every rule\./);
+  assert.doesNotMatch(unheld, /nothing differs/);
+  assert.doesNotMatch(unheld, /undefined|NaN|\[object/);
 
   // With nothing but today's runs the report still stands.
   const alone = renderReport({ app: 'nycinjury', date: '2026-11-20', baseline, smallBaseline: [], replies: [], smalls: [], notes: [], ...context });

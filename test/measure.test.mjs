@@ -10,7 +10,7 @@
 import assert from 'node:assert/strict';
 import { test } from './runner.mjs';
 import { installGuard, MEASURE_DATABASE_URL, withoutKeys } from '../measure/guard-fetch.mjs';
-import { parseArgs, environmentFor, CLEARED_SETTINGS, turnRecord, allowanceDecision, estimateCost, measure } from '../measure/run.mjs';
+import { parseArgs, environmentFor, CLEARED_SETTINGS, turnRecord, allowanceDecision, courtListenerPace, estimateCost, measure } from '../measure/run.mjs';
 import { outcome, probeLine, probeRequests } from '../measure/probe-shapes.mjs';
 import { replyStats, smallStats, majority, agreement, selfAgreement, replyBar, smallBar, parseReportArgs, renderReport, renderSamples } from '../measure/report.mjs';
 import { estimateAiCost } from '../ai-budget.js';
@@ -208,32 +208,78 @@ test("a turn is recorded with the gate's first verdict, its unanchored citations
   assert.deepEqual([ungated.gateStatus, ungated.firstPassCompliant, ungated.served], [null, false, 'text']);
 });
 
+// CourtListener's usage report, with what is left for the day, the hour and the minute.
+const usageOf = (day, hour, minute) => ({ current_usage: [
+  { scope: 'api_usage', rate: '10/min', remaining: 0, limit: 10, window_seconds: 60, reset_at: '2026-11-20T10:00:30+00:00', blocked: false },
+  { scope: 'user', rate: '125/day', remaining: day, limit: 125, window_seconds: 86400, reset_at: '2026-11-21T02:00:00+00:00', blocked: false },
+  { scope: 'user', rate: '50/hour', remaining: hour, limit: 50, window_seconds: 3600, reset_at: '2026-11-20T10:40:00+00:00', blocked: false },
+  { scope: 'user', rate: '5/min', remaining: minute, limit: 5, window_seconds: 60, reset_at: '2026-11-20T10:00:50+00:00', blocked: false },
+] });
+
 test('before a live search the runner goes on, waits or stops by what CourtListener says is left', () => {
-  const usage = (day, hour, minute) => ({ current_usage: [
-    { scope: 'api_usage', rate: '10/min', remaining: 0, limit: 10, window_seconds: 60, reset_at: '2026-11-20T10:00:30+00:00', blocked: false },
-    { scope: 'user', rate: '125/day', remaining: day, limit: 125, window_seconds: 86400, reset_at: '2026-11-21T02:00:00+00:00', blocked: false },
-    { scope: 'user', rate: '50/hour', remaining: hour, limit: 50, window_seconds: 3600, reset_at: '2026-11-20T10:40:00+00:00', blocked: false },
-    { scope: 'user', rate: '5/min', remaining: minute, limit: 5, window_seconds: 60, reset_at: '2026-11-20T10:00:50+00:00', blocked: false },
-  ] });
   const now = Date.parse('2026-11-20T10:00:00+00:00');
-  assert.deepEqual(allowanceDecision(usage(120, 50, 5), now), { action: 'go' });
-  assert.deepEqual(allowanceDecision(usage(10, 4, 4), now), { action: 'go' });
+  assert.deepEqual(allowanceDecision(usageOf(120, 50, 5), now), { action: 'go' });
+  assert.deepEqual(allowanceDecision(usageOf(10, 4, 4), now), { action: 'go' });
   // Under ten for the day: stop, and carry on another day. A turn can spend four searches, so under four in the
   // hour or the minute: wait for that window.
-  const stop = allowanceDecision(usage(9, 50, 5), now);
+  const stop = allowanceDecision(usageOf(9, 50, 5), now);
   assert.equal(stop.action, 'stop');
   assert.match(stop.why, /9 of the day's 125/);
-  const hour = allowanceDecision(usage(60, 3, 5), now);
+  const hour = allowanceDecision(usageOf(60, 3, 5), now);
   assert.deepEqual([hour.action, hour.until], ['wait', Date.parse('2026-11-20T10:40:02+00:00')]);
-  const minute = allowanceDecision(usage(60, 20, 1), now);
+  const minute = allowanceDecision(usageOf(60, 20, 1), now);
   assert.deepEqual([minute.action, minute.until], ['wait', Date.parse('2026-11-20T10:00:52+00:00')]);
   // A window marked blocked has nothing left whatever it says; a report that does not give the day is no licence to go on.
-  const blocked = usage(60, 20, 5);
+  const blocked = usageOf(60, 20, 5);
   blocked.current_usage[3].blocked = true;
   assert.equal(allowanceDecision(blocked, now).action, 'wait');
   assert.equal(allowanceDecision({ current_usage: [] }, now).action, 'stop');
   assert.equal(allowanceDecision(null, now).action, 'stop');
   assert.equal(allowanceDecision({ detail: 'Invalid token.' }, now).action, 'stop');
+});
+
+test('the runner waits out a usage report it cannot read, and says why when it gives up', async () => {
+  // A pace with a scripted usage report and a clock that only moves when the pace sleeps.
+  const scripted = (answers) => {
+    const slept = [];
+    const lines = [];
+    let clock = 1_000_000;
+    const pace = courtListenerPace({
+      log: line => lines.push(line),
+      readUsage: async () => answers.shift(),
+      sleep: async ms => { if (ms > 0) { slept.push(ms); clock += ms; } },
+      now: () => clock,
+    });
+    return { slept, lines, pace };
+  };
+  const readable = body => ({ status: 200, body });
+
+  // Unreadable twice (a timeout, then a refusal), then readable: it goes on, having waited a minute each time.
+  const patient = scripted([{ status: null, body: null, error: 'The operation was aborted due to timeout' }, { status: 429, body: { detail: 'Request was throttled.' } }, readable(usageOf(120, 50, 5))]);
+  assert.equal(await patient.pace.beforeLiveTurn(), 'go');
+  assert.deepEqual(patient.slept, [60_000, 60_000]);
+  assert.match(patient.lines[0], /could not be read \(The operation was aborted due to timeout\)/);
+  assert.match(patient.lines[1], /could not be read \(it answered 429\)/);
+
+  // Unreadable five times running: it stops, and gives the last reason.
+  const hopeless = scripted(Array.from({ length: 5 }, () => ({ status: 503, body: null })));
+  assert.equal(await hopeless.pace.beforeLiveTurn(), 'stop');
+  assert.equal(hopeless.lines.at(-1), "Stopping: CourtListener's usage report could not be read in 5 tries (it answered 503).");
+  assert.deepEqual(hopeless.slept, [60_000, 60_000, 60_000, 60_000]);
+
+  // A second live turn is not started within a minute of the first, and a window that is nearly used up is
+  // looked at again within five minutes, since the windows roll.
+  const paced = scripted([readable(usageOf(120, 50, 5)), readable(usageOf(60, 20, 1)), readable(usageOf(120, 50, 5))]);
+  assert.equal(await paced.pace.beforeLiveTurn(), 'go');
+  assert.deepEqual(paced.slept, []);
+  assert.equal(await paced.pace.beforeLiveTurn(), 'go');
+  assert.deepEqual(paced.slept, [60_000, 300_000]);
+  assert.equal(paced.lines[0], 'Waiting 300s: 1 of 5 CourtListener requests are left this minute.');
+
+  // The day's allowance running low stops the run.
+  const spent = scripted([readable(usageOf(9, 50, 5))]);
+  assert.equal(await spent.pace.beforeLiveTurn(), 'stop');
+  assert.match(spent.lines[0], /^Stopping: only 9 of the day's 125 CourtListener requests are left\.$/);
 });
 
 test("a run's cost is estimated from an earlier run's tokens at the new models' prices, on the high side", () => {

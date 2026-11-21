@@ -13,9 +13,9 @@
     "test/model-shaping.test.mjs": "be3a0b69c2c61c9262266d787c4351417941bca75e21128c5ca8441635505305",
     "test/prices.test.mjs": "b1b53cfbb2af2671f077296a67a0cbbd6ec68ee918e6dd8687d7953b95a7019e",
     "measure/guard-fetch.mjs": "03e117330d3babb86b51ac967a72d74324b55a585c22713a8bd187e34aba6c04",
-    "measure/run.mjs": "5ea67622026d11df62bc7042dbcb02f97a9674e011de7f029e344d3d9bbbfabd",
+    "measure/run.mjs": "15e1d97d09c4960111761f27a4f8612c0ddbf8e23f39978e682d81c14bbd6c8b",
     "measure/probe-shapes.mjs": "05219dcb7e8ca06a57823378a0c581a9dfe1ab6e3da8ef0885ad01abdf7d2b93",
     "measure/report.mjs": "9f35d6fa1318b01f079035de015bc377e3f05d1a164eafb5f86892fbed066b68",
-    "test/measure.test.mjs": "161b723c9492671a02819c078b5db655b76e97635267acbc687fab16dff12a00"
+    "test/measure.test.mjs": "dbb498a035e787e786a16dfccf20acd9230ed9701c65387545fb493b3e142d94"
   }
 }

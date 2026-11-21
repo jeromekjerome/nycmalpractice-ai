@@ -369,30 +369,49 @@ const fileStore = {
 const sleep = ms => new Promise(resolve => setTimeout(resolve, Math.max(0, ms)));
 const MINUTE = 60_000;
 
-// One live turn a minute at most, and none unless CourtListener's own count says there is room.
-function courtListenerPace(log) {
-  let lastLiveTurn = 0;
-  const readUsage = async () => {
-    for (let attempt = 1; ; attempt++) {
-      try {
-        const response = await fetch('https://www.courtlistener.com/api/rest/v4/api-usage/', {
-          headers: { Authorization: `Token ${process.env.COURTLISTENER_TOKEN}` },
-          signal: AbortSignal.timeout(15_000),
-        });
-        return await response.json();
-      } catch (error) {
-        if (attempt === 2) return null;
-        await sleep(15_000);
-      }
-    }
-  };
+// How many times running the usage report may be unreadable before a recording gives up for now.
+const USAGE_REPORT_TRIES = 5;
+
+// CourtListener's own count of what the token has left: { status, body }, or { status: null, error } when the
+// request did not come back.
+async function readCourtListenerUsage() {
+  try {
+    const response = await fetch('https://www.courtlistener.com/api/rest/v4/api-usage/', {
+      headers: { Authorization: `Token ${process.env.COURTLISTENER_TOKEN}` },
+      signal: AbortSignal.timeout(15_000),
+    });
+    return { status: response.status, body: await response.json().catch(() => null) };
+  } catch (error) {
+    return { status: null, body: null, error: withoutKeys(error?.message || error) };
+  }
+}
+
+// One live turn a minute at most, and none unless CourtListener's own count says there is room. A report that
+// cannot be read (CourtListener is slow at times) is asked for again a minute later, and the run stops only when
+// that has failed several times running.
+export function courtListenerPace({ log = () => {}, readUsage = readCourtListenerUsage, sleep: pause = sleep, now = () => Date.now() } = {}) {
+  let lastLiveTurn = null;
   return {
     async beforeLiveTurn() {
-      await sleep(lastLiveTurn + MINUTE - Date.now());
+      if (lastLiveTurn !== null) await pause(lastLiveTurn + MINUTE - now());
+      let unreadable = 0;
       for (;;) {
-        const decision = allowanceDecision(await readUsage());
+        const usage = await readUsage();
+        if (usage?.status !== 200 || !Array.isArray(usage.body?.current_usage)) {
+          unreadable += 1;
+          const why = usage?.error ?? `it answered ${usage?.status ?? 'nothing'}`;
+          if (unreadable === USAGE_REPORT_TRIES) {
+            log(`Stopping: CourtListener's usage report could not be read in ${USAGE_REPORT_TRIES} tries (${why}).`);
+            return 'stop';
+          }
+          log(`CourtListener's usage report could not be read (${why}); asking again in a minute.`);
+          await pause(MINUTE);
+          continue;
+        }
+        unreadable = 0;
+        const decision = allowanceDecision(usage.body, now());
         if (decision.action === 'go') {
-          lastLiveTurn = Date.now();
+          lastLiveTurn = now();
           return 'go';
         }
         if (decision.action === 'stop') {
@@ -400,9 +419,9 @@ function courtListenerPace(log) {
           return 'stop';
         }
         // The windows roll, so room can come back before the whole window has passed: look again in five minutes.
-        const wait = Math.min(decision.until - Date.now(), 5 * MINUTE);
+        const wait = Math.min(decision.until - now(), 5 * MINUTE);
         log(`Waiting ${Math.ceil(Math.max(wait, 0) / 1000)}s: ${decision.why}.`);
-        await sleep(wait);
+        await pause(wait);
       }
     },
   };
@@ -470,7 +489,7 @@ async function main() {
   console.log(`${app.APP}: ${args.mode} run "${args.label}", answer model ${args.answer}, small model ${args.aux}, ${VISITORS.length} visitors, ${turns} turns.`);
   const { status, run } = await measure({
     args, app, visitors: VISITORS, knownBad: KNOWN_BAD, store: fileStore, guard,
-    pace: courtListenerPace(line => console.log(line)), log: line => console.log(line),
+    pace: courtListenerPace({ log: line => console.log(line) }), log: line => console.log(line),
   });
 
   const spent = run.calls.reduce((sum, call) => sum + estimateAiCost(call.model, call.inputTokens, call.outputTokens), 0);

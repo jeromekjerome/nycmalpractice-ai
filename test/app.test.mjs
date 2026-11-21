@@ -5139,3 +5139,115 @@ test('the home page has no section that stays empty until a reply arrives', () =
     assert.ok(script.includes(heading), `script.js no longer builds "${heading}" when there is something to show`);
   }
 });
+
+// ─── Replies made from a recorded packet (the model measurement) ──────────────
+
+const { answerUserQuestion, classifyConversation, classifyAndSearch } = await import('../ask.js');
+
+test('a reply made from a recorded packet neither classifies nor searches nor touches the case memory', async () => {
+  const world = fakeWorld({ answer: `Thank you. What happened next? ${DISCLAIMER}` });
+  await withOutboundHttp(world.handler, async () => {
+    const packet = { caseType: 'surgical_error', cases: [{ caseName: 'Walker v. Hospital', citation: '1 N.Y.3d 1', citations: ['1 N.Y.3d 1'], court: 'ny', dateFiled: '2020-01-01', snippet: 'x', url: '', scope: 'ny' }] };
+    const result = await answerUserQuestion({ question: 'A sponge was left inside me.', mode: 'personal', sessionId: 'measure-1', history: [], recorded: packet });
+    assert.equal(result.caseType, 'surgical_error');
+    assert.deepEqual(result.cases, packet.cases);
+    assert.deepEqual(world.calls.courtListener, []);
+    assert.equal(world.calls.openai.some(call => call.kind === 'classify'), false);
+    assert.deepEqual(world.calls.sql, []);
+    const system = world.calls.openai.find(call => call.kind === 'answer').request.messages[0].content;
+    assert.match(system, /Walker v\. Hospital/);
+    // The prompt says nothing of decisions "found earlier": these were not.
+    assert.doesNotMatch(system, /could not be run just now/);
+
+    // A packet with no decisions is not topped up from the case memory, as a live search that found nothing is.
+    const empty = await answerUserQuestion({ question: 'A sponge was left inside me.', mode: 'personal', sessionId: 'measure-2', history: [], recorded: { caseType: 'surgical_error', cases: [] } });
+    assert.deepEqual(empty.cases, []);
+    assert.deepEqual(world.calls.courtListener, []);
+    assert.deepEqual(world.calls.sql, []);
+    assert.match(world.calls.openai.filter(call => call.kind === 'answer').at(-1).request.messages[0].content, /No specific cases retrieved/);
+
+    // A recorded type that is not one of ours is "other", as a classifier's would be.
+    const odd = await answerUserQuestion({ question: 'A sponge was left inside me.', mode: 'estate', sessionId: 'measure-2b', history: [], recorded: { caseType: 'constructor' } });
+    assert.equal(odd.caseType, 'other');
+    assert.deepEqual(odd.cases, []);
+    assert.equal(world.calls.openai.some(call => call.kind === 'classify'), false);
+  });
+});
+
+test('a recorded draft is graded as it is, and the answer model is not asked to write one', async () => {
+  const world = fakeWorld({ answer: 'UNUSED' });
+  await withOutboundHttp(world.handler, async () => {
+    const draft = `Could you tell me more? ${DISCLAIMER}`;
+    const result = await answerUserQuestion({ question: 'A sponge was left inside me.', mode: 'personal', sessionId: 'measure-3', history: [], recorded: { caseType: 'surgical_error', cases: [], draft } });
+    assert.equal(world.calls.openai.some(call => call.kind === 'answer'), false);
+    assert.equal(result.evaluation.attempts[0].draft_text, draft);
+    // The gate ran on it and, finding nothing wrong, served it.
+    assert.equal(result.evaluation.gate_status, 'PASSED');
+    assert.equal(result.answer, draft);
+
+    // The side analyses run beside a recorded draft as beside any other: here the lead score and the case card.
+    const history = [
+      { role: 'user', content: 'A sponge was left inside me.' }, { role: 'assistant', content: 'I am sorry. When was the surgery?' },
+      { role: 'user', content: 'Three months ago.' }, { role: 'assistant', content: 'How was it found?' },
+    ];
+    const later = await answerUserQuestion({ question: 'On a scan last week.', mode: 'personal', sessionId: 'measure-4', history, recorded: { caseType: 'surgical_error', cases: [], draft } });
+    assert.equal(later.turn, 3);
+    assert.equal(later.evaluation.attempts[0].draft_text, draft);
+    assert.deepEqual(world.calls.openai.map(call => call.kind).sort(), ['caseAnalysis', 'scoreLead']);
+    assert.equal(later.caseAnalysis.score, 6);
+    assert.deepEqual(world.calls.sql, []);
+    assert.deepEqual(world.calls.courtListener, []);
+  });
+});
+
+test('the classification and the search can be run on their own, without the case memory', async () => {
+  const world = fakeWorld({ classification: { type: 'surgical_error', terms: 'retained sponge laparotomy' } });
+  await withOutboundHttp(world.handler, async () => {
+    clearSearchCache();
+    const history = [{ role: 'user', content: 'I had an operation.' }, { role: 'assistant', content: 'I am sorry. What went wrong?' }];
+    assert.deepEqual(await classifyConversation(history, 'They left a sponge inside me.'), { caseType: 'surgical_error', terms: 'retained sponge laparotomy' });
+    // The classifier reads what the visitor said and none of the replies, as it does for a visitor.
+    const shown = world.calls.openai.find(call => call.kind === 'classify').request.messages[0].content;
+    assert.match(shown, /I had an operation\. They left a sponge inside me\./);
+    assert.doesNotMatch(shown, /What went wrong/);
+
+    const found = await classifyAndSearch(history, 'They left a sponge inside me.');
+    assert.deepEqual(Object.keys(found).sort(), ['caseType', 'cases']);
+    assert.equal(found.caseType, 'surgical_error');
+    assert.equal(found.cases[0].caseName, 'Patient v. General Hospital');
+    assert.match(world.calls.courtListener[0].q, /sponge/);
+    // Nothing was saved to the case memory.
+    assert.deepEqual(world.calls.sql, []);
+  });
+
+  // A search that finds nothing is not topped up from the case memory; a type that is not one of ours is
+  // "other"; and terms that are not text are no terms.
+  const empty = fakeWorld({ classification: { type: 'premises', terms: 42 }, nyResults: [] });
+  await withOutboundHttp(empty.handler, async () => {
+    clearSearchCache();
+    assert.deepEqual(await classifyConversation([], 'Something went wrong.'), { caseType: 'other', terms: '' });
+    assert.deepEqual(await classifyAndSearch([], 'Something went wrong.'), { caseType: 'other', cases: [] });
+    assert.deepEqual(empty.calls.sql, []);
+  });
+  clearSearchCache();
+});
+
+test('a visitor cannot hand the server a recorded packet', async () => {
+  const world = fakeWorld({ answer: `Thank you. When did it happen? ${DISCLAIMER}` });
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(world.handler, async () => {
+      const { response, body } = await postJson(server.baseUrl, '/api/ask', {
+        question: 'A sponge was left inside me.', mode: 'personal', sessionId: 'sess-no-packet', history: [],
+        recorded: { caseType: 'surgical_error', cases: [], draft: 'Words the visitor wrote, passed off as the reply.' },
+      });
+      assert.equal(response.status, 200);
+      assert.match(body.answer, /When did it happen/);
+      assert.doesNotMatch(JSON.stringify(body), /passed off as the reply/);
+    });
+  } finally {
+    await server.close();
+  }
+  assert.equal(world.calls.openai.some(call => call.kind === 'classify'), true);
+  assert.equal(world.calls.openai.some(call => call.kind === 'answer'), true);
+});

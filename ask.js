@@ -76,28 +76,39 @@ function buildCaseContext(cases, { recalled = false } = {}) {
   return [...notes, blocks].join('\n\n');
 }
 
-// allowLeadScoring is false when the conversation could not be read from the server's record: a lead is
-// scored only on a history the server can vouch for.
-export async function answerUserQuestion({ question, mode = 'personal', sessionId, history, allowLeadScoring = true }) {
-  // The conversation step: the number of the visitor's own message. The history also holds the AI's
-  // replies, so counting every message ran steps 1, 3, 5 and skipped steps 2 and 4.
-  const turn = history.filter(h => h.role === 'user').length + 1;
+// The type comes from a model, or from a recording of one: anything that is not one of ours is "other".
+function knownType(type) {
+  return Object.hasOwn(CASE_TYPE_NAMES, type) ? type : 'other';
+}
 
+// What kind of claim the conversation is about, and the search terms for it. Exported for the model measurement
+// (measure/), which compares how each small model classifies the same conversations.
+export async function classifyConversation(history, question) {
   // The case type is decided from everything the visitor has said, and nothing else. The AI's own replies are left
   // out: they are several times longer, and they crowded the visitor's words out of what the classifier was shown,
   // so a fact given in the second message (a sponge left inside) was lost by the third.
   const visitorText    = [...history.filter(h => h.role === 'user').map(h => h.content), question].join(' ');
   const classification = (await extractCaseType(visitorText, openai)) || {};
-  const caseType       = Object.hasOwn(CASE_TYPE_NAMES, classification.type) ? classification.type : 'other';
+  return { caseType: knownType(classification.type), terms: typeof classification.terms === 'string' ? classification.terms : '' };
+}
 
+// The type of claim and the decisions CourtListener has for it (New York courts first, national fallback).
+// The case memory is no part of this: findCases puts it behind the search. Exported for the model measurement,
+// which records what this returns once and replays it for every model.
+export async function classifyAndSearch(history, question) {
+  const { caseType, terms } = await classifyConversation(history, question);
   // The classifier's terms only. The visitor's own message is never the query: it can hold a name
   // or a phone number, and the query goes to a third party. Without terms, the search uses the
   // case type's terms alone.
-  let cases = await searchMalpracticeCases({
-    query: typeof classification.terms === 'string' ? classification.terms : '',
-    caseType,
-    limit: 5,
-  });
+  const cases = await searchMalpracticeCases({ query: terms, caseType, limit: 5 });
+  return { caseType, cases };
+}
+
+// What a visitor's reply is written from: the classification and the search, with the case memory behind them.
+async function findCases(history, question) {
+  const found = await classifyAndSearch(history, question);
+  const { caseType } = found;
+  let { cases } = found;
 
   // Found decisions are saved for this case type while the reply is written; when the search found
   // nothing (CourtListener throttled, slow or down), the decisions saved last time are used instead.
@@ -109,6 +120,26 @@ export async function answerUserQuestion({ question, mode = 'personal', sessionI
     cases = await recallCases(caseType).catch(err => { console.error('Could not read the saved cases:', err.message); return []; });
     recalled = cases.length > 0;
   }
+  return { caseType, cases, recalled, remembering };
+}
+
+// allowLeadScoring is false when the conversation could not be read from the server's record: a lead is
+// scored only on a history the server can vouch for.
+//
+// recorded is for the model measurement (measure/), never for a visitor: { caseType, cases, draft? } kept from an
+// earlier run of the same conversation. With it nothing is classified or searched and the case memory is neither
+// read nor written, so every model being compared is given the same decisions. With recorded.draft that text is
+// the draft and the answer model is not asked for one; the side analyses and the gate run as usual. server.js
+// names each field it passes on, so a request cannot supply one.
+export async function answerUserQuestion({ question, mode = 'personal', sessionId, history, allowLeadScoring = true, recorded = null }) {
+  // The conversation step: the number of the visitor's own message. The history also holds the AI's
+  // replies, so counting every message ran steps 1, 3, 5 and skipped steps 2 and 4.
+  const turn = history.filter(h => h.role === 'user').length + 1;
+
+  const { caseType, cases, recalled, remembering } = recorded
+    ? { caseType: knownType(recorded.caseType), cases: Array.isArray(recorded.cases) ? recorded.cases : [], recalled: false, remembering: Promise.resolve() }
+    : await findCases(history, question);
+  const recordedDraft = typeof recorded?.draft === 'string' ? recorded.draft : null;
 
   const caseContext = buildCaseContext(cases, { recalled });
 
@@ -126,13 +157,14 @@ export async function answerUserQuestion({ question, mode = 'personal', sessionI
   ];
 
   const parallelTasks = [
-    chatCompletionsWithFallback(openai, { models: ANSWER_MODELS, messages, temperature: 0.7, max_tokens: 1000 }),
+    // The first draft, unless a recorded draft stands in for it
+    recordedDraft ?? chatCompletionsWithFallback(openai, { models: ANSWER_MODELS, messages, temperature: 0.7, max_tokens: 1000 })
+      .then(completion => completion.choices[0].message.content),
     turn >= 2 && allowLeadScoring ? sideCall(scoreLead(question, history, caseType, mode)) : Promise.resolve(null),
     turn >= 3 ? sideCall(analyzeMalpracticeSituation(question, history, cases, caseType, mode)) : Promise.resolve(null),
   ];
 
-  const [completion, leadScore, caseAnalysis] = await Promise.all(parallelTasks);
-  const draft = completion.choices[0].message.content;
+  const [draft, leadScore, caseAnalysis] = await Promise.all(parallelTasks);
 
   // Gatekeeper & Coach: grade the draft against the rubric; a blocked draft is rewritten once.
   let answer = draft;

@@ -737,9 +737,9 @@ test("the small-job bar wants usable answers every time, today's own agreement, 
 
 test('the report command is told which runs are which, and refuses what it cannot read as a run', () => {
   assert.deepEqual(parseReportArgs(['--app', 'nycinjury', '--baseline', 'base-1,base-2,base-3', '--small-baseline', 'small-base-1', '--replies', 'reply-a,reply-b', '--smalls', 'small-a', '--samples', 'reply-a', '--note', 'one', '--note', 'two']),
-    { app: 'nycinjury', baseline: ['base-1', 'base-2', 'base-3'], smallBaseline: ['small-base-1'], replies: ['reply-a', 'reply-b'], smalls: ['small-a'], samples: ['reply-a'], notes: ['one', 'two'] });
-  assert.deepEqual(parseReportArgs(['--app', 'nycinjury', '--baseline', 'base-1']),
-    { app: 'nycinjury', baseline: ['base-1'], smallBaseline: [], replies: [], smalls: [], samples: [], notes: [] });
+    { app: 'nycinjury', baseline: ['base-1', 'base-2', 'base-3'], smallBaseline: ['small-base-1'], replies: ['reply-a', 'reply-b'], smalls: ['small-a'], pairs: [], samples: ['reply-a'], notes: ['one', 'two'] });
+  assert.deepEqual(parseReportArgs(['--app', 'nycinjury', '--baseline', 'base-1', '--pairs', 'pair-a,pair-b']),
+    { app: 'nycinjury', baseline: ['base-1'], smallBaseline: [], replies: [], smalls: [], pairs: ['pair-a', 'pair-b'], samples: [], notes: [] });
   assert.throws(() => parseReportArgs(['--app', 'nycinjury']), /--baseline/);
   assert.throws(() => parseReportArgs(['--baseline', 'base-1']), /--app/);
   assert.throws(() => parseReportArgs(['--app', 'nycinjury', '--baseline', 'base-1,../x']), /label/);
@@ -770,6 +770,10 @@ test('the report refuses runs that are not what their flags say', () => {
   assert.match(first({ smalls: [made('small-luna', { mode: 'small', aux: 'gpt-6-luna', from: 'reply-sol' })] }), /small-luna took its drafts from reply-sol, which is not one of today's runs/);
   assert.match(first({ smalls: [made('small-luna', { mode: 'small', answer: 'gpt-6.2-sol', aux: 'gpt-6-luna', from: 'base-1' })] }), /small-luna had its rewrites written by gpt-6\.2-sol, not today's gpt-4o/);
   assert.match(first({ smallBaseline: [made('small-base-1', { mode: 'small', aux: 'gpt-6-luna', from: 'base-1' })] }), /small-base-1 used gpt-4o with gpt-6-luna, not today's gpt-4o with gpt-4o-mini/);
+  // A run with both models changed is given as a pair, and may be any reply run; a small-job run is not one.
+  assert.deepEqual(checkRuns({ ...good, pairs: [made('pair-luna-luna', { answer: 'gpt-6-luna', aux: 'gpt-6-luna' })] }), []);
+  assert.match(first({ pairs: [good.smalls[0]] }), /small-luna is a small-job run, given as a pair/);
+  assert.match(first({ pairs: [made('pair-x', { answer: 'gpt-6-luna', aux: 'gpt-6-luna', app: 'nycmalpractice' })] }), /pair-x was run on nycmalpractice, not nycinjury/);
   // The same run named twice, and a run that was stopped part-way.
   assert.match(first({ replies: [good.replies[0], good.replies[0]] }), /reply-sol is given twice/);
   assert.match(first({ replies: [made('reply-sol', { answer: 'gpt-6.2-sol', finishedAt: undefined })] }), /reply-sol is a run that was stopped part-way/);
@@ -843,6 +847,20 @@ test('the report sets each run beside the bar, names what passes cheapest first,
   assert.match(text, /The pass rates are counted over the first drafts the model grader graded/);
   assert.match(text, /the pair of its runs that agrees least/);
   assert.doesNotMatch(text, /undefined|NaN|\[object/);
+
+  // Runs with both models changed together are set out apart, and not held to the bar.
+  assert.doesNotMatch(text, /Both models changed together/);
+  const paired = renderReport({ app: 'nycinjury', date: '2026-11-20', baseline, smallBaseline, replies, smalls, pairs: [reportRun({ label: 'pair-luna-luna', mode: 'reply', answer: 'gpt-6-luna', aux: 'gpt-6-luna' })], notes: [], ...context });
+  assert.ok(paired.includes('\n## Both models changed together\n'));
+  const pairRow = paired.split('\n').find(line => line.startsWith('| pair-luna-luna |'));
+  assert.match(pairRow, /^\| pair-luna-luna \| gpt-6-luna \| gpt-6-luna \| 100% \| 100% \|/);
+  assert.doesNotMatch(pairRow, /passes \|$/);
+  // Four turns over two visitors, each with a reply (3,000 in, 300 out) and a grade (3,300 in, 400 out) at
+  // gpt-6-luna's 0.10 and 0.50 a million: 0.00098 a turn, 0.00196 a conversation.
+  assert.match(pairRow, /\| \$0\.002 \|$/);
+  for (const [i, line] of paired.split('\n').entries()) {
+    if (/^\|[-| :]+\|$/.test(line)) assert.equal(paired.split('\n')[i + 1].split('|').length, paired.split('\n')[i - 1].split('|').length, paired.split('\n')[i + 1]);
+  }
 
   // An app with no seminar has no seminar column, and nothing is said of one.
   assert.match(text, /\| Seminar passes \|/);

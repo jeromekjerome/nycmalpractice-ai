@@ -5,10 +5,11 @@
 // model must pass, and writes docs/measurements/<date>-<app>.md for the owner to choose from.
 //
 //   npm run models:report -- --app <app> --baseline <labels> [--small-baseline <labels>] [--replies <labels>]
-//                            [--smalls <labels>] [--samples <labels>] [--note "<text>"]...
+//                            [--smalls <labels>] [--pairs <labels>] [--samples <labels>] [--note "<text>"]...
 //
 // Labels are separated by commas. --baseline names today's models' runs (a recording run and its repeats);
 // --small-baseline names today's models' small-job runs; --replies and --smalls name the candidates' runs;
+// --pairs names reply runs in which both models were changed together, shown for information;
 // --samples names runs whose replies are set out in full beside today's, in a second file.
 //
 // The bar, from the design (docs/superpowers/specs/2026-11-19-ai-providers-design.md, section 4):
@@ -300,7 +301,7 @@ export function smallBar(stats, baselineSelf, baselineCaught) {
 
 // The runs a report is given must be what their flags say they are, or its tables would be wrong with no sign of
 // it. Returns what is wrong, one line each; an empty list means the runs can be set beside one another.
-export function checkRuns({ app: appName, baseline, smallBaseline = [], replies = [], smalls = [] }) {
+export function checkRuns({ app: appName, baseline, smallBaseline = [], replies = [], smalls = [], pairs = [] }) {
   const problems = [];
   const today = baseline[0];
   const todays = new Set(baseline.map(run => run.label));
@@ -339,6 +340,10 @@ export function checkRuns({ app: appName, baseline, smallBaseline = [], replies 
     else if (run.answer !== today.answer) problems.push(`${run.label} had its rewrites written by ${run.answer}, not today's ${today.answer}`);
     else draftsFromToday(run);
   });
+  // A pair is any reply run: both of its models may differ from today's.
+  each(pairs, run => {
+    if (isSmall(run)) problems.push(`${run.label} is a small-job run, given as a pair`);
+  });
   return problems;
 }
 
@@ -363,10 +368,11 @@ const barCell = bar => (bar.ok ? 'passes' : bar.reasons.join('; '));
  * @param {object[]} options.smallBaseline  today's models' small-job runs
  * @param {object[]} options.replies        the reply candidates' runs
  * @param {object[]} options.smalls         the small-job candidates' runs
+ * @param {object[]} [options.pairs]        reply runs with both models changed together, shown for information
  * @param {string[]} [options.notes]
  * @param {Function} options.price          estimateAiCost
  */
-export function renderReport({ app: appName, date, baseline, smallBaseline, replies, smalls, notes = [], price, visitors = VISITORS, adapter = app }) {
+export function renderReport({ app: appName, date, baseline, smallBaseline, replies, smalls, pairs = [], notes = [], price, visitors = VISITORS, adapter = app }) {
   const context = { price, visitors, adapter };
   const isSeminar = seminarTest({ visitors, seminarModes: adapter.SEMINAR_MODES });
   const leadDue = turn => !isSeminar(turn) && turn.turn >= adapter.SIDE_JOBS_FROM_TURN.leadScore;
@@ -529,6 +535,21 @@ export function renderReport({ app: appName, date, baseline, smallBaseline, repl
       ...baselineMissesSmall.map(row => `- \`${row.run.aux}\` (${row.run.label}): ${row.bar.reasons.join('; ')}`), '');
   }
 
+  if (pairs.length) {
+    out.push('## Both models changed together', '');
+    out.push("For information. Each row is one run with the reply model and the small-job model both changed, as the site would run after a switch. These runs are not held to the bar, whose marks are today's models' runs: a grader that is stricter than today's blocks more first drafts, so these figures are not to be read against the reply table's.", '');
+    out.push(table(
+      ['Run', 'Reply model', 'Small-job model', 'First draft passes', 'Passes after the rewrite', ...(hasSeminar ? ['Seminar passes'] : []), 'Turns not passed after the rewrite', 'First drafts with a case that could not be anchored',
+        'First drafts the model grader did not grade', 'A whole turn takes (middle)', 'A whole turn takes (slowest tenth)', 'Calls that failed', 'All jobs cost, a conversation'],
+      pairs.map(run => {
+        const stats = replyStats(run, context);
+        return [run.label, run.answer, run.aux, percent(stats.firstPassRate), percent(stats.finalPassRate), ...(hasSeminar ? [percent(stats.seminarFinalPassRate)] : []), stats.finalFailures, stats.unanchoredFirstDrafts,
+          stats.ungradedFirstDrafts, seconds(stats.turnMedianMs), seconds(stats.turnSlowestTenthMs), failedCell((run.failed ?? []).length, failureSummary(run.failed ?? [])), money(costOf(run.calls ?? [], price) / visitorsIn(run))];
+      }),
+    ), '');
+    out.push('The cost is of every job in the run but the classification, which a replayed run does not make; it adds a small fraction of a cent.', '');
+  }
+
   out.push('## What a conversation costs', '');
   const todayReply = mean(baseReply.map(row => row.stats.costPerConversation));
   const todaySmall = mean(baseSmall.map(row => row.stats.costPerConversation));
@@ -619,10 +640,10 @@ export function renderSamples({ app: appName, date, runs, visitorKeys, visitors 
 
 // ─── The command ──────────────────────────────────────────────────────────────
 
-const LIST_FLAGS = { '--baseline': 'baseline', '--small-baseline': 'smallBaseline', '--replies': 'replies', '--smalls': 'smalls', '--samples': 'samples' };
+const LIST_FLAGS = { '--baseline': 'baseline', '--small-baseline': 'smallBaseline', '--replies': 'replies', '--smalls': 'smalls', '--pairs': 'pairs', '--samples': 'samples' };
 
 export function parseReportArgs(argv) {
-  const args = { app: null, baseline: [], smallBaseline: [], replies: [], smalls: [], samples: [], notes: [] };
+  const args = { app: null, baseline: [], smallBaseline: [], replies: [], smalls: [], pairs: [], samples: [], notes: [] };
   for (let i = 0; i < argv.length; i += 2) {
     const flag = argv[i];
     const value = argv[i + 1];
@@ -660,7 +681,7 @@ async function main() {
     if (args.app !== app.APP) throw new Error(`this is ${app.APP}, not ${args.app}`);
   } catch (error) {
     console.error(`report: ${error.message}`);
-    console.error('usage: npm run models:report -- --app <app> --baseline <labels> [--small-baseline <labels>] [--replies <labels>] [--smalls <labels>] [--samples <labels>] [--note "<text>"]');
+    console.error('usage: npm run models:report -- --app <app> --baseline <labels> [--small-baseline <labels>] [--replies <labels>] [--smalls <labels>] [--pairs <labels>] [--samples <labels>] [--note "<text>"]');
     return 1;
   }
   // The price table is the app's own, and its file opens the database client as it loads: it is given the
@@ -673,7 +694,7 @@ async function main() {
 
   let runs;
   try {
-    runs = Object.fromEntries(['baseline', 'smallBaseline', 'replies', 'smalls', 'samples'].map(name => [name, args[name].map(readRun)]));
+    runs = Object.fromEntries(['baseline', 'smallBaseline', 'replies', 'smalls', 'pairs', 'samples'].map(name => [name, args[name].map(readRun)]));
   } catch (error) {
     console.error(`report: ${error.message}`);
     return 1;

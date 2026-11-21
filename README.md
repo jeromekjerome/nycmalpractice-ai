@@ -6,7 +6,7 @@ AI-powered medical malpractice legal assistant for NYC. Guides both injured pati
 
 ## How It Works
 
-Users describe their situation as either a patient who was personally harmed or a family member pursuing a wrongful death claim. The AI (gpt-4o) analyzes the conversation, identifies the case type, flags statute of limitations urgency, and pulls relevant NYC Supreme Court malpractice decisions via CourtListener.
+Users describe their situation as either a patient who was personally harmed or a family member pursuing a wrongful death claim. The AI analyzes the conversation, identifies the case type, flags statute of limitations urgency, and pulls relevant NYC Supreme Court malpractice decisions via CourtListener.
 
 As the conversation develops, the AI scores the lead in the background. Qualified leads are delivered directly to subscribed malpractice firms (cold tier) or go to a live auction where multiple firms bid for exclusive access to the contact. Malpractice is a high-value vertical — reserve prices are higher than other AntiGravity apps.
 
@@ -45,7 +45,7 @@ As the conversation develops, the AI scores the lead in the background. Qualifie
 
 ## Lead Scoring
 
-Leads are scored 0–100 by gpt-4o-mini across five dimensions:
+Leads are scored 0–100 by the small-job model (gpt-6-luna) across five dimensions:
 
 | Dimension | Weight | Notes |
 |---|---|---|
@@ -111,7 +111,7 @@ Seven tables in Neon Postgres (separate database from other AntiGravity apps):
 ## Tech Stack
 
 - **Backend:** Node.js / Express (ESM)
-- **AI:** OpenAI gpt-4o (chat/analysis) + gpt-4o-mini (lead scoring)
+- **AI:** OpenAI gpt-6.1-terra (replies) + gpt-6-luna (classification, lead scoring, case card, grading a reply), each falling back to the other and then to gpt-5.4-mini; chosen from the measurement in `docs/measurements/`, set in `models.js`
 - **Case Law:** CourtListener API (NY Supreme Court, Appellate Division — no family court)
 - **Database:** Neon Postgres (`@neondatabase/serverless`)
 - **Payments:** Stripe (subscriptions + per-lead charges + refunds)

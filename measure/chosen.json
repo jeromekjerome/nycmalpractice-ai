@@ -1,0 +1,7 @@
+{
+  "chosenOn": "2026-11-21",
+  "by": "owner",
+  "answer": ["gpt-6.1-terra", "gpt-6-luna", "gpt-5.4-mini"],
+  "aux": ["gpt-6-luna", "gpt-6.1-terra", "gpt-5.4-mini"],
+  "report": "docs/measurements/2026-11-20-nycmalpractice.md"
+}

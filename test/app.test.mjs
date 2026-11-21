@@ -36,6 +36,8 @@ globalThis.fetch = (...args) => activeFetch(...args);
 
 const { default: app } = await import('../server.js');
 const { clearSearchCache, extractCaseType, searchMalpracticeCases } = await import('../courtlistener.js');
+// The chains the app runs with, read from models.js: a test of what the app calls repeats no model's name.
+const { ANSWER_MODELS, AUX_MODELS } = await import('../models.js');
 const { scoreLead } = await import('../auction.js');
 const { CONVERSATION_RETENTION_DAYS } = await import('../retention.js');
 const { CONTACT_CONSENT_TEXT } = await import('../site.js');
@@ -889,7 +891,7 @@ test('extractCaseType uses the aux model chain with failover', async () => {
   };
   assert.deepEqual(await extractCaseType('My baby was injured during delivery.', openai), { type: 'birth_injury', terms: 'shoulder dystocia delivery' });
   assert.equal(modelsTried.length, 2);
-  assert.equal(modelsTried[0], process.env.OPENAI_MODEL_AUX || 'gpt-4o-mini');
+  assert.deepEqual(modelsTried, AUX_MODELS.slice(0, 2));
   assert.notEqual(modelsTried[1], modelsTried[0]);
 
   // Every model failing, or an answer that is not an object, still yields a usable default.
@@ -963,7 +965,7 @@ test('scoreLead uses the aux model chain with failover and the current-law notes
     assert.equal(score.reserve, 200);
   });
   assert.equal(modelsTried.length, 2);
-  assert.equal(modelsTried[0], process.env.OPENAI_MODEL_AUX || 'gpt-4o-mini');
+  assert.deepEqual(modelsTried, AUX_MODELS.slice(0, 2));
   assert.match(scoringPrompt, /The Grieving Families Act is not law/);
   assert.match(scoringPrompt, /It did not change medical malpractice law/);
 });
@@ -5366,7 +5368,6 @@ test('the measurement tells each model call by the job it was for', async () => 
   assert.deepEqual([...new Set(world.calls.openai.map(call => call.kind))].sort(), Object.keys(JOBS).sort());
   assert.deepEqual([...SMALL_JOBS, ...REPLY_JOBS].sort(), Object.values(JOBS).sort());
   // The reply and the rewrite go to the answer chain; the rest to the small one.
-  const { ANSWER_MODELS, AUX_MODELS } = await import('../models.js');
   for (const call of world.calls.openai) assert.equal(call.model, (REPLY_JOBS.includes(jobOf(call.request)) ? ANSWER_MODELS : AUX_MODELS)[0], call.kind);
   assert.equal(jobOf({}), 'reply');
 });

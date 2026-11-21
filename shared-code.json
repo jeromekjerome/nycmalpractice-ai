@@ -2,7 +2,7 @@
   "files": {
     "citator.js": "37cb8bc3705e8d478040ca3b3158bb15c42ce3fd4fa7d56e0c71e28dadd77e6f",
     "backup.js": "9e99c47d5982b9177d488fd524990c3e247e11bc90317b1b2cacc835482c33a8",
-    "ai-budget.js": "7890b6dfe062eee5d97d60bb354b990b2433dc4b8218cda415c98d555ee6f991",
+    "ai-budget.js": "afdae4971c1211ee473bd0ea9f8a70a31f7e00e418d7a06e6e6e828801598898",
     "openaiModelFailover.js": "a4a1751302a492684da04560f27ba9beb43faf50e1ae50ab99bce187d98e52a9",
     "test/ai-budget.test.mjs": "e574a180402b0a3de918e01f767fba0f4235a95a62fcab5488f33e613df5f88a",
     "rate-limit.js": "f6e2a592e34a3b826bf42848f4444d368d11a7b7e5e59c51df8a980aa8910e23",
@@ -10,6 +10,7 @@
     "summary.js": "3f0193b77af9bb06bf020557fd5f783638aa3229ce23df59dde3acdfa18cb509",
     "test/helpers.mjs": "da2246c473511dfbf46e40ececed852ddda7e4bd691d940d111c01555aff0802",
     "test/runner.mjs": "aab9f55bde4a107ce843a5c28842e587e052aca7acce429a09811ebfc8fe56eb",
-    "test/model-shaping.test.mjs": "be3a0b69c2c61c9262266d787c4351417941bca75e21128c5ca8441635505305"
+    "test/model-shaping.test.mjs": "be3a0b69c2c61c9262266d787c4351417941bca75e21128c5ca8441635505305",
+    "test/prices.test.mjs": "b1b53cfbb2af2671f077296a67a0cbbd6ec68ee918e6dd8687d7953b95a7019e"
   }
 }

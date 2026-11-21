@@ -1,24 +1,68 @@
 import sql from './db.js';
 
-const RATES = [
-  [/^gpt-4o-mini/, 0.30, 1.20],
-  [/^gpt-4o/, 5.00, 20.00],
-  [/^gpt-4\.1-mini/, 0.80, 3.20],
-  [/^gpt-4\.1/, 4.00, 16.00],
-  [/^text-embedding-3-small/, 0.04, 0],
-  [/^text-embedding-3-large/, 0.26, 0],
-];
+// OpenAI's published prices in dollars per million tokens, input then output: the standard rate, read from
+// developers.openai.com/api/docs/pricing on 2026-11-20. Until that day the rows here were twice the published
+// prices, so every recorded cost, the daily summary's estimate and both caps were out by a factor of two. They
+// are the published prices now: a cap of 25 dollars means 25 dollars.
+const PRICES = {
+  'gpt-4o': [2.50, 10.00],
+  'gpt-4o-mini': [0.15, 0.60],
+  'gpt-4.1': [2.00, 8.00],
+  'gpt-4.1-mini': [0.40, 1.60],
+  'gpt-5.4': [2.50, 15.00],
+  'gpt-5.4-mini': [0.75, 4.50],
+  'gpt-5.4-nano': [0.20, 1.25],
+  'gpt-6.2-sol': [2.00, 10.00],
+  'gpt-6.1-terra': [1.00, 5.00],
+  'gpt-6-luna': [0.10, 0.50],
+  'text-embedding-3-small': [0.02, 0],
+  'text-embedding-3-large': [0.13, 0],
+};
+// A model with no price is counted at this rate, far above any real one, so that it uses the cap up quickly
+// instead of spending unseen. hasPrice() and the ai_price_missing warning are how the gap gets noticed.
 const DEFAULT_RATE = [20, 100];
 
+// A row prices its own name and that name's dated snapshots (gpt-4o-2024-08-06), and nothing else. A name that
+// merely begins with a priced one (gpt-4o-realtime-preview, gpt-5.4-pro) is a different model at a different
+// price, usually a higher one: counting it at the shorter name's price would under-count against the cap.
+const DATED_SNAPSHOT = /-\d{4}-\d{2}-\d{2}$/;
+
+function isRate(value) {
+  return Array.isArray(value) && value.length === 2 && value.every(part => Number.isFinite(part) && part >= 0);
+}
+
+function configuredPrices() {
+  if (!process.env.OPENAI_MODEL_RATES_JSON) return {};
+  try { return JSON.parse(process.env.OPENAI_MODEL_RATES_JSON) || {}; }
+  catch { return {}; }
+}
+
+function tablePrice(name) {
+  return Object.hasOwn(PRICES, name) ? PRICES[name] : null;
+}
+
+// The price on record for a model, or null when there is none: OPENAI_MODEL_RATES_JSON first, then the table.
+function priceOnRecord(model) {
+  const name = String(model || '');
+  const custom = configuredPrices()[name];
+  if (isRate(custom)) return custom;
+  return tablePrice(name) || tablePrice(name.replace(DATED_SNAPSHOT, ''));
+}
+
+export function hasPrice(model) {
+  return priceOnRecord(model) !== null;
+}
+
+const reportedUnpriced = new Set();
+
 function ratesFor(model) {
-  let configured = {};
-  if (process.env.OPENAI_MODEL_RATES_JSON) {
-    try { configured = JSON.parse(process.env.OPENAI_MODEL_RATES_JSON); }
-    catch { configured = {}; }
+  const price = priceOnRecord(model);
+  if (price) return price;
+  if (!reportedUnpriced.has(model)) {
+    reportedUnpriced.add(model);
+    console.warn(JSON.stringify({ event: 'ai_price_missing', model }));
   }
-  const custom = configured[model];
-  if (Array.isArray(custom) && custom.length === 2 && custom.every(value => Number.isFinite(value) && value >= 0)) return custom;
-  return RATES.find(([pattern]) => pattern.test(model))?.slice(1) || DEFAULT_RATE;
+  return DEFAULT_RATE;
 }
 
 function money(value) {

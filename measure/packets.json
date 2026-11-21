@@ -1,0 +1,1811 @@
+{
+ "er-stroke": [
+  {
+   "type": "misdiagnosis",
+   "cases": [
+    {
+     "caseName": "Hackshaw v. Mercy Medical Center",
+     "citation": "139 A.D.3d 798",
+     "citations": [
+      "139 A.D.3d 798",
+      "33 N.Y.S.3d 297"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2016-05-11",
+     "snippet": "In an action, inter alia, to recover damages for medical malpractice, the plaintiffs appeal from an",
+     "url": "https://www.courtlistener.com/opinion/3202872/hackshaw-v-mercy-medical-center/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/3202872/hackshaw-v-mercy-medical-center/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Michel v. Long Island Jewish Medical Center",
+     "citation": "125 A.D.3d 945",
+     "citations": [
+      "125 A.D.3d 945",
+      "5 N.Y.S.3d 162"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2015-02-25",
+     "snippet": "In an action, inter alia, to recover damages for medical malpractice, the plaintiff appeals, as limited",
+     "url": "https://www.courtlistener.com/opinion/2782202/michel-v-long-island-jewish-medical-center/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/2782202/michel-v-long-island-jewish-medical-center/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "D.Y. Ex Rel. DeShawn Y. v. Catskill Regional Medical Center",
+     "citation": "2017 NY Slip Op 8577",
+     "citations": [
+      "2017 NY Slip Op 8577",
+      "156 A.D.3d 1003",
+      "66 N.Y.S.3d 368"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2017-12-07",
+     "snippet": "presence of blood in his urine and his inability to keep fluids down over a three-day period. Upon examination",
+     "url": "https://www.courtlistener.com/opinion/4449381/dy-ex-rel-deshawn-y-v-catskill-regional-medical-center/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/4449381/dy-ex-rel-deshawn-y-v-catskill-regional-medical-center/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Dispensa v. Medical Diagnostic Imaging, PLLC",
+     "citation": "2026 NY Slip Op 00492",
+     "citations": [
+      "2026 NY Slip Op 00492"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2026-02-04",
+     "snippet": "Dispensa v Medical Diagnostic Imaging, PLLC (2026 NY Slip Op 00492) Dispensa v Medical Diagnostic",
+     "url": "https://www.courtlistener.com/opinion/10784160/dispensa-v-medical-diagnostic-imaging-pllc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/10784160/dispensa-v-medical-diagnostic-imaging-pllc/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Cully v. Ricottone",
+     "citation": "2024 NY Slip Op 03248",
+     "citations": [
+      "2024 NY Slip Op 03248"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2024-06-14",
+     "snippet": "Published by New York State Law Reporting Bureau pursuant to Judiciary Law § 431. This opinion is uncorrected",
+     "url": "https://www.courtlistener.com/opinion/9880428/cully-v-ricottone/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/9880428/cully-v-ricottone/",
+     "scope": "ny"
+    }
+   ]
+  },
+  {
+   "type": "misdiagnosis",
+   "cases": [
+    {
+     "caseName": "Hackshaw v. Mercy Medical Center",
+     "citation": "139 A.D.3d 798",
+     "citations": [
+      "139 A.D.3d 798",
+      "33 N.Y.S.3d 297"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2016-05-11",
+     "snippet": "In an action, inter alia, to recover damages for medical malpractice, the plaintiffs appeal from an",
+     "url": "https://www.courtlistener.com/opinion/3202872/hackshaw-v-mercy-medical-center/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/3202872/hackshaw-v-mercy-medical-center/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Michel v. Long Island Jewish Medical Center",
+     "citation": "125 A.D.3d 945",
+     "citations": [
+      "125 A.D.3d 945",
+      "5 N.Y.S.3d 162"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2015-02-25",
+     "snippet": "In an action, inter alia, to recover damages for medical malpractice, the plaintiff appeals, as limited",
+     "url": "https://www.courtlistener.com/opinion/2782202/michel-v-long-island-jewish-medical-center/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/2782202/michel-v-long-island-jewish-medical-center/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "D.Y. Ex Rel. DeShawn Y. v. Catskill Regional Medical Center",
+     "citation": "2017 NY Slip Op 8577",
+     "citations": [
+      "2017 NY Slip Op 8577",
+      "156 A.D.3d 1003",
+      "66 N.Y.S.3d 368"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2017-12-07",
+     "snippet": "presence of blood in his urine and his inability to keep fluids down over a three-day period. Upon examination",
+     "url": "https://www.courtlistener.com/opinion/4449381/dy-ex-rel-deshawn-y-v-catskill-regional-medical-center/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/4449381/dy-ex-rel-deshawn-y-v-catskill-regional-medical-center/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Dispensa v. Medical Diagnostic Imaging, PLLC",
+     "citation": "2026 NY Slip Op 00492",
+     "citations": [
+      "2026 NY Slip Op 00492"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2026-02-04",
+     "snippet": "Dispensa v Medical Diagnostic Imaging, PLLC (2026 NY Slip Op 00492) Dispensa v Medical Diagnostic",
+     "url": "https://www.courtlistener.com/opinion/10784160/dispensa-v-medical-diagnostic-imaging-pllc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/10784160/dispensa-v-medical-diagnostic-imaging-pllc/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Cully v. Ricottone",
+     "citation": "2024 NY Slip Op 03248",
+     "citations": [
+      "2024 NY Slip Op 03248"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2024-06-14",
+     "snippet": "Published by New York State Law Reporting Bureau pursuant to Judiciary Law § 431. This opinion is uncorrected",
+     "url": "https://www.courtlistener.com/opinion/9880428/cully-v-ricottone/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/9880428/cully-v-ricottone/",
+     "scope": "ny"
+    }
+   ]
+  },
+  {
+   "type": "misdiagnosis",
+   "cases": [
+    {
+     "caseName": "Hackshaw v. Mercy Medical Center",
+     "citation": "139 A.D.3d 798",
+     "citations": [
+      "139 A.D.3d 798",
+      "33 N.Y.S.3d 297"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2016-05-11",
+     "snippet": "In an action, inter alia, to recover damages for medical malpractice, the plaintiffs appeal from an",
+     "url": "https://www.courtlistener.com/opinion/3202872/hackshaw-v-mercy-medical-center/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/3202872/hackshaw-v-mercy-medical-center/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Michel v. Long Island Jewish Medical Center",
+     "citation": "125 A.D.3d 945",
+     "citations": [
+      "125 A.D.3d 945",
+      "5 N.Y.S.3d 162"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2015-02-25",
+     "snippet": "In an action, inter alia, to recover damages for medical malpractice, the plaintiff appeals, as limited",
+     "url": "https://www.courtlistener.com/opinion/2782202/michel-v-long-island-jewish-medical-center/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/2782202/michel-v-long-island-jewish-medical-center/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "D.Y. Ex Rel. DeShawn Y. v. Catskill Regional Medical Center",
+     "citation": "2017 NY Slip Op 8577",
+     "citations": [
+      "2017 NY Slip Op 8577",
+      "156 A.D.3d 1003",
+      "66 N.Y.S.3d 368"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2017-12-07",
+     "snippet": "presence of blood in his urine and his inability to keep fluids down over a three-day period. Upon examination",
+     "url": "https://www.courtlistener.com/opinion/4449381/dy-ex-rel-deshawn-y-v-catskill-regional-medical-center/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/4449381/dy-ex-rel-deshawn-y-v-catskill-regional-medical-center/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Dispensa v. Medical Diagnostic Imaging, PLLC",
+     "citation": "2026 NY Slip Op 00492",
+     "citations": [
+      "2026 NY Slip Op 00492"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2026-02-04",
+     "snippet": "Dispensa v Medical Diagnostic Imaging, PLLC (2026 NY Slip Op 00492) Dispensa v Medical Diagnostic",
+     "url": "https://www.courtlistener.com/opinion/10784160/dispensa-v-medical-diagnostic-imaging-pllc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/10784160/dispensa-v-medical-diagnostic-imaging-pllc/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Cully v. Ricottone",
+     "citation": "2024 NY Slip Op 03248",
+     "citations": [
+      "2024 NY Slip Op 03248"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2024-06-14",
+     "snippet": "Published by New York State Law Reporting Bureau pursuant to Judiciary Law § 431. This opinion is uncorrected",
+     "url": "https://www.courtlistener.com/opinion/9880428/cully-v-ricottone/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/9880428/cully-v-ricottone/",
+     "scope": "ny"
+    }
+   ]
+  },
+  {
+   "type": "misdiagnosis",
+   "cases": [
+    {
+     "caseName": "Hackshaw v. Mercy Medical Center",
+     "citation": "139 A.D.3d 798",
+     "citations": [
+      "139 A.D.3d 798",
+      "33 N.Y.S.3d 297"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2016-05-11",
+     "snippet": "In an action, inter alia, to recover damages for medical malpractice, the plaintiffs appeal from an",
+     "url": "https://www.courtlistener.com/opinion/3202872/hackshaw-v-mercy-medical-center/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/3202872/hackshaw-v-mercy-medical-center/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Michel v. Long Island Jewish Medical Center",
+     "citation": "125 A.D.3d 945",
+     "citations": [
+      "125 A.D.3d 945",
+      "5 N.Y.S.3d 162"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2015-02-25",
+     "snippet": "In an action, inter alia, to recover damages for medical malpractice, the plaintiff appeals, as limited",
+     "url": "https://www.courtlistener.com/opinion/2782202/michel-v-long-island-jewish-medical-center/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/2782202/michel-v-long-island-jewish-medical-center/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "D.Y. Ex Rel. DeShawn Y. v. Catskill Regional Medical Center",
+     "citation": "2017 NY Slip Op 8577",
+     "citations": [
+      "2017 NY Slip Op 8577",
+      "156 A.D.3d 1003",
+      "66 N.Y.S.3d 368"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2017-12-07",
+     "snippet": "presence of blood in his urine and his inability to keep fluids down over a three-day period. Upon examination",
+     "url": "https://www.courtlistener.com/opinion/4449381/dy-ex-rel-deshawn-y-v-catskill-regional-medical-center/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/4449381/dy-ex-rel-deshawn-y-v-catskill-regional-medical-center/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Dispensa v. Medical Diagnostic Imaging, PLLC",
+     "citation": "2026 NY Slip Op 00492",
+     "citations": [
+      "2026 NY Slip Op 00492"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2026-02-04",
+     "snippet": "Dispensa v Medical Diagnostic Imaging, PLLC (2026 NY Slip Op 00492) Dispensa v Medical Diagnostic",
+     "url": "https://www.courtlistener.com/opinion/10784160/dispensa-v-medical-diagnostic-imaging-pllc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/10784160/dispensa-v-medical-diagnostic-imaging-pllc/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Cully v. Ricottone",
+     "citation": "2024 NY Slip Op 03248",
+     "citations": [
+      "2024 NY Slip Op 03248"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2024-06-14",
+     "snippet": "Published by New York State Law Reporting Bureau pursuant to Judiciary Law § 431. This opinion is uncorrected",
+     "url": "https://www.courtlistener.com/opinion/9880428/cully-v-ricottone/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/9880428/cully-v-ricottone/",
+     "scope": "ny"
+    }
+   ]
+  }
+ ],
+ "sepsis-discharge": [
+  {
+   "type": "misdiagnosis",
+   "cases": [
+    {
+     "caseName": "Hackshaw v. Mercy Medical Center",
+     "citation": "139 A.D.3d 798",
+     "citations": [
+      "139 A.D.3d 798",
+      "33 N.Y.S.3d 297"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2016-05-11",
+     "snippet": "In an action, inter alia, to recover damages for medical malpractice, the plaintiffs appeal from an",
+     "url": "https://www.courtlistener.com/opinion/3202872/hackshaw-v-mercy-medical-center/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/3202872/hackshaw-v-mercy-medical-center/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Michel v. Long Island Jewish Medical Center",
+     "citation": "125 A.D.3d 945",
+     "citations": [
+      "125 A.D.3d 945",
+      "5 N.Y.S.3d 162"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2015-02-25",
+     "snippet": "In an action, inter alia, to recover damages for medical malpractice, the plaintiff appeals, as limited",
+     "url": "https://www.courtlistener.com/opinion/2782202/michel-v-long-island-jewish-medical-center/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/2782202/michel-v-long-island-jewish-medical-center/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "D.Y. Ex Rel. DeShawn Y. v. Catskill Regional Medical Center",
+     "citation": "2017 NY Slip Op 8577",
+     "citations": [
+      "2017 NY Slip Op 8577",
+      "156 A.D.3d 1003",
+      "66 N.Y.S.3d 368"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2017-12-07",
+     "snippet": "presence of blood in his urine and his inability to keep fluids down over a three-day period. Upon examination",
+     "url": "https://www.courtlistener.com/opinion/4449381/dy-ex-rel-deshawn-y-v-catskill-regional-medical-center/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/4449381/dy-ex-rel-deshawn-y-v-catskill-regional-medical-center/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Dispensa v. Medical Diagnostic Imaging, PLLC",
+     "citation": "2026 NY Slip Op 00492",
+     "citations": [
+      "2026 NY Slip Op 00492"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2026-02-04",
+     "snippet": "Dispensa v Medical Diagnostic Imaging, PLLC (2026 NY Slip Op 00492) Dispensa v Medical Diagnostic",
+     "url": "https://www.courtlistener.com/opinion/10784160/dispensa-v-medical-diagnostic-imaging-pllc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/10784160/dispensa-v-medical-diagnostic-imaging-pllc/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Cully v. Ricottone",
+     "citation": "2024 NY Slip Op 03248",
+     "citations": [
+      "2024 NY Slip Op 03248"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2024-06-14",
+     "snippet": "Published by New York State Law Reporting Bureau pursuant to Judiciary Law § 431. This opinion is uncorrected",
+     "url": "https://www.courtlistener.com/opinion/9880428/cully-v-ricottone/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/9880428/cully-v-ricottone/",
+     "scope": "ny"
+    }
+   ]
+  },
+  {
+   "type": "misdiagnosis",
+   "cases": [
+    {
+     "caseName": "Hackshaw v. Mercy Medical Center",
+     "citation": "139 A.D.3d 798",
+     "citations": [
+      "139 A.D.3d 798",
+      "33 N.Y.S.3d 297"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2016-05-11",
+     "snippet": "In an action, inter alia, to recover damages for medical malpractice, the plaintiffs appeal from an",
+     "url": "https://www.courtlistener.com/opinion/3202872/hackshaw-v-mercy-medical-center/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/3202872/hackshaw-v-mercy-medical-center/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Michel v. Long Island Jewish Medical Center",
+     "citation": "125 A.D.3d 945",
+     "citations": [
+      "125 A.D.3d 945",
+      "5 N.Y.S.3d 162"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2015-02-25",
+     "snippet": "In an action, inter alia, to recover damages for medical malpractice, the plaintiff appeals, as limited",
+     "url": "https://www.courtlistener.com/opinion/2782202/michel-v-long-island-jewish-medical-center/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/2782202/michel-v-long-island-jewish-medical-center/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "D.Y. Ex Rel. DeShawn Y. v. Catskill Regional Medical Center",
+     "citation": "2017 NY Slip Op 8577",
+     "citations": [
+      "2017 NY Slip Op 8577",
+      "156 A.D.3d 1003",
+      "66 N.Y.S.3d 368"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2017-12-07",
+     "snippet": "presence of blood in his urine and his inability to keep fluids down over a three-day period. Upon examination",
+     "url": "https://www.courtlistener.com/opinion/4449381/dy-ex-rel-deshawn-y-v-catskill-regional-medical-center/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/4449381/dy-ex-rel-deshawn-y-v-catskill-regional-medical-center/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Dispensa v. Medical Diagnostic Imaging, PLLC",
+     "citation": "2026 NY Slip Op 00492",
+     "citations": [
+      "2026 NY Slip Op 00492"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2026-02-04",
+     "snippet": "Dispensa v Medical Diagnostic Imaging, PLLC (2026 NY Slip Op 00492) Dispensa v Medical Diagnostic",
+     "url": "https://www.courtlistener.com/opinion/10784160/dispensa-v-medical-diagnostic-imaging-pllc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/10784160/dispensa-v-medical-diagnostic-imaging-pllc/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Cully v. Ricottone",
+     "citation": "2024 NY Slip Op 03248",
+     "citations": [
+      "2024 NY Slip Op 03248"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2024-06-14",
+     "snippet": "Published by New York State Law Reporting Bureau pursuant to Judiciary Law § 431. This opinion is uncorrected",
+     "url": "https://www.courtlistener.com/opinion/9880428/cully-v-ricottone/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/9880428/cully-v-ricottone/",
+     "scope": "ny"
+    }
+   ]
+  },
+  {
+   "type": "misdiagnosis",
+   "cases": [
+    {
+     "caseName": "Hackshaw v. Mercy Medical Center",
+     "citation": "139 A.D.3d 798",
+     "citations": [
+      "139 A.D.3d 798",
+      "33 N.Y.S.3d 297"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2016-05-11",
+     "snippet": "In an action, inter alia, to recover damages for medical malpractice, the plaintiffs appeal from an",
+     "url": "https://www.courtlistener.com/opinion/3202872/hackshaw-v-mercy-medical-center/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/3202872/hackshaw-v-mercy-medical-center/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Michel v. Long Island Jewish Medical Center",
+     "citation": "125 A.D.3d 945",
+     "citations": [
+      "125 A.D.3d 945",
+      "5 N.Y.S.3d 162"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2015-02-25",
+     "snippet": "In an action, inter alia, to recover damages for medical malpractice, the plaintiff appeals, as limited",
+     "url": "https://www.courtlistener.com/opinion/2782202/michel-v-long-island-jewish-medical-center/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/2782202/michel-v-long-island-jewish-medical-center/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "D.Y. Ex Rel. DeShawn Y. v. Catskill Regional Medical Center",
+     "citation": "2017 NY Slip Op 8577",
+     "citations": [
+      "2017 NY Slip Op 8577",
+      "156 A.D.3d 1003",
+      "66 N.Y.S.3d 368"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2017-12-07",
+     "snippet": "presence of blood in his urine and his inability to keep fluids down over a three-day period. Upon examination",
+     "url": "https://www.courtlistener.com/opinion/4449381/dy-ex-rel-deshawn-y-v-catskill-regional-medical-center/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/4449381/dy-ex-rel-deshawn-y-v-catskill-regional-medical-center/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Dispensa v. Medical Diagnostic Imaging, PLLC",
+     "citation": "2026 NY Slip Op 00492",
+     "citations": [
+      "2026 NY Slip Op 00492"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2026-02-04",
+     "snippet": "Dispensa v Medical Diagnostic Imaging, PLLC (2026 NY Slip Op 00492) Dispensa v Medical Diagnostic",
+     "url": "https://www.courtlistener.com/opinion/10784160/dispensa-v-medical-diagnostic-imaging-pllc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/10784160/dispensa-v-medical-diagnostic-imaging-pllc/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Cully v. Ricottone",
+     "citation": "2024 NY Slip Op 03248",
+     "citations": [
+      "2024 NY Slip Op 03248"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2024-06-14",
+     "snippet": "Published by New York State Law Reporting Bureau pursuant to Judiciary Law § 431. This opinion is uncorrected",
+     "url": "https://www.courtlistener.com/opinion/9880428/cully-v-ricottone/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/9880428/cully-v-ricottone/",
+     "scope": "ny"
+    }
+   ]
+  },
+  {
+   "type": "misdiagnosis",
+   "cases": [
+    {
+     "caseName": "Hackshaw v. Mercy Medical Center",
+     "citation": "139 A.D.3d 798",
+     "citations": [
+      "139 A.D.3d 798",
+      "33 N.Y.S.3d 297"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2016-05-11",
+     "snippet": "In an action, inter alia, to recover damages for medical malpractice, the plaintiffs appeal from an",
+     "url": "https://www.courtlistener.com/opinion/3202872/hackshaw-v-mercy-medical-center/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/3202872/hackshaw-v-mercy-medical-center/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Michel v. Long Island Jewish Medical Center",
+     "citation": "125 A.D.3d 945",
+     "citations": [
+      "125 A.D.3d 945",
+      "5 N.Y.S.3d 162"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2015-02-25",
+     "snippet": "In an action, inter alia, to recover damages for medical malpractice, the plaintiff appeals, as limited",
+     "url": "https://www.courtlistener.com/opinion/2782202/michel-v-long-island-jewish-medical-center/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/2782202/michel-v-long-island-jewish-medical-center/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "D.Y. Ex Rel. DeShawn Y. v. Catskill Regional Medical Center",
+     "citation": "2017 NY Slip Op 8577",
+     "citations": [
+      "2017 NY Slip Op 8577",
+      "156 A.D.3d 1003",
+      "66 N.Y.S.3d 368"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2017-12-07",
+     "snippet": "presence of blood in his urine and his inability to keep fluids down over a three-day period. Upon examination",
+     "url": "https://www.courtlistener.com/opinion/4449381/dy-ex-rel-deshawn-y-v-catskill-regional-medical-center/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/4449381/dy-ex-rel-deshawn-y-v-catskill-regional-medical-center/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Dispensa v. Medical Diagnostic Imaging, PLLC",
+     "citation": "2026 NY Slip Op 00492",
+     "citations": [
+      "2026 NY Slip Op 00492"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2026-02-04",
+     "snippet": "Dispensa v Medical Diagnostic Imaging, PLLC (2026 NY Slip Op 00492) Dispensa v Medical Diagnostic",
+     "url": "https://www.courtlistener.com/opinion/10784160/dispensa-v-medical-diagnostic-imaging-pllc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/10784160/dispensa-v-medical-diagnostic-imaging-pllc/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Cully v. Ricottone",
+     "citation": "2024 NY Slip Op 03248",
+     "citations": [
+      "2024 NY Slip Op 03248"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2024-06-14",
+     "snippet": "Published by New York State Law Reporting Bureau pursuant to Judiciary Law § 431. This opinion is uncorrected",
+     "url": "https://www.courtlistener.com/opinion/9880428/cully-v-ricottone/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/9880428/cully-v-ricottone/",
+     "scope": "ny"
+    }
+   ]
+  }
+ ],
+ "retained-guidewire": [
+  {
+   "type": "surgical_error",
+   "cases": [
+    {
+     "caseName": "Cho-Bodnar v. Adirondack Maxillofacial Surgery",
+     "citation": "215 A.D.3d 1101",
+     "citations": [
+      "215 A.D.3d 1101",
+      "186 N.Y.S.3d 734",
+      "2023 NY Slip Op 01932"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2023-04-13",
+     "snippet": "Cho-Bodnar v Adirondack Maxillofacial Surgery (2023 NY Slip Op 01932) Cho-Bodnar v Adirondack",
+     "url": "https://www.courtlistener.com/opinion/9391235/cho-bodnar-v-adirondack-maxillofacial-surgery/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/9391235/cho-bodnar-v-adirondack-maxillofacial-surgery/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Neurological Surgery, P.C. v. MLMIC Ins. Co.",
+     "citation": "208 A.D.3d 1238",
+     "citations": [
+      "208 A.D.3d 1238",
+      "175 N.Y.S.3d 266",
+      "2022 NY Slip Op 05211"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2022-09-21",
+     "snippet": "Neurological Surgery, P.C. v MLMIC Ins. Co. (2022 NY Slip Op 05211) Neurological Surgery, P.C",
+     "url": "https://www.courtlistener.com/opinion/8242901/neurological-surgery-pc-v-mlmic-ins-co/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/8242901/neurological-surgery-pc-v-mlmic-ins-co/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Lampe v. Neurological Surgery, P.C.",
+     "citation": "2019 NY Slip Op 4927",
+     "citations": [
+      "2019 NY Slip Op 4927"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2019-06-19",
+     "snippet": "Lampe v Neurological Surgery, P.C. (2019 NY Slip Op 04927) Lampe v Neurological Surgery",
+     "url": "https://www.courtlistener.com/opinion/4631231/lampe-v-neurological-surgery-pc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/4631231/lampe-v-neurological-surgery-pc/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Mishli v. Advanced Dermatology Laser & Cosmetic Surgery, P.C.",
+     "citation": "2024 NY Slip Op 04386",
+     "citations": [
+      "2024 NY Slip Op 04386"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2024-09-11",
+     "snippet": "Mishli v Advanced Dermatology Laser & Cosmetic Surgery, P.C. (2024 NY Slip Op 04386) Mishli v Advanced",
+     "url": "https://www.courtlistener.com/opinion/10114418/mishli-v-advanced-dermatology-laser-cosmetic-surgery-pc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/10114418/mishli-v-advanced-dermatology-laser-cosmetic-surgery-pc/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Whitnum v. Plastic & Reconstructive Surgery, P.C.",
+     "citation": "142 A.D.3d 495",
+     "citations": [
+      "142 A.D.3d 495",
+      "36 N.Y.S.3d 470"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2016-08-03",
+     "snippet": "action, inter alia, to recover damages for medical malpractice and lack of informed consent, the plaintiff",
+     "url": "https://www.courtlistener.com/opinion/4244311/whitnum-v-plastic-reconstructive-surgery-pc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/4244311/whitnum-v-plastic-reconstructive-surgery-pc/",
+     "scope": "ny"
+    }
+   ]
+  },
+  {
+   "type": "surgical_error",
+   "cases": [
+    {
+     "caseName": "Cho-Bodnar v. Adirondack Maxillofacial Surgery",
+     "citation": "215 A.D.3d 1101",
+     "citations": [
+      "215 A.D.3d 1101",
+      "186 N.Y.S.3d 734",
+      "2023 NY Slip Op 01932"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2023-04-13",
+     "snippet": "Cho-Bodnar v Adirondack Maxillofacial Surgery (2023 NY Slip Op 01932) Cho-Bodnar v Adirondack",
+     "url": "https://www.courtlistener.com/opinion/9391235/cho-bodnar-v-adirondack-maxillofacial-surgery/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/9391235/cho-bodnar-v-adirondack-maxillofacial-surgery/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Neurological Surgery, P.C. v. MLMIC Ins. Co.",
+     "citation": "208 A.D.3d 1238",
+     "citations": [
+      "208 A.D.3d 1238",
+      "175 N.Y.S.3d 266",
+      "2022 NY Slip Op 05211"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2022-09-21",
+     "snippet": "Neurological Surgery, P.C. v MLMIC Ins. Co. (2022 NY Slip Op 05211) Neurological Surgery, P.C",
+     "url": "https://www.courtlistener.com/opinion/8242901/neurological-surgery-pc-v-mlmic-ins-co/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/8242901/neurological-surgery-pc-v-mlmic-ins-co/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Lampe v. Neurological Surgery, P.C.",
+     "citation": "2019 NY Slip Op 4927",
+     "citations": [
+      "2019 NY Slip Op 4927"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2019-06-19",
+     "snippet": "Lampe v Neurological Surgery, P.C. (2019 NY Slip Op 04927) Lampe v Neurological Surgery",
+     "url": "https://www.courtlistener.com/opinion/4631231/lampe-v-neurological-surgery-pc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/4631231/lampe-v-neurological-surgery-pc/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Mishli v. Advanced Dermatology Laser & Cosmetic Surgery, P.C.",
+     "citation": "2024 NY Slip Op 04386",
+     "citations": [
+      "2024 NY Slip Op 04386"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2024-09-11",
+     "snippet": "Mishli v Advanced Dermatology Laser & Cosmetic Surgery, P.C. (2024 NY Slip Op 04386) Mishli v Advanced",
+     "url": "https://www.courtlistener.com/opinion/10114418/mishli-v-advanced-dermatology-laser-cosmetic-surgery-pc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/10114418/mishli-v-advanced-dermatology-laser-cosmetic-surgery-pc/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Whitnum v. Plastic & Reconstructive Surgery, P.C.",
+     "citation": "142 A.D.3d 495",
+     "citations": [
+      "142 A.D.3d 495",
+      "36 N.Y.S.3d 470"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2016-08-03",
+     "snippet": "action, inter alia, to recover damages for medical malpractice and lack of informed consent, the plaintiff",
+     "url": "https://www.courtlistener.com/opinion/4244311/whitnum-v-plastic-reconstructive-surgery-pc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/4244311/whitnum-v-plastic-reconstructive-surgery-pc/",
+     "scope": "ny"
+    }
+   ]
+  },
+  {
+   "type": "surgical_error",
+   "cases": [
+    {
+     "caseName": "Cho-Bodnar v. Adirondack Maxillofacial Surgery",
+     "citation": "215 A.D.3d 1101",
+     "citations": [
+      "215 A.D.3d 1101",
+      "186 N.Y.S.3d 734",
+      "2023 NY Slip Op 01932"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2023-04-13",
+     "snippet": "Cho-Bodnar v Adirondack Maxillofacial Surgery (2023 NY Slip Op 01932) Cho-Bodnar v Adirondack",
+     "url": "https://www.courtlistener.com/opinion/9391235/cho-bodnar-v-adirondack-maxillofacial-surgery/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/9391235/cho-bodnar-v-adirondack-maxillofacial-surgery/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Neurological Surgery, P.C. v. MLMIC Ins. Co.",
+     "citation": "208 A.D.3d 1238",
+     "citations": [
+      "208 A.D.3d 1238",
+      "175 N.Y.S.3d 266",
+      "2022 NY Slip Op 05211"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2022-09-21",
+     "snippet": "Neurological Surgery, P.C. v MLMIC Ins. Co. (2022 NY Slip Op 05211) Neurological Surgery, P.C",
+     "url": "https://www.courtlistener.com/opinion/8242901/neurological-surgery-pc-v-mlmic-ins-co/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/8242901/neurological-surgery-pc-v-mlmic-ins-co/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Lampe v. Neurological Surgery, P.C.",
+     "citation": "2019 NY Slip Op 4927",
+     "citations": [
+      "2019 NY Slip Op 4927"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2019-06-19",
+     "snippet": "Lampe v Neurological Surgery, P.C. (2019 NY Slip Op 04927) Lampe v Neurological Surgery",
+     "url": "https://www.courtlistener.com/opinion/4631231/lampe-v-neurological-surgery-pc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/4631231/lampe-v-neurological-surgery-pc/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Mishli v. Advanced Dermatology Laser & Cosmetic Surgery, P.C.",
+     "citation": "2024 NY Slip Op 04386",
+     "citations": [
+      "2024 NY Slip Op 04386"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2024-09-11",
+     "snippet": "Mishli v Advanced Dermatology Laser & Cosmetic Surgery, P.C. (2024 NY Slip Op 04386) Mishli v Advanced",
+     "url": "https://www.courtlistener.com/opinion/10114418/mishli-v-advanced-dermatology-laser-cosmetic-surgery-pc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/10114418/mishli-v-advanced-dermatology-laser-cosmetic-surgery-pc/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Whitnum v. Plastic & Reconstructive Surgery, P.C.",
+     "citation": "142 A.D.3d 495",
+     "citations": [
+      "142 A.D.3d 495",
+      "36 N.Y.S.3d 470"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2016-08-03",
+     "snippet": "action, inter alia, to recover damages for medical malpractice and lack of informed consent, the plaintiff",
+     "url": "https://www.courtlistener.com/opinion/4244311/whitnum-v-plastic-reconstructive-surgery-pc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/4244311/whitnum-v-plastic-reconstructive-surgery-pc/",
+     "scope": "ny"
+    }
+   ]
+  },
+  {
+   "type": "surgical_error",
+   "cases": [
+    {
+     "caseName": "Cho-Bodnar v. Adirondack Maxillofacial Surgery",
+     "citation": "215 A.D.3d 1101",
+     "citations": [
+      "215 A.D.3d 1101",
+      "186 N.Y.S.3d 734",
+      "2023 NY Slip Op 01932"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2023-04-13",
+     "snippet": "Cho-Bodnar v Adirondack Maxillofacial Surgery (2023 NY Slip Op 01932) Cho-Bodnar v Adirondack",
+     "url": "https://www.courtlistener.com/opinion/9391235/cho-bodnar-v-adirondack-maxillofacial-surgery/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/9391235/cho-bodnar-v-adirondack-maxillofacial-surgery/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Neurological Surgery, P.C. v. MLMIC Ins. Co.",
+     "citation": "208 A.D.3d 1238",
+     "citations": [
+      "208 A.D.3d 1238",
+      "175 N.Y.S.3d 266",
+      "2022 NY Slip Op 05211"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2022-09-21",
+     "snippet": "Neurological Surgery, P.C. v MLMIC Ins. Co. (2022 NY Slip Op 05211) Neurological Surgery, P.C",
+     "url": "https://www.courtlistener.com/opinion/8242901/neurological-surgery-pc-v-mlmic-ins-co/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/8242901/neurological-surgery-pc-v-mlmic-ins-co/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Lampe v. Neurological Surgery, P.C.",
+     "citation": "2019 NY Slip Op 4927",
+     "citations": [
+      "2019 NY Slip Op 4927"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2019-06-19",
+     "snippet": "Lampe v Neurological Surgery, P.C. (2019 NY Slip Op 04927) Lampe v Neurological Surgery",
+     "url": "https://www.courtlistener.com/opinion/4631231/lampe-v-neurological-surgery-pc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/4631231/lampe-v-neurological-surgery-pc/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Mishli v. Advanced Dermatology Laser & Cosmetic Surgery, P.C.",
+     "citation": "2024 NY Slip Op 04386",
+     "citations": [
+      "2024 NY Slip Op 04386"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2024-09-11",
+     "snippet": "Mishli v Advanced Dermatology Laser & Cosmetic Surgery, P.C. (2024 NY Slip Op 04386) Mishli v Advanced",
+     "url": "https://www.courtlistener.com/opinion/10114418/mishli-v-advanced-dermatology-laser-cosmetic-surgery-pc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/10114418/mishli-v-advanced-dermatology-laser-cosmetic-surgery-pc/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Whitnum v. Plastic & Reconstructive Surgery, P.C.",
+     "citation": "142 A.D.3d 495",
+     "citations": [
+      "142 A.D.3d 495",
+      "36 N.Y.S.3d 470"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2016-08-03",
+     "snippet": "action, inter alia, to recover damages for medical malpractice and lack of informed consent, the plaintiff",
+     "url": "https://www.courtlistener.com/opinion/4244311/whitnum-v-plastic-reconstructive-surgery-pc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/4244311/whitnum-v-plastic-reconstructive-surgery-pc/",
+     "scope": "ny"
+    }
+   ]
+  }
+ ],
+ "too-late": [
+  {
+   "type": "surgical_error",
+   "cases": [
+    {
+     "caseName": "Schuck v. Stony Brook Surgical Associates",
+     "citation": "140 A.D.3d 725",
+     "citations": [
+      "140 A.D.3d 725",
+      "33 N.Y.S.3d 369"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2016-06-01",
+     "snippet": "In an action to recover damages for medical malpractice and lack of informed consent, etc., the defendants",
+     "url": "https://www.courtlistener.com/opinion/3208575/schuck-v-stony-brook-surgical-associates/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/3208575/schuck-v-stony-brook-surgical-associates/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Lampe v. Neurological Surgery, P.C.",
+     "citation": "2019 NY Slip Op 4927",
+     "citations": [
+      "2019 NY Slip Op 4927"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2019-06-19",
+     "snippet": "Lampe v Neurological Surgery, P.C. (2019 NY Slip Op 04927) Lampe v Neurological Surgery",
+     "url": "https://www.courtlistener.com/opinion/4631231/lampe-v-neurological-surgery-pc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/4631231/lampe-v-neurological-surgery-pc/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Cho-Bodnar v. Adirondack Maxillofacial Surgery",
+     "citation": "215 A.D.3d 1101",
+     "citations": [
+      "215 A.D.3d 1101",
+      "186 N.Y.S.3d 734",
+      "2023 NY Slip Op 01932"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2023-04-13",
+     "snippet": "Cho-Bodnar v Adirondack Maxillofacial Surgery (2023 NY Slip Op 01932) Cho-Bodnar v Adirondack",
+     "url": "https://www.courtlistener.com/opinion/9391235/cho-bodnar-v-adirondack-maxillofacial-surgery/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/9391235/cho-bodnar-v-adirondack-maxillofacial-surgery/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Bum Yong Kim v. North Shore Long Is. Jewish Health Sys., Inc.",
+     "citation": "162 N.Y.S.3d 132",
+     "citations": [
+      "162 N.Y.S.3d 132",
+      "202 A.D.3d 653",
+      "2022 NY Slip Op 00649"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2022-02-02",
+     "snippet": "ORDER In an action to recover damages for medical malpractice, etc., the plaintiffs appeal from an order",
+     "url": "https://www.courtlistener.com/opinion/6247788/bum-yong-kim-v-north-shore-long-is-jewish-health-sys-inc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/6247788/bum-yong-kim-v-north-shore-long-is-jewish-health-sys-inc/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Whitnum v. Plastic & Reconstructive Surgery, P.C.",
+     "citation": "142 A.D.3d 495",
+     "citations": [
+      "142 A.D.3d 495",
+      "36 N.Y.S.3d 470"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2016-08-03",
+     "snippet": "action, inter alia, to recover damages for medical malpractice and lack of informed consent, the plaintiff",
+     "url": "https://www.courtlistener.com/opinion/4244311/whitnum-v-plastic-reconstructive-surgery-pc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/4244311/whitnum-v-plastic-reconstructive-surgery-pc/",
+     "scope": "ny"
+    }
+   ]
+  },
+  {
+   "type": "surgical_error",
+   "cases": [
+    {
+     "caseName": "Cho-Bodnar v. Adirondack Maxillofacial Surgery",
+     "citation": "215 A.D.3d 1101",
+     "citations": [
+      "215 A.D.3d 1101",
+      "186 N.Y.S.3d 734",
+      "2023 NY Slip Op 01932"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2023-04-13",
+     "snippet": "Cho-Bodnar v Adirondack Maxillofacial Surgery (2023 NY Slip Op 01932) Cho-Bodnar v Adirondack",
+     "url": "https://www.courtlistener.com/opinion/9391235/cho-bodnar-v-adirondack-maxillofacial-surgery/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/9391235/cho-bodnar-v-adirondack-maxillofacial-surgery/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Schuck v. Stony Brook Surgical Associates",
+     "citation": "140 A.D.3d 725",
+     "citations": [
+      "140 A.D.3d 725",
+      "33 N.Y.S.3d 369"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2016-06-01",
+     "snippet": "In an action to recover damages for medical malpractice and lack of informed consent, etc., the defendants",
+     "url": "https://www.courtlistener.com/opinion/3208575/schuck-v-stony-brook-surgical-associates/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/3208575/schuck-v-stony-brook-surgical-associates/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Lampe v. Neurological Surgery, P.C.",
+     "citation": "2019 NY Slip Op 4927",
+     "citations": [
+      "2019 NY Slip Op 4927"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2019-06-19",
+     "snippet": "Lampe v Neurological Surgery, P.C. (2019 NY Slip Op 04927) Lampe v Neurological Surgery",
+     "url": "https://www.courtlistener.com/opinion/4631231/lampe-v-neurological-surgery-pc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/4631231/lampe-v-neurological-surgery-pc/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Whitnum v. Plastic & Reconstructive Surgery, P.C.",
+     "citation": "142 A.D.3d 495",
+     "citations": [
+      "142 A.D.3d 495",
+      "36 N.Y.S.3d 470"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2016-08-03",
+     "snippet": "action, inter alia, to recover damages for medical malpractice and lack of informed consent, the plaintiff",
+     "url": "https://www.courtlistener.com/opinion/4244311/whitnum-v-plastic-reconstructive-surgery-pc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/4244311/whitnum-v-plastic-reconstructive-surgery-pc/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Bum Yong Kim v. North Shore Long Is. Jewish Health Sys., Inc.",
+     "citation": "162 N.Y.S.3d 132",
+     "citations": [
+      "162 N.Y.S.3d 132",
+      "202 A.D.3d 653",
+      "2022 NY Slip Op 00649"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2022-02-02",
+     "snippet": "ORDER In an action to recover damages for medical malpractice, etc., the plaintiffs appeal from an order",
+     "url": "https://www.courtlistener.com/opinion/6247788/bum-yong-kim-v-north-shore-long-is-jewish-health-sys-inc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/6247788/bum-yong-kim-v-north-shore-long-is-jewish-health-sys-inc/",
+     "scope": "ny"
+    }
+   ]
+  },
+  {
+   "type": "surgical_error",
+   "cases": [
+    {
+     "caseName": "Cho-Bodnar v. Adirondack Maxillofacial Surgery",
+     "citation": "215 A.D.3d 1101",
+     "citations": [
+      "215 A.D.3d 1101",
+      "186 N.Y.S.3d 734",
+      "2023 NY Slip Op 01932"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2023-04-13",
+     "snippet": "Cho-Bodnar v Adirondack Maxillofacial Surgery (2023 NY Slip Op 01932) Cho-Bodnar v Adirondack",
+     "url": "https://www.courtlistener.com/opinion/9391235/cho-bodnar-v-adirondack-maxillofacial-surgery/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/9391235/cho-bodnar-v-adirondack-maxillofacial-surgery/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Neurological Surgery, P.C. v. MLMIC Ins. Co.",
+     "citation": "208 A.D.3d 1238",
+     "citations": [
+      "208 A.D.3d 1238",
+      "175 N.Y.S.3d 266",
+      "2022 NY Slip Op 05211"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2022-09-21",
+     "snippet": "Neurological Surgery, P.C. v MLMIC Ins. Co. (2022 NY Slip Op 05211) Neurological Surgery, P.C",
+     "url": "https://www.courtlistener.com/opinion/8242901/neurological-surgery-pc-v-mlmic-ins-co/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/8242901/neurological-surgery-pc-v-mlmic-ins-co/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Lampe v. Neurological Surgery, P.C.",
+     "citation": "2019 NY Slip Op 4927",
+     "citations": [
+      "2019 NY Slip Op 4927"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2019-06-19",
+     "snippet": "Lampe v Neurological Surgery, P.C. (2019 NY Slip Op 04927) Lampe v Neurological Surgery",
+     "url": "https://www.courtlistener.com/opinion/4631231/lampe-v-neurological-surgery-pc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/4631231/lampe-v-neurological-surgery-pc/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Mishli v. Advanced Dermatology Laser & Cosmetic Surgery, P.C.",
+     "citation": "2024 NY Slip Op 04386",
+     "citations": [
+      "2024 NY Slip Op 04386"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2024-09-11",
+     "snippet": "Mishli v Advanced Dermatology Laser & Cosmetic Surgery, P.C. (2024 NY Slip Op 04386) Mishli v Advanced",
+     "url": "https://www.courtlistener.com/opinion/10114418/mishli-v-advanced-dermatology-laser-cosmetic-surgery-pc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/10114418/mishli-v-advanced-dermatology-laser-cosmetic-surgery-pc/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Whitnum v. Plastic & Reconstructive Surgery, P.C.",
+     "citation": "142 A.D.3d 495",
+     "citations": [
+      "142 A.D.3d 495",
+      "36 N.Y.S.3d 470"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2016-08-03",
+     "snippet": "action, inter alia, to recover damages for medical malpractice and lack of informed consent, the plaintiff",
+     "url": "https://www.courtlistener.com/opinion/4244311/whitnum-v-plastic-reconstructive-surgery-pc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/4244311/whitnum-v-plastic-reconstructive-surgery-pc/",
+     "scope": "ny"
+    }
+   ]
+  },
+  {
+   "type": "surgical_error",
+   "cases": [
+    {
+     "caseName": "Cho-Bodnar v. Adirondack Maxillofacial Surgery",
+     "citation": "215 A.D.3d 1101",
+     "citations": [
+      "215 A.D.3d 1101",
+      "186 N.Y.S.3d 734",
+      "2023 NY Slip Op 01932"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2023-04-13",
+     "snippet": "Cho-Bodnar v Adirondack Maxillofacial Surgery (2023 NY Slip Op 01932) Cho-Bodnar v Adirondack",
+     "url": "https://www.courtlistener.com/opinion/9391235/cho-bodnar-v-adirondack-maxillofacial-surgery/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/9391235/cho-bodnar-v-adirondack-maxillofacial-surgery/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Neurological Surgery, P.C. v. MLMIC Ins. Co.",
+     "citation": "208 A.D.3d 1238",
+     "citations": [
+      "208 A.D.3d 1238",
+      "175 N.Y.S.3d 266",
+      "2022 NY Slip Op 05211"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2022-09-21",
+     "snippet": "Neurological Surgery, P.C. v MLMIC Ins. Co. (2022 NY Slip Op 05211) Neurological Surgery, P.C",
+     "url": "https://www.courtlistener.com/opinion/8242901/neurological-surgery-pc-v-mlmic-ins-co/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/8242901/neurological-surgery-pc-v-mlmic-ins-co/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Lampe v. Neurological Surgery, P.C.",
+     "citation": "2019 NY Slip Op 4927",
+     "citations": [
+      "2019 NY Slip Op 4927"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2019-06-19",
+     "snippet": "Lampe v Neurological Surgery, P.C. (2019 NY Slip Op 04927) Lampe v Neurological Surgery",
+     "url": "https://www.courtlistener.com/opinion/4631231/lampe-v-neurological-surgery-pc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/4631231/lampe-v-neurological-surgery-pc/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Mishli v. Advanced Dermatology Laser & Cosmetic Surgery, P.C.",
+     "citation": "2024 NY Slip Op 04386",
+     "citations": [
+      "2024 NY Slip Op 04386"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2024-09-11",
+     "snippet": "Mishli v Advanced Dermatology Laser & Cosmetic Surgery, P.C. (2024 NY Slip Op 04386) Mishli v Advanced",
+     "url": "https://www.courtlistener.com/opinion/10114418/mishli-v-advanced-dermatology-laser-cosmetic-surgery-pc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/10114418/mishli-v-advanced-dermatology-laser-cosmetic-surgery-pc/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Whitnum v. Plastic & Reconstructive Surgery, P.C.",
+     "citation": "142 A.D.3d 495",
+     "citations": [
+      "142 A.D.3d 495",
+      "36 N.Y.S.3d 470"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2016-08-03",
+     "snippet": "action, inter alia, to recover damages for medical malpractice and lack of informed consent, the plaintiff",
+     "url": "https://www.courtlistener.com/opinion/4244311/whitnum-v-plastic-reconstructive-surgery-pc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/4244311/whitnum-v-plastic-reconstructive-surgery-pc/",
+     "scope": "ny"
+    }
+   ]
+  }
+ ],
+ "marisol-sponge": [
+  {
+   "type": "misdiagnosis",
+   "cases": [
+    {
+     "caseName": "Hackshaw v. Mercy Medical Center",
+     "citation": "139 A.D.3d 798",
+     "citations": [
+      "139 A.D.3d 798",
+      "33 N.Y.S.3d 297"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2016-05-11",
+     "snippet": "In an action, inter alia, to recover damages for medical malpractice, the plaintiffs appeal from an",
+     "url": "https://www.courtlistener.com/opinion/3202872/hackshaw-v-mercy-medical-center/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/3202872/hackshaw-v-mercy-medical-center/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Michel v. Long Island Jewish Medical Center",
+     "citation": "125 A.D.3d 945",
+     "citations": [
+      "125 A.D.3d 945",
+      "5 N.Y.S.3d 162"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2015-02-25",
+     "snippet": "In an action, inter alia, to recover damages for medical malpractice, the plaintiff appeals, as limited",
+     "url": "https://www.courtlistener.com/opinion/2782202/michel-v-long-island-jewish-medical-center/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/2782202/michel-v-long-island-jewish-medical-center/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "D.Y. Ex Rel. DeShawn Y. v. Catskill Regional Medical Center",
+     "citation": "2017 NY Slip Op 8577",
+     "citations": [
+      "2017 NY Slip Op 8577",
+      "156 A.D.3d 1003",
+      "66 N.Y.S.3d 368"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2017-12-07",
+     "snippet": "presence of blood in his urine and his inability to keep fluids down over a three-day period. Upon examination",
+     "url": "https://www.courtlistener.com/opinion/4449381/dy-ex-rel-deshawn-y-v-catskill-regional-medical-center/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/4449381/dy-ex-rel-deshawn-y-v-catskill-regional-medical-center/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Dispensa v. Medical Diagnostic Imaging, PLLC",
+     "citation": "2026 NY Slip Op 00492",
+     "citations": [
+      "2026 NY Slip Op 00492"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2026-02-04",
+     "snippet": "Dispensa v Medical Diagnostic Imaging, PLLC (2026 NY Slip Op 00492) Dispensa v Medical Diagnostic",
+     "url": "https://www.courtlistener.com/opinion/10784160/dispensa-v-medical-diagnostic-imaging-pllc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/10784160/dispensa-v-medical-diagnostic-imaging-pllc/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Cully v. Ricottone",
+     "citation": "2024 NY Slip Op 03248",
+     "citations": [
+      "2024 NY Slip Op 03248"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2024-06-14",
+     "snippet": "Published by New York State Law Reporting Bureau pursuant to Judiciary Law § 431. This opinion is uncorrected",
+     "url": "https://www.courtlistener.com/opinion/9880428/cully-v-ricottone/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/9880428/cully-v-ricottone/",
+     "scope": "ny"
+    }
+   ]
+  },
+  {
+   "type": "surgical_error",
+   "cases": [
+    {
+     "caseName": "Cho-Bodnar v. Adirondack Maxillofacial Surgery",
+     "citation": "215 A.D.3d 1101",
+     "citations": [
+      "215 A.D.3d 1101",
+      "186 N.Y.S.3d 734",
+      "2023 NY Slip Op 01932"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2023-04-13",
+     "snippet": "Cho-Bodnar v Adirondack Maxillofacial Surgery (2023 NY Slip Op 01932) Cho-Bodnar v Adirondack",
+     "url": "https://www.courtlistener.com/opinion/9391235/cho-bodnar-v-adirondack-maxillofacial-surgery/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/9391235/cho-bodnar-v-adirondack-maxillofacial-surgery/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Neurological Surgery, P.C. v. MLMIC Ins. Co.",
+     "citation": "208 A.D.3d 1238",
+     "citations": [
+      "208 A.D.3d 1238",
+      "175 N.Y.S.3d 266",
+      "2022 NY Slip Op 05211"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2022-09-21",
+     "snippet": "Neurological Surgery, P.C. v MLMIC Ins. Co. (2022 NY Slip Op 05211) Neurological Surgery, P.C",
+     "url": "https://www.courtlistener.com/opinion/8242901/neurological-surgery-pc-v-mlmic-ins-co/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/8242901/neurological-surgery-pc-v-mlmic-ins-co/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Lampe v. Neurological Surgery, P.C.",
+     "citation": "2019 NY Slip Op 4927",
+     "citations": [
+      "2019 NY Slip Op 4927"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2019-06-19",
+     "snippet": "Lampe v Neurological Surgery, P.C. (2019 NY Slip Op 04927) Lampe v Neurological Surgery",
+     "url": "https://www.courtlistener.com/opinion/4631231/lampe-v-neurological-surgery-pc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/4631231/lampe-v-neurological-surgery-pc/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Mishli v. Advanced Dermatology Laser & Cosmetic Surgery, P.C.",
+     "citation": "2024 NY Slip Op 04386",
+     "citations": [
+      "2024 NY Slip Op 04386"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2024-09-11",
+     "snippet": "Mishli v Advanced Dermatology Laser & Cosmetic Surgery, P.C. (2024 NY Slip Op 04386) Mishli v Advanced",
+     "url": "https://www.courtlistener.com/opinion/10114418/mishli-v-advanced-dermatology-laser-cosmetic-surgery-pc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/10114418/mishli-v-advanced-dermatology-laser-cosmetic-surgery-pc/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Whitnum v. Plastic & Reconstructive Surgery, P.C.",
+     "citation": "142 A.D.3d 495",
+     "citations": [
+      "142 A.D.3d 495",
+      "36 N.Y.S.3d 470"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2016-08-03",
+     "snippet": "action, inter alia, to recover damages for medical malpractice and lack of informed consent, the plaintiff",
+     "url": "https://www.courtlistener.com/opinion/4244311/whitnum-v-plastic-reconstructive-surgery-pc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/4244311/whitnum-v-plastic-reconstructive-surgery-pc/",
+     "scope": "ny"
+    }
+   ]
+  },
+  {
+   "type": "surgical_error",
+   "cases": [
+    {
+     "caseName": "Cho-Bodnar v. Adirondack Maxillofacial Surgery",
+     "citation": "215 A.D.3d 1101",
+     "citations": [
+      "215 A.D.3d 1101",
+      "186 N.Y.S.3d 734",
+      "2023 NY Slip Op 01932"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2023-04-13",
+     "snippet": "Cho-Bodnar v Adirondack Maxillofacial Surgery (2023 NY Slip Op 01932) Cho-Bodnar v Adirondack",
+     "url": "https://www.courtlistener.com/opinion/9391235/cho-bodnar-v-adirondack-maxillofacial-surgery/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/9391235/cho-bodnar-v-adirondack-maxillofacial-surgery/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Neurological Surgery, P.C. v. MLMIC Ins. Co.",
+     "citation": "208 A.D.3d 1238",
+     "citations": [
+      "208 A.D.3d 1238",
+      "175 N.Y.S.3d 266",
+      "2022 NY Slip Op 05211"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2022-09-21",
+     "snippet": "Neurological Surgery, P.C. v MLMIC Ins. Co. (2022 NY Slip Op 05211) Neurological Surgery, P.C",
+     "url": "https://www.courtlistener.com/opinion/8242901/neurological-surgery-pc-v-mlmic-ins-co/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/8242901/neurological-surgery-pc-v-mlmic-ins-co/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Lampe v. Neurological Surgery, P.C.",
+     "citation": "2019 NY Slip Op 4927",
+     "citations": [
+      "2019 NY Slip Op 4927"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2019-06-19",
+     "snippet": "Lampe v Neurological Surgery, P.C. (2019 NY Slip Op 04927) Lampe v Neurological Surgery",
+     "url": "https://www.courtlistener.com/opinion/4631231/lampe-v-neurological-surgery-pc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/4631231/lampe-v-neurological-surgery-pc/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Mishli v. Advanced Dermatology Laser & Cosmetic Surgery, P.C.",
+     "citation": "2024 NY Slip Op 04386",
+     "citations": [
+      "2024 NY Slip Op 04386"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2024-09-11",
+     "snippet": "Mishli v Advanced Dermatology Laser & Cosmetic Surgery, P.C. (2024 NY Slip Op 04386) Mishli v Advanced",
+     "url": "https://www.courtlistener.com/opinion/10114418/mishli-v-advanced-dermatology-laser-cosmetic-surgery-pc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/10114418/mishli-v-advanced-dermatology-laser-cosmetic-surgery-pc/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Whitnum v. Plastic & Reconstructive Surgery, P.C.",
+     "citation": "142 A.D.3d 495",
+     "citations": [
+      "142 A.D.3d 495",
+      "36 N.Y.S.3d 470"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2016-08-03",
+     "snippet": "action, inter alia, to recover damages for medical malpractice and lack of informed consent, the plaintiff",
+     "url": "https://www.courtlistener.com/opinion/4244311/whitnum-v-plastic-reconstructive-surgery-pc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/4244311/whitnum-v-plastic-reconstructive-surgery-pc/",
+     "scope": "ny"
+    }
+   ]
+  },
+  {
+   "type": "surgical_error",
+   "cases": [
+    {
+     "caseName": "Cho-Bodnar v. Adirondack Maxillofacial Surgery",
+     "citation": "215 A.D.3d 1101",
+     "citations": [
+      "215 A.D.3d 1101",
+      "186 N.Y.S.3d 734",
+      "2023 NY Slip Op 01932"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2023-04-13",
+     "snippet": "Cho-Bodnar v Adirondack Maxillofacial Surgery (2023 NY Slip Op 01932) Cho-Bodnar v Adirondack",
+     "url": "https://www.courtlistener.com/opinion/9391235/cho-bodnar-v-adirondack-maxillofacial-surgery/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/9391235/cho-bodnar-v-adirondack-maxillofacial-surgery/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Neurological Surgery, P.C. v. MLMIC Ins. Co.",
+     "citation": "208 A.D.3d 1238",
+     "citations": [
+      "208 A.D.3d 1238",
+      "175 N.Y.S.3d 266",
+      "2022 NY Slip Op 05211"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2022-09-21",
+     "snippet": "Neurological Surgery, P.C. v MLMIC Ins. Co. (2022 NY Slip Op 05211) Neurological Surgery, P.C",
+     "url": "https://www.courtlistener.com/opinion/8242901/neurological-surgery-pc-v-mlmic-ins-co/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/8242901/neurological-surgery-pc-v-mlmic-ins-co/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Lampe v. Neurological Surgery, P.C.",
+     "citation": "2019 NY Slip Op 4927",
+     "citations": [
+      "2019 NY Slip Op 4927"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2019-06-19",
+     "snippet": "Lampe v Neurological Surgery, P.C. (2019 NY Slip Op 04927) Lampe v Neurological Surgery",
+     "url": "https://www.courtlistener.com/opinion/4631231/lampe-v-neurological-surgery-pc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/4631231/lampe-v-neurological-surgery-pc/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Mishli v. Advanced Dermatology Laser & Cosmetic Surgery, P.C.",
+     "citation": "2024 NY Slip Op 04386",
+     "citations": [
+      "2024 NY Slip Op 04386"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2024-09-11",
+     "snippet": "Mishli v Advanced Dermatology Laser & Cosmetic Surgery, P.C. (2024 NY Slip Op 04386) Mishli v Advanced",
+     "url": "https://www.courtlistener.com/opinion/10114418/mishli-v-advanced-dermatology-laser-cosmetic-surgery-pc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/10114418/mishli-v-advanced-dermatology-laser-cosmetic-surgery-pc/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Whitnum v. Plastic & Reconstructive Surgery, P.C.",
+     "citation": "142 A.D.3d 495",
+     "citations": [
+      "142 A.D.3d 495",
+      "36 N.Y.S.3d 470"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2016-08-03",
+     "snippet": "action, inter alia, to recover damages for medical malpractice and lack of informed consent, the plaintiff",
+     "url": "https://www.courtlistener.com/opinion/4244311/whitnum-v-plastic-reconstructive-surgery-pc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/4244311/whitnum-v-plastic-reconstructive-surgery-pc/",
+     "scope": "ny"
+    }
+   ]
+  }
+ ],
+ "pressure-ulcers": [
+  {
+   "type": "hospital_negligence",
+   "cases": [
+    {
+     "caseName": "Manswell v. Montefiore Medical Center",
+     "citation": "2016 NY Slip Op 7855",
+     "citations": [
+      "2016 NY Slip Op 7855",
+      "144 A.D.3d 564",
+      "42 N.Y.S.3d 13"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2016-11-22",
+     "snippet": "without costs. In this action for negligence and medical malpractice, plaintiff alleges that his wife",
+     "url": "https://www.courtlistener.com/opinion/4323849/manswell-v-montefiore-medical-center/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/4323849/manswell-v-montefiore-medical-center/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Livsey v. Nyack Hospital",
+     "citation": "54 Misc. 3d 214",
+     "citations": [
+      "54 Misc. 3d 214",
+      "39 N.Y.S.3d 364"
+     ],
+     "court": "New York Supreme Court",
+     "dateFiled": "2016-10-13",
+     "snippet": "disposed of as follows: This medical malpractice action arises from alleged negligence during a surgical procedure",
+     "url": "https://www.courtlistener.com/opinion/6317656/livsey-v-nyack-hospital/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/6317656/livsey-v-nyack-hospital/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Vallone v. Saratoga Hospital",
+     "citation": "141 A.D.3d 886",
+     "citations": [
+      "141 A.D.3d 886",
+      "35 N.Y.S.3d 544"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2016-07-14",
+     "snippet": "action sounding in both ordinary and professional negligence against defendant. We agree with the majority",
+     "url": "https://www.courtlistener.com/opinion/4238352/vallone-v-saratoga-hospital/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/4238352/vallone-v-saratoga-hospital/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Ingutti v. Rochester General Hospital",
+     "citation": "145 A.D.3d 1423",
+     "citations": [
+      "145 A.D.3d 1423",
+      "44 N.Y.S.3d 274"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2016-12-23",
+     "snippet": "Frederick Ingutti (plaintiff) from leaving the hospital against medical advice or to ensure plaintiffs safe return",
+     "url": "https://www.courtlistener.com/opinion/6232949/ingutti-v-rochester-general-hospital/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/6232949/ingutti-v-rochester-general-hospital/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Sherman v. St. Elizabeth Medical Center",
+     "citation": "145 A.D.3d 1461",
+     "citations": [
+      "145 A.D.3d 1461",
+      "44 N.Y.S.3d 826"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2016-12-23",
+     "snippet": "granted the motion of defendant St. Elizabeth Medical Center to deem the original complaint to be the",
+     "url": "https://www.courtlistener.com/opinion/6233211/sherman-v-st-elizabeth-medical-center/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/6233211/sherman-v-st-elizabeth-medical-center/",
+     "scope": "ny"
+    }
+   ]
+  },
+  {
+   "type": "hospital_negligence",
+   "cases": [
+    {
+     "caseName": "Pichardo v. St. Barnabas Nursing Home, Inc.",
+     "citation": "134 A.D.3d 421",
+     "citations": [
+      "134 A.D.3d 421",
+      "21 N.Y.S.3d 42"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2015-12-03",
+     "snippet": "motion of defendants St. Barnabas Nursing Home, Inc. and St. Barnabas Hospital for summary judgment dismissing",
+     "url": "https://www.courtlistener.com/opinion/3159843/pichardo-v-st-barnabas-nursing-home-inc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/3159843/pichardo-v-st-barnabas-nursing-home-inc/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Barnaman v. Bishop Hucles Episcopal Nursing Home",
+     "citation": "213 A.D.3d 896",
+     "citations": [
+      "213 A.D.3d 896",
+      "184 N.Y.S.3d 800",
+      "2023 NY Slip Op 00980"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2023-02-22",
+     "snippet": "Barnaman v Bishop Hucles Episcopal Nursing Home (2023 NY Slip Op 00980) Barnaman v Bishop Hucles",
+     "url": "https://www.courtlistener.com/opinion/9378916/barnaman-v-bishop-hucles-episcopal-nursing-home/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/9378916/barnaman-v-bishop-hucles-episcopal-nursing-home/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Van DeVeerdonk v. North Westchester Restorative Therapy & Nursing Ctr.",
+     "citation": "2024 NY Slip Op 00180",
+     "citations": [
+      "2024 NY Slip Op 00180"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2024-01-17",
+     "snippet": "DeVeerdonk v North Westchester Restorative Therapy & Nursing Ctr. (2024 NY Slip Op 00180) Van DeVeerdonk",
+     "url": "https://www.courtlistener.com/opinion/9461452/van-deveerdonk-v-north-westchester-restorative-therapy-nursing-ctr/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/9461452/van-deveerdonk-v-north-westchester-restorative-therapy-nursing-ctr/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Sherman v. St. Elizabeth Medical Center",
+     "citation": "145 A.D.3d 1461",
+     "citations": [
+      "145 A.D.3d 1461",
+      "44 N.Y.S.3d 826"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2016-12-23",
+     "snippet": "granted the motion of defendant St. Elizabeth Medical Center to deem the original complaint to be the",
+     "url": "https://www.courtlistener.com/opinion/6233211/sherman-v-st-elizabeth-medical-center/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/6233211/sherman-v-st-elizabeth-medical-center/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Pietroforte v. Belle Harbor Home of the Sages, Inc.",
+     "citation": "197 N.Y.S.3d 220",
+     "citations": [
+      "197 N.Y.S.3d 220",
+      "220 A.D.3d 628",
+      "2023 NY Slip Op 05481"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2023-10-31",
+     "snippet": "Pietroforte v Belle Harbor Home of the Sages, Inc. (2023 NY Slip Op 05481) Pietroforte v Belle",
+     "url": "https://www.courtlistener.com/opinion/9436237/pietroforte-v-belle-harbor-home-of-the-sages-inc/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/9436237/pietroforte-v-belle-harbor-home-of-the-sages-inc/",
+     "scope": "ny"
+    }
+   ]
+  },
+  {
+   "type": "hospital_negligence",
+   "cases": [
+    {
+     "caseName": "Manswell v. Montefiore Medical Center",
+     "citation": "2016 NY Slip Op 7855",
+     "citations": [
+      "2016 NY Slip Op 7855",
+      "144 A.D.3d 564",
+      "42 N.Y.S.3d 13"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2016-11-22",
+     "snippet": "without costs. In this action for negligence and medical malpractice, plaintiff alleges that his wife",
+     "url": "https://www.courtlistener.com/opinion/4323849/manswell-v-montefiore-medical-center/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/4323849/manswell-v-montefiore-medical-center/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Livsey v. Nyack Hospital",
+     "citation": "54 Misc. 3d 214",
+     "citations": [
+      "54 Misc. 3d 214",
+      "39 N.Y.S.3d 364"
+     ],
+     "court": "New York Supreme Court",
+     "dateFiled": "2016-10-13",
+     "snippet": "disposed of as follows: This medical malpractice action arises from alleged negligence during a surgical procedure",
+     "url": "https://www.courtlistener.com/opinion/6317656/livsey-v-nyack-hospital/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/6317656/livsey-v-nyack-hospital/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Vallone v. Saratoga Hospital",
+     "citation": "141 A.D.3d 886",
+     "citations": [
+      "141 A.D.3d 886",
+      "35 N.Y.S.3d 544"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2016-07-14",
+     "snippet": "action sounding in both ordinary and professional negligence against defendant. We agree with the majority",
+     "url": "https://www.courtlistener.com/opinion/4238352/vallone-v-saratoga-hospital/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/4238352/vallone-v-saratoga-hospital/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Ingutti v. Rochester General Hospital",
+     "citation": "145 A.D.3d 1423",
+     "citations": [
+      "145 A.D.3d 1423",
+      "44 N.Y.S.3d 274"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2016-12-23",
+     "snippet": "Frederick Ingutti (plaintiff) from leaving the hospital against medical advice or to ensure plaintiffs safe return",
+     "url": "https://www.courtlistener.com/opinion/6232949/ingutti-v-rochester-general-hospital/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/6232949/ingutti-v-rochester-general-hospital/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Sherman v. St. Elizabeth Medical Center",
+     "citation": "145 A.D.3d 1461",
+     "citations": [
+      "145 A.D.3d 1461",
+      "44 N.Y.S.3d 826"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2016-12-23",
+     "snippet": "granted the motion of defendant St. Elizabeth Medical Center to deem the original complaint to be the",
+     "url": "https://www.courtlistener.com/opinion/6233211/sherman-v-st-elizabeth-medical-center/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/6233211/sherman-v-st-elizabeth-medical-center/",
+     "scope": "ny"
+    }
+   ]
+  },
+  {
+   "type": "hospital_negligence",
+   "cases": [
+    {
+     "caseName": "Manswell v. Montefiore Medical Center",
+     "citation": "2016 NY Slip Op 7855",
+     "citations": [
+      "2016 NY Slip Op 7855",
+      "144 A.D.3d 564",
+      "42 N.Y.S.3d 13"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2016-11-22",
+     "snippet": "without costs. In this action for negligence and medical malpractice, plaintiff alleges that his wife",
+     "url": "https://www.courtlistener.com/opinion/4323849/manswell-v-montefiore-medical-center/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/4323849/manswell-v-montefiore-medical-center/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Livsey v. Nyack Hospital",
+     "citation": "54 Misc. 3d 214",
+     "citations": [
+      "54 Misc. 3d 214",
+      "39 N.Y.S.3d 364"
+     ],
+     "court": "New York Supreme Court",
+     "dateFiled": "2016-10-13",
+     "snippet": "disposed of as follows: This medical malpractice action arises from alleged negligence during a surgical procedure",
+     "url": "https://www.courtlistener.com/opinion/6317656/livsey-v-nyack-hospital/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/6317656/livsey-v-nyack-hospital/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Vallone v. Saratoga Hospital",
+     "citation": "141 A.D.3d 886",
+     "citations": [
+      "141 A.D.3d 886",
+      "35 N.Y.S.3d 544"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2016-07-14",
+     "snippet": "action sounding in both ordinary and professional negligence against defendant. We agree with the majority",
+     "url": "https://www.courtlistener.com/opinion/4238352/vallone-v-saratoga-hospital/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/4238352/vallone-v-saratoga-hospital/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Ingutti v. Rochester General Hospital",
+     "citation": "145 A.D.3d 1423",
+     "citations": [
+      "145 A.D.3d 1423",
+      "44 N.Y.S.3d 274"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2016-12-23",
+     "snippet": "Frederick Ingutti (plaintiff) from leaving the hospital against medical advice or to ensure plaintiffs safe return",
+     "url": "https://www.courtlistener.com/opinion/6232949/ingutti-v-rochester-general-hospital/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/6232949/ingutti-v-rochester-general-hospital/",
+     "scope": "ny"
+    },
+    {
+     "caseName": "Sherman v. St. Elizabeth Medical Center",
+     "citation": "145 A.D.3d 1461",
+     "citations": [
+      "145 A.D.3d 1461",
+      "44 N.Y.S.3d 826"
+     ],
+     "court": "Appellate Division of the Supreme Court of the State of New York",
+     "dateFiled": "2016-12-23",
+     "snippet": "granted the motion of defendant St. Elizabeth Medical Center to deem the original complaint to be the",
+     "url": "https://www.courtlistener.com/opinion/6233211/sherman-v-st-elizabeth-medical-center/",
+     "absoluteUrl": "https://www.courtlistener.com/opinion/6233211/sherman-v-st-elizabeth-medical-center/",
+     "scope": "ny"
+    }
+   ]
+  }
+ ]
+}

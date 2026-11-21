@@ -9,6 +9,9 @@
         "setup-db": "node setup-db.js",
         "test:unit": "node test/index.test.mjs",
         "check:shared": "node check-shared-code.mjs",
+        "models:probe": "node --env-file=.env measure/probe-shapes.mjs",
+        "models:measure": "node --env-file=.env measure/run.mjs",
+        "models:report": "node measure/report.mjs",
         "test:e2e": "playwright test",
         "test:e2e:headed": "playwright test --headed"
     },

@@ -9,3 +9,7 @@ playwright-report/
 test-results/
 # Agent notes that contain live credentials: never commit or upload
 PROJECT_INSTRUCTIONS.md
+
+# The model measurement: a run that was stopped part-way, and a file caught mid-write
+measure/results/*.partial.json
+measure/**/*.writing

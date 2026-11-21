@@ -4,6 +4,8 @@ import './backup.test.mjs';
 import './models.test.mjs';
 import './model-shaping.test.mjs';
 import './prices.test.mjs';
+import './measure.test.mjs';
+import './measure-app.test.mjs';
 
 import { run } from './runner.mjs';
 

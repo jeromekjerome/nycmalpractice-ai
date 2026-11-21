@@ -5321,3 +5321,52 @@ test('gatekeeper: GATEKEEPER_MODE=llm asks the model grader even in a test envir
     if (previous === undefined) delete process.env.GATEKEEPER_MODE; else process.env.GATEKEEPER_MODE = previous;
   }
 });
+
+// ─── The model measurement: which job a model call is for ────────────────────
+
+test('the measurement tells each model call by the job it was for', async () => {
+  const { jobOf, SMALL_JOBS, REPLY_JOBS } = await import('../measure/app.mjs');
+  const world = fakeWorld({ answer: `Thank you. ${DISCLAIMER}`, leadScore: leadScoreOf(84) });
+  // The outside world above knows the app's own prompts; the gate's two are answered here. The grader blocks the
+  // first draft it sees, so that a rewrite is asked for as well.
+  let gradings = 0;
+  const handler = async (url, init) => {
+    if (url.startsWith('https://api.openai.com/')) {
+      const request = JSON.parse(init.body);
+      if (String(request.messages[0].content).startsWith('You are an uncompromising AI Compliance Gatekeeper')) {
+        world.calls.openai.push({ kind: 'gatekeeperEvaluator', model: request.model, request });
+        return chatCompletion(verdictsFor('personal', (gradings += 1) === 1 ? { failed: { 'REQ-MM-01': 'No assessment yet.' } } : {}));
+      }
+      if (String(request.messages.at(-1).content).startsWith('COMPLIANCE GATEKEEPER')) {
+        world.calls.openai.push({ kind: 'gatekeeperRemediation', model: request.model, request });
+        return chatCompletion(`A rewritten reply. ${DISCLAIMER}`);
+      }
+    }
+    return world.handler(url, init);
+  };
+  const previous = process.env.GATEKEEPER_MODE;
+  process.env.GATEKEEPER_MODE = 'llm';
+  try {
+    await withOutboundHttp(handler, async () => {
+      clearSearchCache();
+      const history = [
+        { role: 'user', content: 'A sponge was left inside me.' }, { role: 'assistant', content: 'I am sorry. When was the surgery?' },
+        { role: 'user', content: 'Three months ago.' }, { role: 'assistant', content: 'How was it found?' },
+      ];
+      await answerUserQuestion({ question: 'On a scan last week.', mode: 'personal', sessionId: 'measure-jobs-1', history });
+    });
+  } finally {
+    if (previous === undefined) delete process.env.GATEKEEPER_MODE; else process.env.GATEKEEPER_MODE = previous;
+    clearSearchCache();
+  }
+  // The names this file gives each kind of call, and the measurement's name for the same job.
+  const JOBS = { classify: 'classify', answer: 'reply', scoreLead: 'leadScore', caseAnalysis: 'caseCard', gatekeeperEvaluator: 'grade', gatekeeperRemediation: 'rewrite' };
+  for (const call of world.calls.openai) assert.equal(jobOf(call.request), JOBS[call.kind], call.kind);
+  // Every job the app has was seen, so none is told apart only by luck.
+  assert.deepEqual([...new Set(world.calls.openai.map(call => call.kind))].sort(), Object.keys(JOBS).sort());
+  assert.deepEqual([...SMALL_JOBS, ...REPLY_JOBS].sort(), Object.values(JOBS).sort());
+  // The reply and the rewrite go to the answer chain; the rest to the small one.
+  const { ANSWER_MODELS, AUX_MODELS } = await import('../models.js');
+  for (const call of world.calls.openai) assert.equal(call.model, (REPLY_JOBS.includes(jobOf(call.request)) ? ANSWER_MODELS : AUX_MODELS)[0], call.kind);
+  assert.equal(jobOf({}), 'reply');
+});

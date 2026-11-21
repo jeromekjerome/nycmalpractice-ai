@@ -3811,6 +3811,37 @@ test('a slow side analysis does not hold back an answer that is ready', async ()
   }
 });
 
+test('a point on the case card that runs past its length ends at a word, with an ellipsis', () => {
+  // The card keeps 200 characters of a point and 300 of the deadline note. The cut used to fall wherever the
+  // limit did, mid-word. gpt-4o-mini wrote short points and seldom reached it; gpt-6-luna writes longer ones, and
+  // on a quarter of nycinjury's cards a point ended like "time off work alone does not qualify under t".
+  const note = REVIEW_APP.appId === 'nycinjury' ? 'solNote' : 'solWarning';
+  const long = 'Your doctor recorded restricted movement in your neck and lower back, which may support a serious injury under Insurance Law §5102(d); time off work alone does not qualify under the statute as it now stands, so the medical records will matter a great deal.';
+  const exact = `${'word '.repeat(39)}words`;
+  const endsOnAWord = `${'word '.repeat(40)}and more words after the limit`;
+  assert.ok(long.length > 200 && exact.length === 200 && endsOnAWord[199] === ' ');
+  const card = normalizeCaseAnalysis({
+    score: 6, strengths: [long, exact, 'Short.'], weaknesses: ['x'.repeat(250), endsOnAWord], [note]: `${'deadline '.repeat(40)}end`,
+  });
+
+  const [cut, whole, short] = card.strengths;
+  assert.equal(whole, exact, 'a point of exactly the length is left alone');
+  assert.equal(short, 'Short.');
+  assert.ok(cut.length <= 200, `the point is ${cut.length} characters long`);
+  assert.ok(cut.endsWith('…'), 'the cut is not marked');
+  const kept = cut.slice(0, -1);
+  assert.ok(long.startsWith(kept), 'the point was reworded');
+  assert.match(long.slice(kept.length), /^[ ,;:]/, 'the cut fell inside a word');
+  assert.doesNotMatch(kept, /[ ,;:]$/, 'a loose space or comma was left before the ellipsis');
+  assert.ok(kept.length > 150, 'far more was cut than the limit asks');
+  // One word longer than the limit has no better place to be cut. A limit that falls at the end of a word keeps
+  // that word.
+  assert.equal(card.weaknesses[0], `${'x'.repeat(199)}…`);
+  assert.equal(card.weaknesses[1], `${'word '.repeat(39)}word…`);
+  // The deadline note is kept to 300 characters in the same way.
+  assert.ok(card[note].length <= 300 && card[note].endsWith('deadline…'), card[note].slice(-20));
+});
+
 test('the case card reads every message the visitor wrote, however long the AI replies are', async () => {
   const { analysisTranscript } = await import('../ask.js');
   const long = 'An assessment that goes on. '.repeat(130);   // about 3,600 characters, like a step-3 reply

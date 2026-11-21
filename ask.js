@@ -293,7 +293,20 @@ TURN ${turn}: If they want to speak with a qualified NYC wrongful death / malpra
 
 // ─── Case Situation Analysis ───────────────────────────────────────────────────
 
-const cleanText = (value, max) => (typeof value === 'string' && value.trim() ? value.trim().slice(0, max) : null);
+// A point on the case card is kept to a length. When it is longer, the cut falls at the end of a word and is
+// marked with an ellipsis. It used to fall wherever the limit did, mid-word: gpt-4o-mini wrote short points and
+// seldom reached the limit, gpt-6-luna writes longer ones and came within a few characters of it here, and past
+// it in the sister app (21 November 2026). A single word longer than half the limit is cut where the limit falls.
+function shortened(text, limit) {
+  if (text.length <= limit) return text;
+  const room = text.slice(0, limit - 1);
+  // The limit may fall just after a whole word; otherwise the cut goes back to the last gap between words.
+  const gap = room.search(/\s\S*$/);
+  const kept = /\s/.test(text[limit - 1]) || gap < limit / 2 ? room : room.slice(0, gap);
+  return `${kept.replace(/[\s,;:(–—-]+$/, '')}…`;
+}
+
+const cleanText = (value, max) => (typeof value === 'string' && value.trim() ? shortened(value.trim(), max) : null);
 const cleanList = (value, max) => (Array.isArray(value) ? value : []).map(item => cleanText(item, 200)).filter(Boolean).slice(0, max);
 const COMPLEXITY_LEVELS = { low: 'Low', medium: 'Medium', high: 'High' };
 

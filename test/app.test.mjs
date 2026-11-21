@@ -5251,3 +5251,73 @@ test('a visitor cannot hand the server a recorded packet', async () => {
   assert.equal(world.calls.openai.some(call => call.kind === 'classify'), true);
   assert.equal(world.calls.openai.some(call => call.kind === 'answer'), true);
 });
+
+// ─── The gate's model grader, asked for by a setting ──────────────────────────
+
+// A stand-in OpenAI client for the gate's model path: it answers the grader's requests with `evaluate` and the
+// rewrite's with `remediate`, and keeps what it was asked.
+function scriptedOpenAI(handlers) {
+  const calls = [];
+  return {
+    calls,
+    count: kind => calls.filter(call => call.kind === kind).length,
+    chat: {
+      completions: {
+        create: async request => {
+          const first = String(request.messages[0].content);
+          const last = String(request.messages.at(-1).content);
+          const kind = first.startsWith('You are an uncompromising AI Compliance Gatekeeper') ? 'evaluate'
+            : last.startsWith('COMPLIANCE GATEKEEPER') ? 'remediate'
+            : 'other';
+          calls.push({ kind, request });
+          const content = await handlers[kind](request, calls.filter(call => call.kind === kind).length);
+          return { choices: [{ message: { role: 'assistant', content } }] };
+        },
+      },
+    },
+  };
+}
+
+// The grader's JSON for a mode's rubric: everything passes except what is listed.
+function verdictsFor(mode, { failed = {} } = {}) {
+  const rubric = loadRubric(mode);
+  return JSON.stringify({
+    required_checks: rubric.required_criteria.map(c => ({ id: c.id, name: c.name, passed: !(c.id in failed), evidence_or_gap: failed[c.id] || 'Satisfied.' })),
+    prohibited_checks: rubric.prohibited_criteria.map(c => ({ id: c.id, name: c.name, violated: false, offending_quote: 'None', remediation_instruction: '' })),
+    coaching: 'No changes needed.',
+  });
+}
+
+test('gatekeeper: GATEKEEPER_MODE=llm asks the model grader even in a test environment, and nothing else does', async () => {
+  const messages = [
+    { role: 'system', content: 'You are an expert NYC medical malpractice advisor.' },
+    { role: 'user', content: 'A sponge was left inside me during surgery.' },
+  ];
+  // Who graded the draft, and how often the model grader was asked.
+  const graded = async (over = {}) => {
+    const openai = scriptedOpenAI({ evaluate: () => verdictsFor('personal'), remediate: () => 'unused' });
+    const { evaluation } = await evaluateAndRemediateDraft({
+      openai, auxModels: ['aux-model'], answerModels: ['answer-model'], messages,
+      draftText: `I am sorry this happened. When was the surgery? ${DISCLAIMER}`, turn: 1, mode: 'personal', retrievedCases: [], ...over,
+    });
+    return { evaluator: evaluation.evaluator, asked: openai.count('evaluate') };
+  };
+  const previous = process.env.GATEKEEPER_MODE;
+  try {
+    delete process.env.GATEKEEPER_MODE;
+    assert.deepEqual(await graded(), { evaluator: 'deterministic', asked: 0 });
+    process.env.GATEKEEPER_MODE = 'llm';
+    assert.deepEqual(await graded(), { evaluator: 'llm', asked: 1 });
+    process.env.GATEKEEPER_MODE = ' LLM ';
+    assert.deepEqual(await graded(), { evaluator: 'llm', asked: 1 });
+    // What the caller says outright still decides, and with no client there is no model to ask.
+    assert.deepEqual(await graded({ deterministicOnly: true }), { evaluator: 'deterministic', asked: 0 });
+    assert.equal((await evaluateAndRemediateDraft({ draftText: `I am sorry this happened. When was the surgery? ${DISCLAIMER}`, turn: 1, mode: 'personal' })).evaluation.evaluator, 'deterministic');
+    process.env.GATEKEEPER_MODE = 'deterministic';
+    assert.deepEqual(await graded(), { evaluator: 'deterministic', asked: 0 });
+    process.env.GATEKEEPER_MODE = 'something else';
+    assert.deepEqual(await graded(), { evaluator: 'deterministic', asked: 0 });
+  } finally {
+    if (previous === undefined) delete process.env.GATEKEEPER_MODE; else process.env.GATEKEEPER_MODE = previous;
+  }
+});

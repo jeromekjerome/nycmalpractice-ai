@@ -1174,6 +1174,11 @@ function buildInitialCoaching(report) {
   };
 }
 
+// GATEKEEPER_MODE, lower-cased: "deterministic", "llm", or anything else for the default.
+function gateModeSetting() {
+  return String(process.env.GATEKEEPER_MODE || '').trim().toLowerCase();
+}
+
 function courtListenerLookupEnabled() {
   return !/^(?:off|false|0|no)$/i.test(String(process.env.GATEKEEPER_COURTLISTENER_LOOKUP || 'on').trim());
 }
@@ -1184,7 +1189,10 @@ function courtListenerLookupEnabled() {
  * attempt and the diagnosis of the first failure (No Silent Fixes).
  *
  * In NODE_ENV === 'test' (or GATEKEEPER_MODE=deterministic) evaluation and remediation are pure
- * code — no OpenAI or CourtListener calls are made.
+ * code — no OpenAI or CourtListener calls are made. GATEKEEPER_MODE=llm asks the model grader even
+ * in a test environment: the model measurement (measure/) runs as one, so that the spending cap and
+ * the database stay out of it, and the grader is what it is there to compare. Everywhere else the
+ * model grader is already the default, so there the setting changes nothing.
  *
  * @param {object} params
  * @param {object} params.openai        OpenAI client
@@ -1234,9 +1242,9 @@ export async function evaluateAndRemediateDraft({
     lookupCache: new Map(),
     deterministicOnly: typeof deterministicOnly === 'boolean'
       ? deterministicOnly
-      : (process.env.NODE_ENV === 'test' ||
-         /^deterministic$/i.test(String(process.env.GATEKEEPER_MODE || '').trim()) ||
-         !openai),
+      : (!openai ||
+         gateModeSetting() === 'deterministic' ||
+         (process.env.NODE_ENV === 'test' && gateModeSetting() !== 'llm')),
   };
 
   const attempts = [];

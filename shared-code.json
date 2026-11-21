@@ -15,7 +15,7 @@
     "measure/guard-fetch.mjs": "03e117330d3babb86b51ac967a72d74324b55a585c22713a8bd187e34aba6c04",
     "measure/run.mjs": "5ea67622026d11df62bc7042dbcb02f97a9674e011de7f029e344d3d9bbbfabd",
     "measure/probe-shapes.mjs": "05219dcb7e8ca06a57823378a0c581a9dfe1ab6e3da8ef0885ad01abdf7d2b93",
-    "measure/report.mjs": "390d11dbffdc806dc499b61e72ea4c3fe3fcdcdae66808cae1fab254b274582a",
-    "test/measure.test.mjs": "1b89ea464cfaba713df6fca7e9a63950525f54239e67b67736388e6832c1a6a6"
+    "measure/report.mjs": "9f35d6fa1318b01f079035de015bc377e3f05d1a164eafb5f86892fbed066b68",
+    "test/measure.test.mjs": "161b723c9492671a02819c078b5db655b76e97635267acbc687fab16dff12a00"
   }
 }

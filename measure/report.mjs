@@ -336,6 +336,28 @@ export function renderReport({ app: appName, date, baseline, smallBaseline, repl
     ), '');
   }
 
+  if (baseSmall.length || candidateSmall.length) {
+    // Draft by draft, what each run's grader made of it. A draft blocked under a rule other than the one it breaks
+    // was still kept from the visitor, but the rewrite it was sent for would be aimed at the wrong fault.
+    const smallRuns = [...baseSmall, ...candidateSmall].map(row => row.run);
+    const drafts = [];
+    for (const run of smallRuns) {
+      for (const entry of run.knownBad ?? []) {
+        if (!drafts.some(draft => draft.key === entry.key)) drafts.push({ key: entry.key, breaks: entry.breaks ?? '' });
+      }
+    }
+    const made = (run, draft) => {
+      const entry = (run.knownBad ?? []).find(candidate => candidate.key === draft.key);
+      if (!entry) return 'not shown';
+      if (entry.error) return 'the turn failed';
+      if (!entry.caught) return 'NOT caught';
+      const flagged = entry.flagged ?? [];
+      return !draft.breaks || flagged.includes(draft.breaks) || !flagged.length ? 'caught' : `caught under ${flagged.join(', ')}`;
+    };
+    out.push('### The drafts that are wrong on purpose', '');
+    out.push(table(['Draft', 'The rule it breaks', ...smallRuns.map(run => `${run.aux} (${run.label})`)], drafts.map(draft => [draft.key, draft.breaks, ...smallRuns.map(run => made(run, draft))])), '');
+  }
+
   // What passes, cheapest first.
   const passingReply = candidateReply.filter(row => row.bar.ok).sort(byValue(stats => stats.replySlowestTenthMs));
   const passingSmall = candidateSmall.filter(row => row.bar.ok).sort(byValue(stats => stats.slowestTenthMs));

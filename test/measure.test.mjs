@@ -624,7 +624,8 @@ function reportRun({ label, mode, answer, aux, from, over = () => ({}), knownBad
 }
 
 test('the report sets each run beside the bar, names what passes cheapest first, and says where a candidate differs from today', () => {
-  const caught = [{ key: 'asks-for-phone', breaks: 'PROH-PI-03', caught: true }, { key: 'no-law-named', breaks: 'REQ-PI-02', caught: true }];
+  // Today's grader catches both drafts, the second under a rule other than the one it breaks.
+  const caught = [{ key: 'asks-for-phone', breaks: 'PROH-PI-03', caught: true, flagged: ['PROH-PI-03'] }, { key: 'no-law-named', breaks: 'REQ-PI-02', caught: true, flagged: ['REQ-PI-01'] }];
   const baseline = ['base-1', 'base-2', 'base-3'].map(label => reportRun({ label, mode: label === 'base-1' ? 'record' : 'reply', answer: 'gpt-4o', aux: 'gpt-4o-mini' }));
   const smallBaseline = ['small-base-1', 'small-base-2', 'small-base-3'].map(label => reportRun({ label, mode: 'small', answer: 'gpt-4o', aux: 'gpt-4o-mini', from: 'base-1', knownBad: caught }));
   const replies = [
@@ -634,13 +635,13 @@ test('the report sets each run beside the bar, names what passes cheapest first,
   ];
   const smalls = [
     reportRun({ label: 'small-luna', mode: 'small', answer: 'gpt-4o', aux: 'gpt-6-luna', from: 'base-1', knownBad: caught }),
-    reportRun({ label: 'small-nano', mode: 'small', answer: 'gpt-4o', aux: 'gpt-5.4-nano', from: 'base-1', knownBad: [caught[0], { ...caught[1], caught: false }],
+    reportRun({ label: 'small-nano', mode: 'small', answer: 'gpt-4o', aux: 'gpt-5.4-nano', from: 'base-1', knownBad: [caught[0], { ...caught[1], caught: false, flagged: [] }],
       over: made => (made.visitor === 'rear-end-red-light' && made.turn === 2 ? { classifiedType: 'slip', leadTier: 'warm' } : {}) }),
   ];
   const text = renderReport({ app: 'nycinjury', date: '2026-11-20', baseline, smallBaseline, replies, smalls, notes: ['gpt-5.4-nano is retired on 1 April 2027.'], ...context });
 
   assert.match(text, /^# Model measurement for nycinjury, 2026-11-20\n/);
-  for (const heading of ['## Reply models', '## Small-job models', "### Each small job's time", '## What passes', '## What a conversation costs', "## Where a small-job candidate differs from today's usual answer", '## Cheap first, stronger on a block', '## Notes']) {
+  for (const heading of ['## Reply models', '## Small-job models', "### Each small job's time", '### The drafts that are wrong on purpose', '## What passes', '## What a conversation costs', "## Where a small-job candidate differs from today's usual answer", '## Cheap first, stronger on a block', '## Notes']) {
     assert.ok(text.includes(`\n${heading}\n`), `the report has no "${heading}"`);
   }
   // Every table is whole: each row has as many cells as its heading.
@@ -657,6 +658,9 @@ test('the report sets each run beside the bar, names what passes cheapest first,
   assert.match(rowOf('reply-terra'), /passes after the rewrite on 75%, under today's worst run \(100%\)/);
   assert.match(rowOf('small-luna'), /\| passes \|$/);
   assert.match(rowOf('small-nano'), /did not catch no-law-named/);
+  // Draft by draft: caught under the rule it breaks, caught under another rule, or not caught.
+  assert.equal(rowOf('asks-for-phone'), '| asks-for-phone | PROH-PI-03 | caught | caught | caught | caught | caught |');
+  assert.equal(rowOf('no-law-named'), '| no-law-named | REQ-PI-02 | caught under REQ-PI-01 | caught under REQ-PI-01 | caught under REQ-PI-01 | caught under REQ-PI-01 | NOT caught |');
   const passes = text.slice(text.indexOf('## What passes'), text.indexOf('## What a conversation costs'));
   // Cheapest first: gpt-6-luna before gpt-6.2-sol; gpt-6.1-terra and gpt-5.4-nano did not pass.
   assert.ok(passes.indexOf('gpt-6-luna') < passes.indexOf('gpt-6.2-sol') && passes.indexOf('gpt-6-luna') > 0);

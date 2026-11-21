@@ -14,7 +14,8 @@ import { alertOperatorOnce, recordInteraction, deepHealth, runSteps, recordJobRu
 import nodemailer from 'nodemailer';
 import { createSubscriptionCheckout, createPortalSession, constructWebhookEvent, getSubscriptionDetails, getCustomerCard, liveSubscription } from './stripe.js';
 import OpenAI from 'openai';
-import { buildModelList, probeAllModelChains } from './openaiModelFailover.js';
+import { probeAllModelChains } from './openaiModelFailover.js';
+import { ANSWER_MODELS as answerModels, AUX_MODELS as auxModels, EMBEDDING_MODELS as embeddingModels } from './models.js';
 import { APP_URL, APP_ID, CONTACT_CONSENT_TEXT, CONTACT_FORM_FROM_STEP } from './site.js';
 import { mentionsPublicHospital, deadlineNotices } from './deadlines.js';
 import { buildSummaryEmail } from './summary.js';
@@ -27,18 +28,6 @@ const app = express();
 const sql = neon(process.env.DATABASE_URL);
 // Each AI call is cut off after 30 seconds and retried once; it could wait 10 minutes.
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 30_000, maxRetries: 1 });
-const answerModels = buildModelList(
-  process.env.OPENAI_MODEL_ANSWER || 'gpt-4o',
-  process.env.OPENAI_MODEL_ANSWER_FALLBACKS || 'gpt-4.1,gpt-5.4-mini'
-);
-const auxModels = buildModelList(
-  process.env.OPENAI_MODEL_AUX || 'gpt-4o-mini',
-  process.env.OPENAI_MODEL_AUX_FALLBACKS || 'gpt-4.1-mini,gpt-5.4-mini'
-);
-const embeddingModels = buildModelList(
-  process.env.OPENAI_MODEL_EMBEDDING || 'text-embedding-3-small',
-  process.env.OPENAI_MODEL_EMBEDDING_FALLBACKS || 'text-embedding-3-large'
-);
 let modelHealthSnapshot = {
   answer: { active: answerModels[0] || null, fallbacks_available: answerModels.slice(1) },
   aux: { active: auxModels[0] || null, fallbacks_available: auxModels.slice(1) },

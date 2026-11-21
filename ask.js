@@ -4,19 +4,12 @@ import OpenAI from 'openai';
 import { searchMalpracticeCases, extractCaseType } from './courtlistener.js';
 import { rememberCases, recallCases } from './case-memory.js';
 import { scoreLead } from './auction.js';
-import { buildModelList, chatCompletionsWithFallback } from './openaiModelFailover.js';
+import { chatCompletionsWithFallback } from './openaiModelFailover.js';
+import { ANSWER_MODELS, AUX_MODELS } from './models.js';
 import { evaluateAndRemediateDraft, renderRubricForPrompt, renderCurrentLawForPrompt } from './gatekeeper.js';
 
 // Each AI call is cut off after 30 seconds and retried once; it could wait 10 minutes.
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 30_000, maxRetries: 1 });
-const ANSWER_MODELS = buildModelList(
-  process.env.OPENAI_MODEL_ANSWER || 'gpt-4o',
-  process.env.OPENAI_MODEL_ANSWER_FALLBACKS || 'gpt-4.1,gpt-5.4-mini'
-);
-const AUX_MODELS = buildModelList(
-  process.env.OPENAI_MODEL_AUX || 'gpt-4o-mini',
-  process.env.OPENAI_MODEL_AUX_FALLBACKS || 'gpt-4.1-mini,gpt-5.4-mini'
-);
 
 const CASE_TYPE_NAMES = {
   surgical_error:      'Surgical Error / Operating Room Negligence',

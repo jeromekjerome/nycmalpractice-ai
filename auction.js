@@ -5,7 +5,8 @@ import OpenAI from 'openai';
 import nodemailer from 'nodemailer';
 import { getActiveFirms, createMagicLink, getFirm, recordDecline, recentDeclineCounts, setFirmCard, claimCardDeclinedNotice, clearCardDeclined } from './firms.js';
 import { chargeCustomer, createRefund, cardsOnFile } from './stripe.js';
-import { buildModelList, chatCompletionsWithFallback } from './openaiModelFailover.js';
+import { chatCompletionsWithFallback } from './openaiModelFailover.js';
+import { AUX_MODELS } from './models.js';
 import { renderCurrentLawForPrompt } from './gatekeeper.js';
 import { APP_URL, MAX_FIRMS_PER_LEAD, caseTypeLabel } from './site.js';
 import { randomInt } from 'node:crypto';
@@ -14,10 +15,6 @@ import { isDemo, demoMailer } from './demo.js';
 const sql    = neon(process.env.DATABASE_URL);
 // Each AI call is cut off after 30 seconds and retried once; it could wait 10 minutes.
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 30_000, maxRetries: 1 });
-const AUX_MODELS = buildModelList(
-  process.env.OPENAI_MODEL_AUX || 'gpt-4o-mini',
-  process.env.OPENAI_MODEL_AUX_FALLBACKS || 'gpt-4.1-mini,gpt-5.4-mini'
-);
 
 export const TIER_CONFIG = {
   cold:    { label: 'Cold',    minScore: 55, maxScore: 69, reserve: 25,  auctionHours: 0, color: '#6b7a94' },

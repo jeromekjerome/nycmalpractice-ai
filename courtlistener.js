@@ -1,13 +1,9 @@
 // Copyright (c) 2026 Jerome W. Dewald. All rights reserved.
 
-import { buildModelList, chatCompletionsWithFallback } from './openaiModelFailover.js';
+import { chatCompletionsWithFallback } from './openaiModelFailover.js';
+import { AUX_MODELS } from './models.js';
 
 const CL_BASE = 'https://www.courtlistener.com/api/rest/v4';
-
-const AUX_MODELS = buildModelList(
-  process.env.OPENAI_MODEL_AUX || 'gpt-4o-mini',
-  process.env.OPENAI_MODEL_AUX_FALLBACKS || 'gpt-4.1-mini,gpt-5.4-mini'
-);
 
 // New York Court of Appeals, Supreme Court, and Appellate Division.
 const DEFAULT_NY_COURTS = 'ny nysupct nyappdiv';

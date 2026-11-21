@@ -111,7 +111,7 @@ Seven tables in Neon Postgres (separate database from other AntiGravity apps):
 ## Tech Stack
 
 - **Backend:** Node.js / Express (ESM)
-- **AI:** OpenAI gpt-6.1-terra (replies) + gpt-6-luna (classification, lead scoring, case card, grading a reply), each falling back to the other and then to gpt-5.4-mini; chosen from the measurement in `docs/measurements/`, set in `models.js`
+- **AI:** OpenAI gpt-6.1-terra (replies) + gpt-6-luna (classification, lead scoring, case card, grading a reply), each falling back to the other and then to gpt-5.4-mini; chosen by the owner from the measurement in `docs/measurements/` (`measure/chosen.json` records the choice and why, including where a chosen model misses the bar that report sets), set in `models.js`
 - **Case Law:** CourtListener API (NY Supreme Court, Appellate Division — no family court)
 - **Database:** Neon Postgres (`@neondatabase/serverless`)
 - **Payments:** Stripe (subscriptions + per-lead charges + refunds)

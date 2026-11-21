@@ -33,6 +33,11 @@ test('every model in the chains was chosen by the owner, measured, priced, and i
   assert.deepEqual(DEFAULTS.answer, chosen.answer);
   assert.deepEqual(DEFAULTS.aux, chosen.aux);
   assert.ok(existsSync(new URL(`../${chosen.report}`, import.meta.url)), 'the report the choice was made from is in the repository');
+  // The record says why. The report holds each model to a bar, and no small-job model passed every rule of it,
+  // so a reader has to be told on what grounds one was chosen all the same.
+  for (const chain of ['answer', 'aux']) {
+    assert.ok(typeof chosen.why?.[chain] === 'string' && chosen.why[chain].trim().length >= 80, `measure/chosen.json does not say why the ${chain} chain was chosen`);
+  }
   // Only finished runs count. A run that was stopped part-way is kept beside them as <label>.partial.json, on this
   // machine only, and would otherwise vouch here for a model that the repository cannot show was measured.
   const finished = readdirSync(new URL('../measure/results/', import.meta.url)).filter(file => file.endsWith('.json') && !file.endsWith('.partial.json'));

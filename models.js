@@ -14,7 +14,8 @@
 // that names only the main model gives a chain of one.
 //
 // The answer and aux defaults are the owner's choice of 21 November 2026, made from the measurement in
-// docs/measurements/ and written down in measure/chosen.json; test/models.test.mjs holds the three together.
+// docs/measurements/ and written down, with the reasons, in measure/chosen.json; test/models.test.mjs holds the
+// three together.
 // They replaced gpt-4o and gpt-4o-mini (fallbacks gpt-4.1 and gpt-4.1-mini), which OpenAI shuts down on
 // 14 January 2027. To change a model, measure it first (npm run models:measure) and record the new choice.
 import { buildModelList } from './openaiModelFailover.js';

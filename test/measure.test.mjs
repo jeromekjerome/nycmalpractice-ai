@@ -584,7 +584,11 @@ test('a reply model is timed on its own calls and costed on its own jobs, and it
       { model: 'gpt-4o-mini', job: 'grade', status: 500, ms: 50 },
     ] };
   const stats = replyStats(run, context);
-  assert.equal(stats.finalPassRate, 3 / 5);
+  // The first turn's draft was graded by code alone, so nothing is known of it from the model grader: the pass
+  // rates are counted over the other four. The empty draft was rewritten and served (a pass in the end, not at
+  // first); the seminar's three turns are a pass, a block and a failure.
+  assert.equal(stats.firstPassRate, 1 / 4);
+  assert.equal(stats.finalPassRate, 2 / 4);
   assert.equal(stats.seminarFinalPassRate, 1 / 3);
   assert.equal(stats.emptyFirstDrafts, 1);
   assert.equal(stats.failedTurns, 1);
@@ -695,10 +699,14 @@ test("the reply bar is today's worst run, and ten seconds for the slowest tenth 
   assert.deepEqual(failed.failed, ['finalPass', 'unanchored', 'seminar', 'speed']);
   // A run with no reply call to time has not shown its speed.
   assert.deepEqual(replyBar({ finalPassRate: 1, unanchoredFirstDrafts: 0, seminarFinalPassRate: 1, replySlowestTenthMs: null }, baselines).failed, ['speed']);
-  // A run in which the model grader did not grade every first draft is not a full measurement, whatever it scored.
-  const halfGraded = replyBar({ finalPassRate: 1, unanchoredFirstDrafts: 0, seminarFinalPassRate: 1, replySlowestTenthMs: 1000, ungradedFirstDrafts: 2 }, baselines);
+  // Today's grader's answer is now and then cut off, and that draft is then graded by code alone: such drafts are
+  // left out of the pass rates. A run in which more than a tenth went that way is not a measurement of its model.
+  const mostlyGraded = { finalPassRate: 1, unanchoredFirstDrafts: 0, seminarFinalPassRate: 1, replySlowestTenthMs: 1000, turns: 45, ungradedFirstDrafts: 2 };
+  assert.deepEqual(replyBar(mostlyGraded, baselines).failed, []);
+  assert.deepEqual(replyBar({ ...mostlyGraded, ungradedFirstDrafts: 4 }, baselines).failed, []);
+  const halfGraded = replyBar({ ...mostlyGraded, ungradedFirstDrafts: 5 }, baselines);
   assert.deepEqual(halfGraded.failed, ['graded']);
-  assert.match(halfGraded.reasons[0], /2 first drafts were graded by code alone/);
+  assert.match(halfGraded.reasons[0], /5 of its 45 first drafts were graded by code alone/);
 });
 
 test("the small-job bar wants usable answers every time, today's own agreement, a steady lead score, every draft today's model catches, and four seconds", () => {
@@ -822,6 +830,7 @@ test('the report sets each run beside the bar, names what passes cheapest first,
   assert.match(differs, /lead tier warm, where today's says hot/);
   assert.match(text, /gpt-5\.4-nano is retired on 1 April 2027\./);
   assert.match(text, /does not count the classification and the search/);
+  assert.match(text, /The pass rates are counted over the first drafts the model grader graded/);
   assert.match(text, /the pair of its runs that agrees least/);
   assert.doesNotMatch(text, /undefined|NaN|\[object/);
 

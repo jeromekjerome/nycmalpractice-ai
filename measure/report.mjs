@@ -33,6 +33,9 @@ import * as app from './app.mjs';
 const REPLY_SLOWEST_TENTH_LIMIT_MS = 10_000;
 const SMALL_SLOWEST_TENTH_LIMIT_MS = 4_000;
 const LEAD_SCORE_TOLERANCE = 3;
+// A reply run counts as a measurement of its model while no more than this share of its first drafts went
+// ungraded by the model grader.
+const UNGRADED_SHARE_ALLOWED = 0.1;
 // The site gives a turn up after this long and asks the visitor to send the message again.
 const TURN_DEADLINE_MS = 45_000;
 const LABEL = /^[A-Za-z0-9][A-Za-z0-9.-]*$/;
@@ -82,19 +85,22 @@ export function replyStats(run, { price, visitors = VISITORS, adapter = app } = 
   // ran out of time counts as slow.
   const failures = (run.failed ?? []).filter(failure => replyJobs.includes(failure.job));
   const replyTimes = [...replyCalls, ...failures].map(call => call.ms);
+  // A first draft the model grader did not grade (its answer was cut off or could not be used, or never came) was
+  // passed or failed by code alone, which says nothing of the rules only a model can judge. Such a draft is left
+  // out of the pass rates and counted apart. An empty draft and a turn that failed are failures, and are counted.
+  const ungraded = turn => !turn.error && Boolean(turn.firstDraft) && turn.evaluator !== 'llm';
+  const graded = run.turns.filter(turn => !ungraded(turn));
   return {
     turns: run.turns.length,
-    firstPassRate: rate(run.turns, turn => turn.firstPassCompliant === true),
-    finalPassRate: rate(run.turns, passedFinally),
-    seminarFinalPassRate: rate(seminar, passedFinally),
+    firstPassRate: rate(graded, turn => turn.firstPassCompliant === true),
+    finalPassRate: rate(graded, passedFinally),
+    seminarFinalPassRate: rate(seminar.filter(turn => !ungraded(turn)), passedFinally),
     // Drafts, not citations: a draft with two citations that could not be anchored is one draft.
     unanchoredFirstDrafts: run.turns.filter(turn => turn.firstDraftUnanchored > 0).length,
     emptyFirstDrafts: run.turns.filter(turn => !turn.error && !turn.firstDraft).length,
     failedTurns: run.turns.filter(turn => turn.error).length,
     cutOff: replyCalls.filter(call => call.finish === 'length').length,
-    // A first draft the model grader did not grade (its answer could not be used, or never came) was passed or
-    // failed by code alone. An empty draft is failed in code and is never sent to the grader.
-    ungradedFirstDrafts: run.turns.filter(turn => !turn.error && turn.firstDraft && turn.evaluator !== 'llm').length,
+    ungradedFirstDrafts: run.turns.filter(ungraded).length,
     retriedTurns: run.turns.filter(turn => (turn.attempts ?? 1) > 1).length,
     turnsOverDeadline: run.turns.filter(turn => turn.ms > TURN_DEADLINE_MS).length,
     replyCallsFailed: failures.length,
@@ -256,10 +262,10 @@ export function replyBar(stats, baselines) {
       reason: typeof stats.replySlowestTenthMs === 'number'
         ? `the slowest tenth of its replies takes ${seconds(stats.replySlowestTenthMs)}, over the ${seconds(REPLY_SLOWEST_TENTH_LIMIT_MS)} allowed`
         : 'none of its replies was timed' },
-    // Not a rule of the design's bar but a condition of the measurement: pass rates mean what they say only when
-    // the model grader graded every first draft.
-    { key: 'graded', ok: !(stats.ungradedFirstDrafts > 0),
-      reason: `${stats.ungradedFirstDrafts} first drafts were graded by code alone because the model grader's answer did not come or could not be used, so this run is not a full measurement` },
+    // Not a rule of the design's bar but a condition of the measurement: the pass rates are counted over the
+    // drafts the model grader graded, and too few of those is no measurement.
+    { key: 'graded', ok: !(stats.ungradedFirstDrafts > UNGRADED_SHARE_ALLOWED * stats.turns),
+      reason: `${stats.ungradedFirstDrafts} of its ${stats.turns} first drafts were graded by code alone because the model grader's answer did not come or could not be used, too many for the run to count` },
   ]);
 }
 
@@ -420,6 +426,7 @@ export function renderReport({ app: appName, date, baseline, smallBaseline, repl
       stats.ungradedFirstDrafts, failedCell(stats.replyCallsFailed, stats.replyCallFailures), money(stats.costPerConversation),
     ]),
   ), '');
+  out.push("The pass rates are counted over the first drafts the model grader graded. Today's grader's answer is now and then cut off at its length limit, and the gate then grades that draft by code alone, on the site as here; those drafts are counted in the second table and left out of the rates.", '');
   out.push('A whole turn is the reply, the side analyses, the grading and any rewrite. It does not count the classification and the search for case law, which come first on the site and add a second or two; the site gives a turn up after 45 seconds. '
     + 'A reply call that failed is timed for as long as it took, so one that ran out of time counts as slow.', '');
 

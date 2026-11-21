@@ -182,6 +182,10 @@ export function smallStats(run, reference, baselineAverageLeadScore, { price, vi
   // call is made again, and it may be the account's rate limit that refused it and not the model.
   const failures = (run.failed ?? []).filter(failure => smallJobs.includes(failure.job));
   const answered = run.turns.filter(turn => !turn.error);
+  // Where a visitor was written with a definite case type, the classifier has a right answer to be held to.
+  // Agreement with today's model does not show it: a candidate that is right where today's is wrong disagrees.
+  const writtenAs = new Map(visitors.filter(visitor => visitor.caseType && visitor.caseType !== 'other').map(visitor => [visitor.key, visitor.caseType]));
+  const withRightAnswer = run.turns.filter(turn => writtenAs.has(turn.visitor) && turn.classifiedType !== null);
 
   // Was there a usable answer each time one was due?
   const checks = [
@@ -223,6 +227,7 @@ export function smallStats(run, reference, baselineAverageLeadScore, { price, vi
   return {
     jsonValidRate: rate(checks, Boolean),
     typeAgreement: agreement(run, reference.type, turn => turn.classifiedType),
+    typeRight: withRightAnswer.length ? rate(withRightAnswer, turn => turn.classifiedType === writtenAs.get(turn.visitor)) : null,
     tierAgreement: agreement(run, reference.tier, turn => turn.leadTier, leadDue),
     verdictAgreement: agreement(run, reference.verdict, turn => turn.firstPassCompliant),
     averageLeadScore,
@@ -445,11 +450,12 @@ export function renderReport({ app: appName, date, baseline, smallBaseline, repl
   if (!baseSmall.length && !candidateSmall.length) {
     out.push('No small-job run was given.', '');
   } else {
+    const compared = value => (smallBaseline.length ? percent(value) : 'nothing to compare with');
     out.push(table(
-      ['Run', 'Model', 'A usable answer when one was due', "Same case type as today's", "Same lead tier as today's", "Same first verdict as today's", 'Average lead score', 'Known-bad drafts caught',
+      ['Run', 'Model', 'A usable answer when one was due', "Same case type as today's", 'Case type right, where the visitor was written with one', "Same lead tier as today's", "Same first verdict as today's", 'Average lead score', 'Known-bad drafts caught',
         'Slowest job (slowest tenth)', 'Small-job calls that failed', 'Small jobs cost, a conversation', 'Bar'],
       [...baseSmall, ...candidateSmall].map(({ run, stats, bar }) => [
-        run.label, run.aux, percent(stats.jsonValidRate), ...[stats.typeAgreement, stats.tierAgreement, stats.verdictAgreement].map(value => (smallBaseline.length ? percent(value) : 'nothing to compare with')),
+        run.label, run.aux, percent(stats.jsonValidRate), compared(stats.typeAgreement), stats.typeRight === null ? 'none was' : percent(stats.typeRight), compared(stats.tierAgreement), compared(stats.verdictAgreement),
         stats.averageLeadScore === null ? 'none scored' : `${stats.averageLeadScore.toFixed(1)}${typeof stats.leadScoreShift === 'number' ? ` (${stats.leadScoreShift >= 0 ? '+' : ''}${stats.leadScoreShift.toFixed(1)})` : ''}`,
         `${stats.knownBadCaught.length} of ${(run.knownBad ?? []).length}`,
         stats.slowestJob ? `${stats.slowestJob}, ${seconds(stats.slowestTenthMs)}` : 'not timed', failedCell(stats.failedCalls, stats.failedCallSummary), money(stats.costPerConversation), barCell(bar),
@@ -462,6 +468,7 @@ export function renderReport({ app: appName, date, baseline, smallBaseline, repl
     } else {
       out.push(`Today's small-job model was run ${smallBaseline.length === 1 ? 'once' : 'not at all'}, so how well it agrees with itself is not known and no candidate can be held to it.`, '');
     }
+    out.push("Agreement with today's model is what the bar asks, but it cannot tell a candidate that is wrong from one that is right where today's model is wrong. Where a visitor was written with a definite case type, the next column says how often each model named it; the turn-by-turn differences are set out further down.", '');
     out.push('A usable answer is counted each time one was due: the grade of a draft, a lead score, a case card, and every answer that had to be JSON. A call that was refused or never answered is counted apart, in its own column, with what it failed on: such a call is made again, and it may be the account that was refused and not the model.', '');
 
     out.push("### Each small job's time", '');

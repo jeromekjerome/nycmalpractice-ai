@@ -677,6 +677,12 @@ test("a small-job model is judged on usable answers, agreement with today's, the
   assert.equal(stats.failedCalls, 1);
   assert.equal(stats.failedCallSummary, '429 x1');
   assert.equal(stats.typeAgreement, 3 / 4);
+  // Both people were written as motor-vehicle cases, and three of the four turns were classified so. A visitor
+  // written with no definite type ("other") has no right answer to be held to.
+  assert.equal(stats.typeRight, 3 / 4);
+  const noneDefinite = PEOPLE.map(person => ({ ...person, caseType: 'other' }));
+  assert.equal(smallStats(run, reference, 65, { ...context, visitors: noneDefinite }).typeRight, null);
+  assert.equal(smallStats(run, reference, 65, { ...context, visitors: [PEOPLE[0], { ...PEOPLE[1], caseType: 'slip' }] }).typeRight, 2 / 4);
   assert.equal(stats.tierAgreement, 1 / 2);
   assert.equal(stats.verdictAgreement, 1);
   assert.equal(stats.averageLeadScore, 70);
@@ -846,6 +852,7 @@ test('the report sets each run beside the bar, names what passes cheapest first,
   assert.match(text, /does not count the classification and the search/);
   assert.match(text, /The pass rates are counted over the first drafts the model grader graded/);
   assert.match(text, /the pair of its runs that agrees least/);
+  assert.match(text, /\| Case type right, where the visitor was written with one \|/);
   assert.doesNotMatch(text, /undefined|NaN|\[object/);
 
   // Runs with both models changed together are set out apart, and not held to the bar.

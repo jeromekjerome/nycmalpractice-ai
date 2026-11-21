@@ -30,6 +30,16 @@ export function getTier(score) {
   return 'cold';
 }
 
+// The scorer's own mark for the time limit, 1 to 10, where 1 or 2 means the time to sue has likely passed. A
+// claim marked so is never a lead, whatever its total (the owner's decision of 21 November 2026): the time limit
+// is a fifth of the total, so a grave injury with a clear cause totals over the cut-off years after the claim
+// expired, and a model that does the arithmetic then calls it viable. The prompt below defines 1-2 as "likely
+// expired". A mark that is missing, or is not a number, decides nothing.
+function likelyOutOfTime(mark) {
+  const value = typeof mark === 'string' && mark.trim() !== '' ? Number(mark) : mark;
+  return typeof value === 'number' && Number.isFinite(value) && value <= 2;
+}
+
 export async function scoreLead(question, history, caseType, mode) {
   try {
     const histText = history.map(h => `${h.role}: ${h.content}`).join('\n');
@@ -76,7 +86,12 @@ Malpractice SOL in NY: 2.5 years from act/omission or the end of continuous trea
     const result = JSON.parse(res.choices[0].message.content);
     // A rejection is a verdict, kept apart from no verdict at all (null: an error or a timeout): it clears a
     // qualifying score from an earlier message, which used to go to firms even after the claim fell apart.
-    if (!result.viable || result.confidence < 0.65 || result.score < 55) {
+    const rejected = !result.viable || result.confidence < 0.65 || result.score < 55;
+    const outOfTime = likelyOutOfTime(result.dimensions?.sol_status);
+    if (outOfTime && !rejected) {
+      console.log(`[lead] not a lead: the scorer marked the time limit ${result.dimensions.sol_status} of 10 (likely out of time) and still called the claim viable at ${result.score}`);
+    }
+    if (rejected || outOfTime) {
       return { viable: false, score: Number(result.score) || 0, confidence: Number(result.confidence) || 0 };
     }
     const tier = getTier(result.score);

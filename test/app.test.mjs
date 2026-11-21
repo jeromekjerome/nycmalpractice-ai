@@ -2894,6 +2894,53 @@ test('a later rejection clears an earlier qualifying score, so the contact form 
   assert.equal(none.result, null, 'an outage was read as a rejection');
 });
 
+test('a claim the scorer marks as likely out of time is never a lead, whatever its total', async () => {
+  const { scoreLead } = await import('../auction.js');
+  // The scorer marks five things from 1 to 10. This is its mark for the time limit, where 1-2 means the time to
+  // sue has likely passed. It is a fifth of the total, so a grave injury with a clear cause totals over the lead
+  // cut-off years after the claim expired, and gpt-6-luna then called such a claim viable.
+  const mark = REVIEW_APP.appId === 'nycinjury' ? 'sol' : 'sol_status';
+  const history = [{ role: 'user', content: 'What went wrong happened in 2017.' }, { role: 'assistant', content: 'I am sorry. Has anything been done about it since?' }];
+  const answered = value => ({ viable: true, score: 63, confidence: 0.75, preview: 'A grave injury in 2017, with nothing done since 2018.', dimensions: { [mark]: value } });
+  const verdictFor = answer => capturingLogs(() => withOutboundHttp(async () => chatCompletion(JSON.stringify(answer)),
+    () => scoreLead('I would still like to talk to someone.', history, REVIEW_APP.caseType, REVIEW_APP.mode)));
+  const overrides = logs => logs.filter(line => /out of time/.test(line)).length;
+
+  for (const value of [1, 2, '1', ' 2 ', 0]) {
+    const { result, logs } = await verdictFor(answered(value));
+    assert.deepEqual(result, { viable: false, score: 63, confidence: 0.75 }, `a time-limit mark of ${JSON.stringify(value)}`);
+    assert.equal(overrides(logs), 1, 'overruling the model is logged, once');
+  }
+  // Any other mark leaves the verdict to the total, as before. So does a mark that is missing or is not a number.
+  for (const value of [3, 2.5, 10, '9', null, undefined, '', 'unknown', true, [1]]) {
+    const { result, logs } = await verdictFor(answered(value));
+    assert.equal(result.tier, 'cold', `a time-limit mark of ${JSON.stringify(value)}`);
+    assert.equal(overrides(logs), 0);
+  }
+  const noMarks = await verdictFor({ viable: true, score: 63, confidence: 0.75 });
+  assert.equal(noMarks.result.tier, 'cold');
+  // A claim the model itself rejected is rejected as before, and nothing was overruled.
+  const rejected = await verdictFor({ ...answered(1), viable: false });
+  assert.deepEqual(rejected.result, { viable: false, score: 63, confidence: 0.75 });
+  assert.equal(overrides(rejected.logs), 0);
+
+  // On the visitor's path no lead tier comes back, and a qualifying score kept from an earlier message is
+  // cleared: the contact form then sends no lead, and the request goes to the operator.
+  const world = fakeWorld({ answer: 'Thank you.', leadScore: answered(1) });
+  const server = await startServer(app);
+  try {
+    await capturingLogs(() => withOutboundHttp(world.handler, async () => {
+      const { response, body } = await postJson(server.baseUrl, '/api/ask', { question: 'I would still like to talk to someone.', mode: REVIEW_APP.mode, sessionId: 'sess-out-of-time', history });
+      assert.equal(response.status, 200);
+      assert.equal(body.leadTier, null);
+    }));
+  } finally {
+    await server.close();
+  }
+  const save = world.calls.sql.find(call => /^INSERT INTO conversations/.test(call.query));
+  assert.ok(save.params.map(String).includes('true'), 'the out-of-time verdict did not clear the stored score');
+});
+
 test('a cold lead goes only to firms whose card is charged, and the operator is told when none could be', async () => {
   const { deliverColdLead } = await import('../auction.js');
   const run = (firms, declined) => {

@@ -51,11 +51,18 @@ function shouldTryFallback(error, hasMoreModels) {
 // only the default temperature, and spend part of that allowance thinking before they write. Every call here was
 // written for gpt-4o, so a fallback to such a model failed with a 400 and the chain stopped there: gpt-4.1 behind
 // it was never tried. The request is adapted to the model it goes to.
-const REASONING_MODEL = /^(gpt-5|o\d)/i;
+//
+// The pattern takes gpt-5 and every later number (gpt-6.2-sol, gpt-10), not gpt-5 alone: a later name it missed
+// was sent a gpt-4o request, which that model refuses.
+const REASONING_MODEL = /^(?:gpt-(?:[5-9]|\d{2,})|o\d)/i;
 const REASONING_HEADROOM_TOKENS = 2000;
 
+export function isReasoningModel(model) {
+  return REASONING_MODEL.test(String(model || ''));
+}
+
 export function requestFor(model, request) {
-  if (!REASONING_MODEL.test(model)) return { model, ...request };
+  if (!isReasoningModel(model)) return { model, ...request };
   const { max_tokens: maxTokens, temperature, ...rest } = request;
   return {
     model,

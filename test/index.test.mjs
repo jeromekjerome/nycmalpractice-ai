@@ -2,6 +2,7 @@ import './app.test.mjs';
 import './ai-budget.test.mjs';
 import './backup.test.mjs';
 import './models.test.mjs';
+import './model-shaping.test.mjs';
 
 import { run } from './runner.mjs';
 

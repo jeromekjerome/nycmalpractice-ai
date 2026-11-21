@@ -550,6 +550,8 @@ test('a reply that came back empty counts as failed, and the slowest tenth is th
   const stats = replyStats(run, context);
   assert.equal(stats.turns, 10);
   assert.equal(stats.finalPassRate, 0.8);
+  assert.equal(stats.finalFailures, 2);
+  assert.equal(stats.seminarFinalFailures, 0);
   assert.equal(stats.firstPassRate, 0.9);
   // Drafts are counted, not citations: one draft with two citations the citator could not anchor is one.
   assert.equal(stats.unanchoredFirstDrafts, 1);
@@ -589,7 +591,9 @@ test('a reply model is timed on its own calls and costed on its own jobs, and it
   // first); the seminar's three turns are a pass, a block and a failure.
   assert.equal(stats.firstPassRate, 1 / 4);
   assert.equal(stats.finalPassRate, 2 / 4);
+  assert.equal(stats.finalFailures, 2);
   assert.equal(stats.seminarFinalPassRate, 1 / 3);
+  assert.equal(stats.seminarFinalFailures, 2);
   assert.equal(stats.emptyFirstDrafts, 1);
   assert.equal(stats.failedTurns, 1);
   assert.equal(stats.cutOff, 1);
@@ -691,17 +695,23 @@ test("a small-job model is judged on usable answers, agreement with today's, the
 });
 
 test("the reply bar is today's worst run, and ten seconds for the slowest tenth of the reply's own calls", () => {
-  const baselines = [{ finalPassRate: 0.95, unanchoredFirstDrafts: 1, seminarFinalPassRate: 1 }, { finalPassRate: 0.9, unanchoredFirstDrafts: 3, seminarFinalPassRate: 0.875 }];
-  assert.deepEqual(replyBar({ finalPassRate: 0.9, unanchoredFirstDrafts: 3, seminarFinalPassRate: 0.875, replySlowestTenthMs: 10000 }, baselines), { ok: true, reasons: [], failed: [] });
-  const failed = replyBar({ finalPassRate: 0.89, unanchoredFirstDrafts: 4, seminarFinalPassRate: 0.8, replySlowestTenthMs: 10001 }, baselines);
+  // "At least as often as today's worst run" is judged on how many turns did not pass, not on a share: a draft or
+  // two may be left out of one run's rates and not another's, and one turn not passed is one turn in either.
+  const baselines = [{ finalFailures: 2, unanchoredFirstDrafts: 1, seminarFinalFailures: 0 }, { finalFailures: 4, unanchoredFirstDrafts: 3, seminarFinalFailures: 1 }];
+  assert.deepEqual(replyBar({ finalFailures: 4, unanchoredFirstDrafts: 3, seminarFinalFailures: 1, replySlowestTenthMs: 10000 }, baselines), { ok: true, reasons: [], failed: [] });
+  const failed = replyBar({ finalFailures: 5, unanchoredFirstDrafts: 4, seminarFinalFailures: 2, replySlowestTenthMs: 10001 }, baselines);
   assert.equal(failed.ok, false);
   assert.equal(failed.reasons.length, 4);
   assert.deepEqual(failed.failed, ['finalPass', 'unanchored', 'seminar', 'speed']);
+  assert.match(failed.reasons[0], /^5 turns did not pass after the rewrite, more than in today's worst run \(4\)$/);
+  assert.match(replyBar({ finalFailures: 5, unanchoredFirstDrafts: 0, seminarFinalFailures: 0, replySlowestTenthMs: 1 }, [{ finalFailures: 0, unanchoredFirstDrafts: 0, seminarFinalFailures: 0 }]).reasons[0], /^5 turns did not pass/);
+  assert.match(replyBar({ finalFailures: 1, unanchoredFirstDrafts: 1, seminarFinalFailures: 1, replySlowestTenthMs: 1 }, [{ finalFailures: 0, unanchoredFirstDrafts: 0, seminarFinalFailures: 0 }]).reasons.join('; '),
+    /^1 turn did not pass after the rewrite, more than in today's worst run \(0\); 1 first draft cites a case that could not be anchored, more than in today's worst run \(0\); 1 seminar turn did not pass, more than in today's worst run \(0\)$/);
   // A run with no reply call to time has not shown its speed.
-  assert.deepEqual(replyBar({ finalPassRate: 1, unanchoredFirstDrafts: 0, seminarFinalPassRate: 1, replySlowestTenthMs: null }, baselines).failed, ['speed']);
+  assert.deepEqual(replyBar({ finalFailures: 0, unanchoredFirstDrafts: 0, seminarFinalFailures: 0, replySlowestTenthMs: null }, baselines).failed, ['speed']);
   // Today's grader's answer is now and then cut off, and that draft is then graded by code alone: such drafts are
   // left out of the pass rates. A run in which more than a tenth went that way is not a measurement of its model.
-  const mostlyGraded = { finalPassRate: 1, unanchoredFirstDrafts: 0, seminarFinalPassRate: 1, replySlowestTenthMs: 1000, turns: 45, ungradedFirstDrafts: 2 };
+  const mostlyGraded = { finalFailures: 0, unanchoredFirstDrafts: 0, seminarFinalFailures: 0, replySlowestTenthMs: 1000, turns: 45, ungradedFirstDrafts: 2 };
   assert.deepEqual(replyBar(mostlyGraded, baselines).failed, []);
   assert.deepEqual(replyBar({ ...mostlyGraded, ungradedFirstDrafts: 4 }, baselines).failed, []);
   const halfGraded = replyBar({ ...mostlyGraded, ungradedFirstDrafts: 5 }, baselines);
@@ -814,7 +824,7 @@ test('the report sets each run beside the bar, names what passes cheapest first,
   assert.match(rowOf('base-1'), /\| gpt-4o \|/);
   assert.match(rowOf('reply-sol'), /\| passes \|$/);
   // The run that left a turn blocked is set beside the rule it missed, and is not among what passes.
-  assert.match(rowOf('reply-terra'), /passes after the rewrite on 75%, under today's worst run \(100%\)/);
+  assert.match(rowOf('reply-terra'), /1 turn did not pass after the rewrite, more than in today's worst run \(0\)/);
   assert.match(rowOf('small-luna'), /\| passes \|$/);
   assert.match(rowOf('small-nano'), /did not catch no-law-named/);
   // Draft by draft: caught under the rule it breaks, caught under another rule, or not caught.

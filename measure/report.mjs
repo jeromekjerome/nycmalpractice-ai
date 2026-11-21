@@ -12,7 +12,8 @@
 // --samples names runs whose replies are set out in full beside today's, in a second file.
 //
 // The bar, from the design (docs/superpowers/specs/2026-11-19-ai-providers-design.md, section 4):
-//   a reply model      passes the gate after the one rewrite at least as often as today's model's worst run;
+//   a reply model      passes the gate after the one rewrite at least as often as today's model's worst run
+//                      (judged on the number of turns that did not pass);
 //                      has no more first drafts citing a case that cannot be anchored than today's worst run;
 //                      passes the seminar rubric at least as often as today's worst run;
 //                      and the slowest tenth of its replies takes at most 10 seconds.
@@ -94,7 +95,10 @@ export function replyStats(run, { price, visitors = VISITORS, adapter = app } = 
     turns: run.turns.length,
     firstPassRate: rate(graded, turn => turn.firstPassCompliant === true),
     finalPassRate: rate(graded, passedFinally),
+    // The bar is judged on how many turns did not pass, which means the same whatever was left out of the rates.
+    finalFailures: graded.filter(turn => !passedFinally(turn)).length,
     seminarFinalPassRate: rate(seminar.filter(turn => !ungraded(turn)), passedFinally),
+    seminarFinalFailures: seminar.filter(turn => !ungraded(turn) && !passedFinally(turn)).length,
     // Drafts, not citations: a draft with two citations that could not be anchored is one draft.
     unanchoredFirstDrafts: run.turns.filter(turn => turn.firstDraftUnanchored > 0).length,
     emptyFirstDrafts: run.turns.filter(turn => !turn.error && !turn.firstDraft).length,
@@ -248,16 +252,17 @@ function verdict(rules) {
 // A reply model against today's model's runs.
 export function replyBar(stats, baselines) {
   if (!baselines.length) return { ok: false, reasons: ["there is no run of today's model to set it beside"], failed: ['baseline'] };
-  const worstFinal = Math.min(...baselines.map(baseline => baseline.finalPassRate));
+  const mostFailures = Math.max(...baselines.map(baseline => baseline.finalFailures));
   const mostUnanchored = Math.max(...baselines.map(baseline => baseline.unanchoredFirstDrafts));
-  const worstSeminar = Math.min(...baselines.map(baseline => baseline.seminarFinalPassRate));
+  const mostSeminarFailures = Math.max(...baselines.map(baseline => baseline.seminarFinalFailures));
+  const some = (count, one, many) => `${count} ${count === 1 ? one : many}`;
   return verdict([
-    { key: 'finalPass', ok: stats.finalPassRate >= worstFinal,
-      reason: `passes after the rewrite on ${percent(stats.finalPassRate)}, under today's worst run (${percent(worstFinal)})` },
+    { key: 'finalPass', ok: stats.finalFailures <= mostFailures,
+      reason: `${some(stats.finalFailures, 'turn', 'turns')} did not pass after the rewrite, more than in today's worst run (${mostFailures})` },
     { key: 'unanchored', ok: stats.unanchoredFirstDrafts <= mostUnanchored,
-      reason: `${stats.unanchoredFirstDrafts} first drafts cite a case that could not be anchored, over today's worst run (${mostUnanchored})` },
-    { key: 'seminar', ok: stats.seminarFinalPassRate >= worstSeminar,
-      reason: `passes the seminar rubric on ${percent(stats.seminarFinalPassRate)}, under today's worst run (${percent(worstSeminar)})` },
+      reason: `${some(stats.unanchoredFirstDrafts, 'first draft cites', 'first drafts cite')} a case that could not be anchored, more than in today's worst run (${mostUnanchored})` },
+    { key: 'seminar', ok: stats.seminarFinalFailures <= mostSeminarFailures,
+      reason: `${some(stats.seminarFinalFailures, 'seminar turn', 'seminar turns')} did not pass, more than in today's worst run (${mostSeminarFailures})` },
     { key: 'speed', ok: typeof stats.replySlowestTenthMs === 'number' && stats.replySlowestTenthMs <= REPLY_SLOWEST_TENTH_LIMIT_MS,
       reason: typeof stats.replySlowestTenthMs === 'number'
         ? `the slowest tenth of its replies takes ${seconds(stats.replySlowestTenthMs)}, over the ${seconds(REPLY_SLOWEST_TENTH_LIMIT_MS)} allowed`

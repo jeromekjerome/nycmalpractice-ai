@@ -16,7 +16,7 @@
 
 import { readFileSync } from 'fs';
 import { auditDraftCitations, flagUnanchoredCitations, textOutsideCitations, VERIFY_PLACEHOLDER } from './citator.js';
-import { chatCompletionsWithFallback } from './openaiModelFailover.js';
+import { runJob } from './providers.js';
 import {
   RUBRIC_FILES, CURRENT_LAW_FILE, SERVICE_DESCRIPTION, DEFAULT_HUMAN_VERIFICATION_CHECKLIST, DEFAULT_GATE_TARGETS, normalizeMode,
 } from './gate-config.js';
@@ -639,7 +639,8 @@ function conversationTail(messages, limit = 6) {
     .join('\n\n') || '(no prior messages)';
 }
 
-async function runLlmEvaluator({ openai, auxModels, rubric, draftText, turn, mode, retrievedCases, messages }) {
+// The grader's verdicts, and who gave them: { verdicts, gradedBy: { provider, model } }.
+async function runLlmEvaluator({ smallModels, rubric, draftText, turn, mode, retrievedCases, messages, deps, clock }) {
   const system = [
     `You are an uncompromising AI Compliance Gatekeeper and Enablement Coach for ${SERVICE_DESCRIPTION}.`,
     'You grade ONE AI-generated reply (the DRAFT) against a JSON rubric before it is shown to a member of the public.',
@@ -677,20 +678,22 @@ async function runLlmEvaluator({ openai, auxModels, rubric, draftText, turn, mod
     draftText,
   ].join('\n');
 
-  const res = await chatCompletionsWithFallback(openai, {
-    models: auxModels,
+  const res = await runJob({
+    job: 'grade',
+    chain: smallModels,
     messages: [
       { role: 'system', content: system },
       { role: 'user', content: user },
     ],
-    response_format: { type: 'json_object' },
+    json: true,
     temperature: 0,
-    max_tokens: EVALUATOR_MAX_TOKENS,
-  });
+    maxTokens: EVALUATOR_MAX_TOKENS,
+    clock,
+  }, deps);
 
-  const parsed = JSON.parse(res.choices[0].message.content);
+  const parsed = JSON.parse(res.text);
   if (!parsed || typeof parsed !== 'object') throw new Error('LLM evaluator returned a non-object');
-  return parsed;
+  return { verdicts: parsed, gradedBy: { provider: res.provider, model: res.model } };
 }
 
 function clip(value, max = 600) {
@@ -956,26 +959,31 @@ function ungradedCriteria(ctx, graded) {
 }
 
 // Grade one draft: LLM verdicts (unless deterministic) → deterministic gate.
-// `previous` is the report of the blocked attempt this draft replaces, when there is one.
-async function evaluateDraft(ctx, draftText, { carriedVerdicts = null, previous = null } = {}) {
+// `previous` is the report of the blocked attempt this draft replaces, when there is one. `gradedBy` is the
+// model whose verdicts the report holds ({ provider, model }), or null when code graded the draft alone; carried
+// verdicts come with the model that gave them.
+async function evaluateDraft(ctx, draftText, { carriedVerdicts = null, carriedGradedBy = null, previous = null } = {}) {
   let report = baselineReport(ctx.rubric);
   let evaluator = 'deterministic';
   let verdicts = null;
+  let gradedBy = null;
 
   if (carriedVerdicts) {
     // The earlier verdicts, about a draft that has only had the disclaimer appended since. The
     // advice that came with them was about the draft before that, so it is not carried.
     applyLlmVerdicts(report, carriedVerdicts, draftText, { withCoaching: false });
     verdicts = carriedVerdicts;
+    gradedBy = carriedGradedBy;
     evaluator = 'carried_forward';
   } else {
     // An empty draft is not sent to the evaluator: the deterministic gate fails it outright.
     if (!ctx.deterministicOnly && String(draftText ?? '').trim()) {
       try {
-        const response = await runLlmEvaluator({ ...ctx, draftText });
+        const { verdicts: response, gradedBy: grader } = await runLlmEvaluator({ ...ctx, draftText });
         const graded = applyLlmVerdicts(report, response, draftText);
         if (graded.size === 0) throw new Error('the evaluator returned no usable verdict for any criterion');
         verdicts = response;
+        gradedBy = grader;
         const skipped = ungradedCriteria(ctx, graded);
         evaluator = skipped.length ? 'llm_incomplete' : 'llm';
         if (skipped.length) report.evaluator_error = `The evaluator returned no usable verdict for: ${skipped.join(', ')}`;
@@ -985,6 +993,7 @@ async function evaluateDraft(ctx, draftText, { carriedVerdicts = null, previous 
         report.evaluator_error = clip(errorText(err), 300);
         evaluator = 'deterministic_fallback';
         verdicts = null;
+        gradedBy = null;
       }
     }
     if (previous) carryUnresolvedFindings(report, previous);
@@ -999,7 +1008,7 @@ async function evaluateDraft(ctx, draftText, { carriedVerdicts = null, previous 
 
   report.evaluator = evaluator;
   report.coaching = finalizeCoaching(report);
-  return { report, verdicts };
+  return { report, verdicts, gradedBy };
 }
 
 // ─── Remediation ───────────────────────────────────────────────────────────────
@@ -1057,6 +1066,7 @@ function remediationBrief(report) {
   ].join('\n');
 }
 
+// The replacement reply, and who wrote it: { text, writtenBy: { provider, model } }.
 async function runLlmRemediation(ctx, blockedDraft, report) {
   const hadReply = Boolean(String(blockedDraft ?? '').trim());
   const instruction = [
@@ -1078,20 +1088,21 @@ async function runLlmRemediation(ctx, blockedDraft, report) {
     renderRubricForPrompt(ctx.mode, ctx.turn),
   ].join('\n');
 
-  const res = await chatCompletionsWithFallback(ctx.openai, {
-    models: ctx.answerModels,
+  // A model that answers with no text is passed over for the next in the chain, so a rewrite is never empty.
+  const res = await runJob({
+    job: 'rewrite',
+    chain: ctx.answerModels,
     messages: [
       ...(Array.isArray(ctx.messages) ? ctx.messages : []),
       ...(hadReply ? [{ role: 'assistant', content: blockedDraft }] : []),
       { role: 'system', content: instruction },
     ],
     temperature: 0.2,
-    max_tokens: REMEDIATION_MAX_TOKENS,
-  });
+    maxTokens: REMEDIATION_MAX_TOKENS,
+    clock: ctx.clock,
+  }, ctx.deps);
 
-  const rewritten = res.choices?.[0]?.message?.content;
-  if (typeof rewritten !== 'string' || !rewritten.trim()) throw new Error('Remediation model returned an empty reply');
-  return rewritten;
+  return { text: res.text, writtenBy: { provider: res.provider, model: res.model } };
 }
 
 // True when every failure is something code repairs exactly by appending text, so no rewrite is needed.
@@ -1103,16 +1114,19 @@ function onlyAppendRepairsNeeded(ctx, report) {
 }
 
 // One remediation pass. An LLM rewrite (when needed and available) followed by the code-level
-// repairs as a guard, so the rules code can decide hold whatever the model does.
+// repairs as a guard, so the rules code can decide hold whatever the model does. `writtenBy` is the model
+// that rewrote the draft, or null when none did.
 async function remediate(ctx, blockedDraft, report) {
   const steps = [];
   let text = blockedDraft;
+  let writtenBy = null;
   let rewriteError = null;
   const appendOnly = onlyAppendRepairsNeeded(ctx, report);
 
-  if (!ctx.deterministicOnly && !appendOnly) {
+  // A rewrite is asked only of an answer chain the caller supplied.
+  if (!ctx.deterministicOnly && !appendOnly && ctx.answerModels?.length) {
     try {
-      text = await runLlmRemediation(ctx, blockedDraft, report);
+      ({ text, writtenBy } = await runLlmRemediation(ctx, blockedDraft, report));
       steps.push('llm_rewrite');
     } catch (err) {
       console.error('[Gatekeeper] LLM remediation failed, applying deterministic repairs only:', errorText(err));
@@ -1126,6 +1140,7 @@ async function remediate(ctx, blockedDraft, report) {
   return {
     text: repaired.text,
     appendOnly,
+    writtenBy,
     remediation: {
       method: steps.join('+') || 'none',
       deterministic_repairs: repaired.repairs,
@@ -1189,35 +1204,48 @@ function courtListenerLookupEnabled() {
  * attempt and the diagnosis of the first failure (No Silent Fixes).
  *
  * In NODE_ENV === 'test' (or GATEKEEPER_MODE=deterministic) evaluation and remediation are pure
- * code — no OpenAI or CourtListener calls are made. GATEKEEPER_MODE=llm asks the model grader even
+ * code — no model or CourtListener calls are made. GATEKEEPER_MODE=llm asks the model grader even
  * in a test environment: the model measurement (measure/) runs as one, so that the spending cap and
  * the database stay out of it, and the grader is what it is there to compare. Everywhere else the
- * model grader is already the default, so there the setting changes nothing.
+ * model grader is already the default, so there the setting changes nothing. Without a grader chain
+ * the draft is graded by code, and without an answer chain it is never rewritten by a model.
+ *
+ * The evaluation records who wrote the reply that is served and who graded it, each as
+ * { provider, model }: writtenBy is the rewrite's model when a rewrite is served, and otherwise the
+ * draft's; gradedBy is null when code graded the reply alone.
+ *
+ * The grades and the rewrite are given the reply's clock, when there is one. A step that finds too
+ * little of the reply's time left fails at once, and the gate does what it does when that step fails:
+ * the steps run in turn, so the second grade gives way first, then the rewrite, then the first grade.
  *
  * @param {object} params
- * @param {object} params.openai        OpenAI client
- * @param {string[]} params.auxModels   model chain for the evaluator
+ * @param {string[]} params.smallModels  model chain for the evaluator
  * @param {string[]} params.answerModels model chain for the remediation rewrite
  * @param {Array} params.messages       the chat messages that produced the draft (system + history + user)
  * @param {string} params.draftText     Attempt 1
+ * @param {object|null} [params.writtenBy]  who wrote the draft, { provider, model }; null when no model did
  * @param {number} params.turn
  * @param {string} params.mode  one of the modes in gate-config.js
  * @param {Array} [params.retrievedCases]
  * @param {boolean} [params.deterministicOnly]  override the mode switch (tests)
  * @param {Function} [params.fetchImpl]         injected fetch for the CourtListener lookup (tests)
+ * @param {object} [params.deps]                handed on to runJob (providers.js): tests pass fake adapters
+ * @param {object|null} [params.clock]          the reply's clock (replyClock in providers.js), handed on to runJob
  * @returns {Promise<{finalText: string, evaluation: object}>}
  */
 export async function evaluateAndRemediateDraft({
-  openai,
-  auxModels = [],
+  smallModels = [],
   answerModels = [],
   messages = [],
   draftText,
+  writtenBy = null,
   turn,
   mode,
   retrievedCases = [],
   deterministicOnly,
   fetchImpl,
+  deps = {},
+  clock = null,
 }) {
   const gateMode = normalizeMode(mode);
   const rubric = loadRubric(gateMode);
@@ -1227,9 +1255,10 @@ export async function evaluateAndRemediateDraft({
     : 1;
 
   const ctx = {
-    openai,
-    auxModels,
+    smallModels,
     answerModels,
+    deps,
+    clock,
     messages,
     turn,
     mode: gateMode,
@@ -1242,7 +1271,7 @@ export async function evaluateAndRemediateDraft({
     lookupCache: new Map(),
     deterministicOnly: typeof deterministicOnly === 'boolean'
       ? deterministicOnly
-      : (!openai ||
+      : (!smallModels?.length ||
          gateModeSetting() === 'deterministic' ||
          (process.env.NODE_ENV === 'test' && gateModeSetting() !== 'llm')),
   };
@@ -1250,14 +1279,16 @@ export async function evaluateAndRemediateDraft({
   const attempts = [];
   const remediationNotes = [];
   let currentText = String(draftText ?? '');
+  // Who wrote the text that would be served now: the draft's writer, until a rewrite is served instead.
+  let author = writtenBy ?? null;
 
-  let { report, verdicts } = await evaluateDraft(ctx, currentText);
+  let { report, verdicts, gradedBy } = await evaluateDraft(ctx, currentText);
   attempts.push(attemptRecord(1, currentText, report));
   const initialCoaching = buildInitialCoaching(report);
 
   let retriesUsed = 0;
   while (report.gate_status === 'BLOCKED' && retriesUsed < maxRetries) {
-    const { text, remediation, appendOnly } = await remediate(ctx, currentText, report);
+    const { text, remediation, appendOnly, writtenBy: rewrittenBy } = await remediate(ctx, currentText, report);
     if (text === currentText) {
       const stillFailing = describeChecks([...failedRequired(report), ...violatedProhibited(report)]);
       remediationNotes.push(
@@ -1270,13 +1301,15 @@ export async function evaluateAndRemediateDraft({
     }
     retriesUsed += 1;
     currentText = text;
+    if (rewrittenBy) author = rewrittenBy;
 
     // When the only change was appending the mandatory disclaimer, nothing the evaluator graded
     // has changed, so its verdicts carry over instead of paying for a second evaluation.
     const carry = appendOnly && !remediation.method.includes('llm_rewrite') ? verdicts : null;
-    const next = await evaluateDraft(ctx, currentText, { carriedVerdicts: carry, previous: report });
+    const next = await evaluateDraft(ctx, currentText, { carriedVerdicts: carry, carriedGradedBy: gradedBy, previous: report });
     report = next.report;
     verdicts = next.verdicts;
+    gradedBy = next.gradedBy;
     attempts.push(attemptRecord(retriesUsed + 1, currentText, report, remediation));
   }
 
@@ -1299,6 +1332,9 @@ export async function evaluateAndRemediateDraft({
     max_auto_retries: maxRetries,
     final_attempt_number: attempts.length,
     evaluator: report.evaluator,
+    // Kept on the record and never sent to the visitor's browser (toPublicEvaluation names what it sends).
+    writtenBy: author,
+    gradedBy,
     required_checks: report.required_checks,
     prohibited_checks: report.prohibited_checks,
     citation_audit: report.citation_audit,

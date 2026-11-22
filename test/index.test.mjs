@@ -2,7 +2,6 @@ import './app.test.mjs';
 import './ai-budget.test.mjs';
 import './backup.test.mjs';
 import './models.test.mjs';
-import './model-shaping.test.mjs';
 import './providers.test.mjs';
 import './provider-anthropic.test.mjs';
 import './provider-google.test.mjs';

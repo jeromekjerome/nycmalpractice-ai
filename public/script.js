@@ -137,6 +137,9 @@ async function submitQuestion() {
     if (!res.ok || typeof data?.answer !== 'string') {
       // The server's own words when it refused the message (too long, too many) or could not answer in time.
       returnQuestion(userMsg, input, q, [400, 429, 503].includes(res.status) && typeof data?.error === 'string' ? data.error : NOT_ANSWERED);
+      // The deadlines the visitor's words point to matter whether or not the AI could answer: the server sends them
+      // with a reply it could not give, too.
+      showDeadlineNotices(data);
       return;
     }
 

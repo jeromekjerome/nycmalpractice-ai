@@ -1,15 +1,11 @@
 // Copyright (c) 2026 Jerome W. Dewald. All rights reserved.
 
-import OpenAI from 'openai';
 import { searchMalpracticeCases, extractCaseType } from './courtlistener.js';
 import { rememberCases, recallCases } from './case-memory.js';
 import { scoreLead } from './auction.js';
-import { chatCompletionsWithFallback } from './openaiModelFailover.js';
-import { ANSWER_MODELS, AUX_MODELS } from './models.js';
+import { runJob } from './providers.js';
+import { chains } from './model-settings.js';
 import { evaluateAndRemediateDraft, renderRubricForPrompt, renderCurrentLawForPrompt } from './gatekeeper.js';
-
-// Each AI call is cut off after 30 seconds and retried once; it could wait 10 minutes.
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 30_000, maxRetries: 1 });
 
 const CASE_TYPE_NAMES = {
   surgical_error:      'Surgical Error / Operating Room Negligence',
@@ -40,8 +36,9 @@ export function analysisTranscript(history, question, { visitorChars = 4000, rep
   return visitor + (reply ? `\n\nThe end of the AI's last reply, for context only:\n${reply.length > replyChars ? '…' + reply.slice(-replyChars) : reply}` : '');
 }
 
-// The side analyses (lead score, case card, seminar score) get 20 seconds; one that takes longer is left out of
-// this reply rather than holding back an answer that is ready. Each AI call alone may take 30 seconds and a retry.
+// The side analyses (lead score, case card) get 20 seconds; one that takes longer is left out of this reply rather
+// than holding back an answer that is ready. Each of their model calls also has its own limit, from the reply's clock
+// (providers.js).
 const DEFAULT_SIDE_CALL_CAP_MS = 20_000;
 function sideCall(work) {
   if (!work) return null;
@@ -82,21 +79,22 @@ function knownType(type) {
 }
 
 // What kind of claim the conversation is about, and the search terms for it. Exported for the model measurement
-// (measure/), which compares how each small model classifies the same conversations.
-export async function classifyConversation(history, question) {
+// (measure/), which compares how each small model classifies the same conversations. `clock` is the reply's
+// (replyClock in providers.js), when there is a reply.
+export async function classifyConversation(history, question, clock = null) {
   // The case type is decided from everything the visitor has said, and nothing else. The AI's own replies are left
   // out: they are several times longer, and they crowded the visitor's words out of what the classifier was shown,
   // so a fact given in the second message (a sponge left inside) was lost by the third.
   const visitorText    = [...history.filter(h => h.role === 'user').map(h => h.content), question].join(' ');
-  const classification = (await extractCaseType(visitorText, openai)) || {};
+  const classification = (await extractCaseType(visitorText, {}, clock)) || {};
   return { caseType: knownType(classification.type), terms: typeof classification.terms === 'string' ? classification.terms : '' };
 }
 
 // The type of claim and the decisions CourtListener has for it (New York courts first, national fallback).
 // The case memory is no part of this: findCases puts it behind the search. Exported for the model measurement,
 // which records what this returns once and replays it for every model.
-export async function classifyAndSearch(history, question) {
-  const { caseType, terms } = await classifyConversation(history, question);
+export async function classifyAndSearch(history, question, clock = null) {
+  const { caseType, terms } = await classifyConversation(history, question, clock);
   // The classifier's terms only. The visitor's own message is never the query: it can hold a name
   // or a phone number, and the query goes to a third party. Without terms, the search uses the
   // case type's terms alone.
@@ -105,8 +103,8 @@ export async function classifyAndSearch(history, question) {
 }
 
 // What a visitor's reply is written from: the classification and the search, with the case memory behind them.
-async function findCases(history, question) {
-  const found = await classifyAndSearch(history, question);
+async function findCases(history, question, clock) {
+  const found = await classifyAndSearch(history, question, clock);
   const { caseType } = found;
   let { cases } = found;
 
@@ -131,14 +129,18 @@ async function findCases(history, question) {
 // read nor written, so every model being compared is given the same decisions. With recorded.draft that text is
 // the draft and the answer model is not asked for one; the side analyses and the gate run as usual. server.js
 // names each field it passes on, so a request cannot supply one.
-export async function answerUserQuestion({ question, mode = 'personal', sessionId, history, allowLeadScoring = true, recorded = null }) {
+//
+// clock is the reply's (replyClock in providers.js), which every model call of the reply is given: the
+// classifier, the draft, the side analyses, and the gate's grades and rewrite. Without one, each call is given
+// the cap for its kind of job.
+export async function answerUserQuestion({ question, mode = 'personal', sessionId, history, allowLeadScoring = true, recorded = null, clock = null }) {
   // The conversation step: the number of the visitor's own message. The history also holds the AI's
   // replies, so counting every message ran steps 1, 3, 5 and skipped steps 2 and 4.
   const turn = history.filter(h => h.role === 'user').length + 1;
 
   const { caseType, cases, recalled, remembering } = recorded
     ? { caseType: knownType(recorded.caseType), cases: Array.isArray(recorded.cases) ? recorded.cases : [], recalled: false, remembering: Promise.resolve() }
-    : await findCases(history, question);
+    : await findCases(history, question, clock);
   const recordedDraft = typeof recorded?.draft === 'string' ? recorded.draft : null;
 
   const caseContext = buildCaseContext(cases, { recalled });
@@ -156,29 +158,36 @@ export async function answerUserQuestion({ question, mode = 'personal', sessionI
     { role: 'user', content: question },
   ];
 
+  // The chains the reply is written, graded and rewritten with (model-settings.js), asked for as its job starts.
+  const { answer: answerChain, small: smallChain } = await chains();
+
   const parallelTasks = [
-    // The first draft, unless a recorded draft stands in for it
-    recordedDraft ?? chatCompletionsWithFallback(openai, { models: ANSWER_MODELS, messages, temperature: 0.7, max_tokens: 1000 })
-      .then(completion => completion.choices[0].message.content),
-    turn >= 2 && allowLeadScoring ? sideCall(scoreLead(question, history, caseType, mode)) : Promise.resolve(null),
-    turn >= 3 ? sideCall(analyzeMalpracticeSituation(question, history, cases, caseType, mode)) : Promise.resolve(null),
+    // The first draft, unless a recorded draft stands in for it. The gate records who wrote it; no model wrote a
+    // recorded draft.
+    recordedDraft !== null
+      ? { text: recordedDraft, writtenBy: null }
+      : runJob({ job: 'reply', chain: answerChain, messages, temperature: 0.7, maxTokens: 1000, clock })
+        .then(({ text, provider, model }) => ({ text, writtenBy: { provider, model } })),
+    turn >= 2 && allowLeadScoring ? sideCall(scoreLead(question, history, caseType, mode, { clock })) : Promise.resolve(null),
+    turn >= 3 ? sideCall(analyzeMalpracticeSituation(question, history, cases, caseType, mode, clock)) : Promise.resolve(null),
   ];
 
   const [draft, leadScore, caseAnalysis] = await Promise.all(parallelTasks);
 
   // Gatekeeper & Coach: grade the draft against the rubric; a blocked draft is rewritten once.
-  let answer = draft;
+  let answer = draft.text;
   let evaluation = null;
   try {
     const gated = await evaluateAndRemediateDraft({
-      openai,
-      auxModels: AUX_MODELS,
-      answerModels: ANSWER_MODELS,
+      smallModels: smallChain,
+      answerModels: answerChain,
       messages,
-      draftText: draft,
+      draftText: draft.text,
+      writtenBy: draft.writtenBy,
       turn,
       mode,
       retrievedCases: cases,
+      clock,
     });
     answer = gated.finalText;
     evaluation = gated.evaluation;
@@ -333,8 +342,9 @@ export function normalizeCaseAnalysis(raw) {
   };
 }
 
-async function analyzeMalpracticeSituation(question, history, cases, caseType, mode) {
+async function analyzeMalpracticeSituation(question, history, cases, caseType, mode, clock = null) {
   try {
+    const { small } = await chains();
     const typeName    = CASE_TYPE_NAMES[caseType] || 'Medical Malpractice';
     const conversation = analysisTranscript(history, question);
     const perspective = mode === 'estate' ? 'estate / wrongful death claimant' : 'injured patient';
@@ -345,8 +355,9 @@ async function analyzeMalpracticeSituation(question, history, cases, caseType, m
     // New York law the model may state wrongly (rubrics/ny_malpractice_current_law.json).
     const currentLaw = renderCurrentLawForPrompt();
 
-    const res = await chatCompletionsWithFallback(openai, {
-      models: AUX_MODELS,
+    const res = await runJob({
+      job: 'caseCard',
+      chain: small,
       messages: [{
         role: 'user',
         content: `You are a NYC medical malpractice case analyst evaluating the position of the ${perspective}.
@@ -377,11 +388,12 @@ Rules:
 - weaknesses: 1-2 specific risks, gaps or defenses
 - Use only facts stated in the conversation. Do not invent facts and do not cite court cases`,
       }],
-      response_format: { type: 'json_object' },
-      max_tokens: 400,
+      json: true,
+      maxTokens: 400,
+      clock,
     });
 
-    return normalizeCaseAnalysis(JSON.parse(res.choices[0].message.content));
+    return normalizeCaseAnalysis(JSON.parse(res.text));
   } catch (err) {
     console.error('Case analysis error:', err.message);
     return null;

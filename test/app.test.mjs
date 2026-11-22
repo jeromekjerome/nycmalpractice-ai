@@ -38,10 +38,11 @@ process.env.DAILY_DIGEST ||= 'off';
 process.env.COURTLISTENER_TOKEN ||= 'cl-test-token';
 
 // ─── Offline harness ─────────────────────────────────────────────────────────
-// Every outbound HTTP call the app makes (OpenAI SDK, CourtListener, Neon's HTTP driver) goes
+// Every outbound HTTP call the app makes (OpenAI SDK, Stripe, CourtListener, Neon's HTTP driver) goes
 // through global fetch. Routing it through a swappable function lets the tests below run the
 // real request path end to end without touching the network. It must be installed before
-// server.js is imported, because the OpenAI client captures fetch when it is constructed.
+// server.js is imported, because Stripe's client keeps the fetch it finds when it is made. (The
+// OpenAI adapter's client asks for the global fetch at each call.)
 const realFetch = globalThis.fetch;
 let activeFetch = realFetch;
 globalThis.fetch = (...args) => activeFetch(...args);
@@ -51,7 +52,7 @@ const { default: app } = await import('../server.js');
 // server.js has set providers.js to email the owner when a provider answers 400, and to keep the provider state in its
 // database. Many tests here make a fake provider fail on purpose, and none of them may send mail, so the suite starts
 // with nobody told and no state; the tests of the telling set it themselves (withOperatorMail).
-const { configureProviders } = await import('../providers.js');
+const { configureProviders, replyClock } = await import('../providers.js');
 configureProviders({ tell: null });
 
 // server.js has also given the model settings its database (model-settings.js). The suite starts with none, so that
@@ -71,10 +72,13 @@ async function withModelSettings(options, fn) {
 }
 
 const { clearSearchCache, extractCaseType, searchMalpracticeCases } = await import('../courtlistener.js');
-// The chains the app runs with, read from models.js: a test of what the app calls repeats no model's name.
-const { ANSWER_MODELS, AUX_MODELS, DEFAULTS } = await import('../models.js');
-// The chains the app runs with in these tests, the built-in ones, as the jobs will read them (model-settings.js).
+const { openaiAdapter } = await import('../provider-openai.js');
+// The chains the app runs with in these tests, the built-in ones, as the jobs read them (model-settings.js): a test of
+// what the app calls repeats no model's name. The embedding chain is no setting.
 const { answer: ANSWER_CHAIN, small: SMALL_CHAIN } = await chains();
+const { DEFAULTS } = await import('../models.js');
+const EMBEDDING_CHAIN = DEFAULTS.embedding;
+const { providerOf } = await import('../model-registry.js');
 const { scoreLead } = await import('../auction.js');
 const { CONVERSATION_RETENTION_DAYS } = await import('../retention.js');
 const { CONTACT_CONSENT_TEXT } = await import('../site.js');
@@ -256,6 +260,19 @@ function chatCompletion(content) {
     choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }],
     usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
   });
+}
+
+// What a model job is run with when a stand-in OpenAI client answers it: the app's own OpenAI adapter in front of
+// the client, so that what the client is sent is the request OpenAI would be sent.
+function throughAdapter(client) {
+  return { adapters: { openai: openaiAdapter(client) } };
+}
+
+// The same, for a test that walks a chain of models of every provider: each provider's adapter is the OpenAI one over the
+// same stand-in client, which answers whatever model it is asked, so that the chain is walked as it is in the defaults.
+function throughEveryProvider(client) {
+  const adapter = openaiAdapter(client);
+  return { adapters: { openai: adapter, anthropic: adapter, google: adapter } };
 }
 
 /** Run fn with every outbound request answered by handler(url, init). The local test server passes through. */
@@ -915,7 +932,7 @@ test('searchMalpracticeCases stops sending requests once CourtListener throttles
   assert.equal(requests.length, 1, 'a throttled token was asked again');
 });
 
-test('extractCaseType uses the aux model chain with failover', async () => {
+test('extractCaseType uses the small-job chain with failover', async () => {
   const modelsTried = [];
   const openai = {
     chat: {
@@ -928,17 +945,24 @@ test('extractCaseType uses the aux model chain with failover', async () => {
       },
     },
   };
-  assert.deepEqual(await extractCaseType('My baby was injured during delivery.', openai), { type: 'birth_injury', terms: 'shoulder dystocia delivery' });
+  const { result: classified } = await capturingLogs(() => extractCaseType('My baby was injured during delivery.', throughEveryProvider(openai)));
+  assert.deepEqual(classified, { type: 'birth_injury', terms: 'shoulder dystocia delivery' });
   assert.equal(modelsTried.length, 2);
-  assert.deepEqual(modelsTried, AUX_MODELS.slice(0, 2));
+  assert.deepEqual(modelsTried, SMALL_CHAIN.slice(0, 2));
   assert.notEqual(modelsTried[1], modelsTried[0]);
 
   // Every model failing, or an answer that is not an object, still yields a usable default.
   const fallback = { type: 'other', terms: 'medical malpractice standard of care' };
   const dead = { chat: { completions: { create: async () => { throw Object.assign(new Error('down'), { status: 503 }); } } } };
-  assert.deepEqual(await extractCaseType('anything', dead), fallback);
+  const { result: down } = await capturingLogs(() => extractCaseType('anything', throughAdapter(dead)));
+  assert.deepEqual(down, fallback);
   const listAnswer = { chat: { completions: { create: async () => ({ choices: [{ message: { content: '["dental"]' } }] }) } } };
-  assert.deepEqual(await extractCaseType('anything', listAnswer), fallback);
+  assert.deepEqual(await extractCaseType('anything', throughAdapter(listAnswer)), fallback);
+  // An answer with no text at all is passed over for the next model, and when every model gives none the default
+  // stands as well.
+  const silent = { chat: { completions: { create: async () => ({ choices: [{ message: { content: null } }] }) } } };
+  const { result: nothing } = await capturingLogs(() => extractCaseType('anything', throughAdapter(silent)));
+  assert.deepEqual(nothing, fallback);
 });
 
 test('the case type is decided from everything the visitor has said, not from the two ends of the transcript', async () => {
@@ -976,7 +1000,7 @@ test('the case type is decided from everything the visitor has said, not from th
 
 test('extractCaseType reads a long account whole, and keeps both ends of one too long to send', async () => {
   const seen = [];
-  const openai = { chat: { completions: { create: async request => { seen.push(String(request.messages[0].content).split('Text: ')[1]); return { choices: [{ message: { content: '{"type":"other","terms":"x"}' } }] }; } } } };
+  const openai = throughAdapter({ chat: { completions: { create: async request => { seen.push(String(request.messages[0].content).split('Text: ')[1]); return { choices: [{ message: { content: '{"type":"other","terms":"x"}' } }] }; } } } });
   // 3,000 characters with the deciding fact in the middle: all of it is read.
   const account = `${'a'.repeat(1500)} a sponge was left inside me ${'b'.repeat(1470)}`;
   await extractCaseType(account, openai);
@@ -989,10 +1013,10 @@ test('extractCaseType reads a long account whole, and keeps both ends of one too
   assert.ok(seen[1].length < tooLong.length && seen[1].length <= 4010);
 });
 
-test('scoreLead uses the aux model chain with failover and the current-law notes', async () => {
+test('scoreLead uses the small-job chain with failover and the current-law notes', async () => {
   const modelsTried = [];
   let scoringPrompt;
-  await withOutboundHttp(async (url, init) => {
+  await capturingLogs(() => withOutboundHttp(async (url, init) => {
     const request = JSON.parse(init.body);
     modelsTried.push(request.model);
     scoringPrompt = request.messages[0].content;
@@ -1002,9 +1026,9 @@ test('scoreLead uses the aux model chain with failover and the current-law notes
     const score = await scoreLead('I found out in March.', QUALIFYING_HISTORY, 'misdiagnosis', 'personal');
     assert.equal(score.tier, 'hot');
     assert.equal(score.reserve, 200);
-  });
+  }));
   assert.equal(modelsTried.length, 2);
-  assert.deepEqual(modelsTried, AUX_MODELS.slice(0, 2));
+  assert.deepEqual(modelsTried, SMALL_CHAIN.slice(0, 2));
   assert.match(scoringPrompt, /The Grieving Families Act is not law/);
   assert.match(scoringPrompt, /It did not change medical malpractice law/);
 });
@@ -2450,6 +2474,45 @@ test('POST /api/ask grades the reply, sends the verdict, and saves the full audi
   }
 });
 
+test('the saved evaluation says which provider and model wrote the reply and which graded it, and the browser is told neither', async () => {
+  clearSearchCache();
+  const world = fakeWorld({ answer: `The hospital may have departed from the standard of care. ${DISCLAIMER}` });
+  // A grader that passes every rule, so that the reply is graded by a model and not by code alone.
+  const handler = async (url, init) => {
+    if (url.startsWith('https://api.openai.com/') && promptOf(init).startsWith('You are an uncompromising AI Compliance Gatekeeper')) {
+      return chatCompletion(verdictsFor('personal'));
+    }
+    return world.handler(url, init);
+  };
+  const history = [
+    { role: 'user', content: 'A sponge was left inside me during surgery.' },
+    { role: 'assistant', content: 'I am so sorry. When was the surgery?' },
+    { role: 'user', content: 'Three months ago, at a private hospital.' },
+    { role: 'assistant', content: 'Thank you. How was it found?' },
+  ];
+  const previous = process.env.GATEKEEPER_MODE;
+  process.env.GATEKEEPER_MODE = 'llm';
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(handler, async () => {
+      const { response, body } = await postJson(server.baseUrl, '/api/ask', {
+        question: 'It was found on a scan last week.', mode: 'personal', sessionId: 'sess-written-and-graded', history,
+      });
+      assert.equal(response.status, 200);
+      assert.equal(body.evaluation.turn, 3);
+      assert.equal(body.evaluation.evaluator, 'llm');
+      for (const field of ['writtenBy', 'gradedBy']) assert.equal(field in body.evaluation, false, `the browser was told ${field}`);
+    });
+    const upsert = world.calls.sql.find(call => /^INSERT INTO conversations \(session_id, mode/.test(call.query));
+    const audit = JSON.parse(upsert.params.find(param => typeof param === 'string' && param.includes('"gate_status"')));
+    assert.deepEqual(audit.writtenBy, { provider: 'openai', model: ANSWER_CHAIN[0] });
+    assert.deepEqual(audit.gradedBy, { provider: 'openai', model: SMALL_CHAIN[0] });
+  } finally {
+    if (previous === undefined) delete process.env.GATEKEEPER_MODE; else process.env.GATEKEEPER_MODE = previous;
+    await server.close();
+  }
+});
+
 test('health reports that the gate rubrics load', async () => {
   const server = await startServer(app);
   try {
@@ -3307,7 +3370,7 @@ test('an auction being closed alongside a chat message is finished before an err
   let claimed = false;
   const world = fakeWorld();
   const handler = async (url, init) => {
-    if (url.startsWith('https://api.openai.com/')) return jsonResponse({ error: { message: 'Bad request', type: 'invalid_request_error' } }, 400);   // fails at once, no retries
+    if (url.startsWith('https://api.openai.com/')) return jsonResponse({ error: { message: 'Bad request', type: 'invalid_request_error' } }, 400);   // every model refuses at once, with no retries, so the reply fails
     if (url.endsWith('/sql')) {
       const q = JSON.parse(init.body).query.replace(/\s+/g, ' ').trim();
       if (/^SELECT id FROM auctions WHERE status = 'open' AND closes_at <= NOW\(\)/.test(q)) {
@@ -3320,11 +3383,11 @@ test('an auction being closed alongside a chat message is finished before an err
   };
   const server = await startServer(app);
   try {
-    await withoutMail(() => withOutboundHttp(handler, async () => {
+    await capturingLogs(() => withoutMail(() => withOutboundHttp(handler, async () => {
       const { response } = await postJson(server.baseUrl, '/api/ask', { question: 'Hello.', mode: 'personal', sessionId: 'sess-sweep-error', history: [] });
-      assert.equal(response.status, 500);
+      assert.equal(response.status, 503);
       assert.ok(claimed, 'the reply was sent before the auction close had run');
-    }));
+    })));
   } finally {
     await server.close();
     if (previous === undefined) delete process.env.AUCTION_SWEEP_IN_TESTS;
@@ -3553,33 +3616,349 @@ test('a failure reaches the caller as a plain message, never the internal error 
 
 // ─── A slow reply, and what a reload brings back ──────────────────────────────
 
+// A model request the fake provider takes and never answers. The only way out is the request's own signal, which
+// the reply's clock fires when the call's time runs out. `seen` records the request, and whether it was cut off.
+function neverAnswered(init, seen) {
+  const request = { aborted: false };
+  seen.push(request);
+  return new Promise((_, reject) => {
+    init.signal.addEventListener('abort', () => { request.aborted = true; reject(init.signal.reason); }, { once: true });
+  });
+}
+
+const promptOf = init => String(JSON.parse(init.body).messages?.[0]?.content || '');
+
 test('a reply that takes too long gets a plain "send it again", and nothing from the turn is saved', async () => {
   const world = fakeWorld({ answer: 'A reply that comes too late.' });
-  // The drafting call takes longer than the deadline this test sets.
+  // The drafting call is taken and never answered, and the reply's clock cuts it off at the deadline this test
+  // sets. The deadline leaves the drafting call time to start: with under half a second left, no call is made.
+  const drafts = [];
   const slow = async (url, init) => {
-    if (url.startsWith('https://api.openai.com/') && String(JSON.parse(init.body).messages?.[0]?.content || '').startsWith('You are an expert')) {
-      await new Promise(resolve => setTimeout(resolve, 900));
-    }
+    if (url.startsWith('https://api.openai.com/') && promptOf(init).startsWith('You are an expert')) return neverAnswered(init, drafts);
     return world.handler(url, init);
   };
   const previous = process.env.ASK_REPLY_DEADLINE_MS;
-  process.env.ASK_REPLY_DEADLINE_MS = '300';
+  process.env.ASK_REPLY_DEADLINE_MS = '1500';
   const server = await startServer(app);
   try {
-    await withOutboundHttp(slow, async () => {
+    await capturingLogs(() => withOutboundHttp(slow, async () => {
       const { response, body } = await postJson(server.baseUrl, '/api/ask', { question: 'I was hurt.', mode: 'personal', sessionId: 'sess-slow-reply', history: [] });
       assert.equal(response.status, 503);
       assert.equal(body.retry, true);
       assert.match(body.error, /taking longer than usual/);
       assert.match(body.error, /send it again/);
-      // The late reply finishes in the background; it is still not saved.
-      await new Promise(resolve => setTimeout(resolve, 1500));
-    });
+      // Every reply nobody could give has the same shape, notices included.
+      assert.deepEqual(body.deadlineNotices, []);
+      // The reply model was asked once, and cut off at the deadline, which left no time to ask another.
+      assert.deepEqual(drafts, [{ aborted: true }]);
+      // Nothing is saved afterwards either.
+      await new Promise(resolve => setTimeout(resolve, 300));
+    }));
   } finally {
     if (previous === undefined) delete process.env.ASK_REPLY_DEADLINE_MS; else process.env.ASK_REPLY_DEADLINE_MS = previous;
     await server.close();
   }
   assert.ok(!world.calls.sql.some(call => /^INSERT INTO conversations/.test(call.query)), 'a turn that missed its deadline was saved');
+});
+
+// Every model of every chain answers with a server error: no model can answer the visitor.
+const everyModelFails = world => async (url, init) => {
+  if (url.startsWith('https://api.openai.com/')) return jsonResponse({ error: { message: 'The server had an error.', type: 'server_error' } }, 500);
+  return world.handler(url, init);
+};
+
+test('when every AI model fails, /api/ask says so plainly with a 503, keeps no answer, and still carries the deadline notices the visitor\'s own words trigger', async () => {
+  const world = fakeWorld({ answer: 'Never given.' });
+  resetRateLimits();
+  const server = await startServer(app);
+  try {
+    await capturingLogs(() => withOutboundHttp(everyModelFails(world), async () => {
+      const { response, body } = await postJson(server.baseUrl, '/api/ask', { question: 'I had surgery at Bellevue and they left a sponge inside me.', mode: 'personal', sessionId: 'sess-all-fail', history: [] });
+      assert.equal(response.status, 503, JSON.stringify(body));
+      assert.equal(body.retry, true);
+      assert.equal(body.error, 'The AI service is not answering just now, and your message was not answered. It is still in the box below: please send it again in a minute.');
+      assert.equal('answer' in body, false);
+      // Bellevue is a city hospital: its 90-day notice of claim.
+      assert.deepEqual(body.deadlineNotices, ['public_hospital']);
+    }));
+  } finally {
+    await server.close();
+  }
+  assert.ok(!world.calls.sql.some(call => /^INSERT INTO conversations/.test(call.query)), 'a turn nobody answered was saved');
+  assert.ok(world.calls.sql.some(call => /^INSERT INTO user_interactions/.test(call.query) && call.params.includes('error')), 'the failure was not recorded');
+});
+
+test('a reply nobody can give carries the notices of the stored conversation and the new message, in either mode, without reading the conversation again, and of the new message alone when nothing is stored', async () => {
+  // This app's notices are read from the words alone (deadlines.js), in both modes, with no case type.
+  const history = [{ role: 'user', content: 'My mother had surgery at Bellevue last spring.' }, { role: 'assistant', content: 'I am so sorry. What happened after it?' }];
+  resetRateLimits();
+  const server = await startServer(app);
+  try {
+    for (const [stored, mode, expected] of [
+      [{ mode: 'personal', history }, 'personal', ['public_hospital']],
+      [{ mode: 'estate', history }, 'estate', ['public_hospital']],
+      [null, 'personal', []],
+    ]) {
+      const world = fakeWorld({ answer: 'Never given.', stored });
+      await capturingLogs(() => withOutboundHttp(everyModelFails(world), async () => {
+        const { response, body } = await postJson(server.baseUrl, '/api/ask', { question: 'It was last month.', mode, sessionId: `sess-all-fail-${mode}-${stored ? 'stored' : 'none'}`, history });
+        assert.equal(response.status, 503, JSON.stringify(body));
+        // With nothing stored the page's history is not trusted, and the visitor's own words alone are read.
+        assert.deepEqual(body.deadlineNotices, expected, `${mode} ${stored ? 'stored' : 'none'}`);
+      }));
+      assert.equal(world.calls.sql.filter(call => /^SELECT mode, history FROM conversations/.test(call.query)).length, 1, 'the conversation was read again on the error path');
+    }
+  } finally {
+    await server.close();
+  }
+});
+
+test('a model that answers 400 to every request emails the owner once, with the provider\'s message and no key and nothing the visitor wrote, and the visitor is not shown the provider\'s words', async () => {
+  const world = fakeWorld({ answer: 'Never given.' });
+  const refusing = async (url, init) => {
+    if (url.startsWith('https://api.openai.com/')) {
+      return jsonResponse({ error: { message: 'Unsupported parameter: temperature. Key sk-proj-abcDEF123456wxyz7890.', type: 'invalid_request_error', code: 'unsupported_parameter' } }, 400);
+    }
+    return world.handler(url, init);
+  };
+  resetRateLimits();
+  const server = await startServer(app);
+  try {
+    await withOperatorMail(async sent => {
+      await capturingLogs(() => withOutboundHttp(refusing, async () => {
+        const { response, body } = await postJson(server.baseUrl, '/api/ask', { question: 'My name is Jane Roe and I had surgery at Bellevue.', mode: 'personal', sessionId: 'sess-refused', history: [] });
+        // Every model refused: nothing could answer, so the visitor is told plainly, with the notices their words call for.
+        assert.equal(response.status, 503, JSON.stringify(body));
+        assert.equal(body.retry, true);
+        assert.match(body.error, /not answering just now/);
+        assert.deepEqual(body.deadlineNotices, ['public_hospital']);
+        assert.ok(!JSON.stringify(body).includes('Unsupported parameter'));
+      }));
+      assert.equal(sent.length, 1, 'one email an hour for the provider, however many models and jobs it refused');
+      const html = String(sent[0].html);
+      for (const text of ['openai', 'Job', '400', 'unsupported_parameter', 'Unsupported parameter: temperature.']) assert.ok(html.includes(text), text);
+      assert.ok(!html.includes('sk-proj'), 'a key was emailed');
+      assert.ok(!html.includes('Jane Roe') && !html.includes('Bellevue'), 'a visitor\'s words were emailed');
+    });
+  } finally {
+    await server.close();
+  }
+});
+
+// The spending caps as the site runs them, over the fake database. Each model call is reserved before it is
+// made, and what it cost is recorded after it; both are database round trips. For a job named in `slowJobs` the
+// reservation takes `reserveMs`, and recording a call that failed takes `recordMs`.
+function withCaps(handler, { slowJobs = [], reserveMs = 0, recordMs = 0 } = {}) {
+  let reserved = 0;
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+  return async (url, init) => {
+    if (url.endsWith('/sql')) {
+      const body = JSON.parse(init.body);
+      // The reservation: a lock, then the row that reserves the call, whose first value is the job.
+      if (Array.isArray(body.queries)) {
+        if (slowJobs.includes(body.queries[1]?.params?.[0])) await wait(reserveMs);
+        reserved += 1;
+        return jsonResponse({ results: [EMPTY_ROWS, { fields: [{ name: 'id', dataTypeID: INT }], rows: [[String(reserved)]], command: 'INSERT', rowCount: 1, rowAsArray: true }] });
+      }
+      if (/^UPDATE ai_usage/.test(String(body.query).trim())) {
+        if (body.params?.[0] === 'error') await wait(recordMs);
+        return jsonResponse({ ...EMPTY_ROWS, command: 'UPDATE' });
+      }
+    }
+    return handler(url, init);
+  };
+}
+
+// The settings for a reply whose steps of the gate are cut off at the reply clock's end: a 4-second deadline,
+// whose clock ends a tenth of it, 400 ms, early; the model grader; and the spending caps, as on the site. The
+// deadline is long enough that a stall on a loaded runner does not turn these tests red.
+const SHORT_GATED_REPLY = { ASK_REPLY_DEADLINE_MS: '4000', GATEKEEPER_MODE: 'llm', AI_BUDGET_IN_TESTS: '1' };
+
+test('a grader that hangs with about two seconds of the reply left gives way to the checks in code, and the reply is still served inside the deadline', async () => {
+  const draft = `I am so sorry this happened. When was the surgery? ${DISCLAIMER}`;
+  const world = fakeWorld({ answer: draft });
+  const grades = [];
+  // The grade is cut off at the reply clock's end. Reserving it took 80 ms, and recording that it failed takes
+  // 40 ms more, as database round trips do.
+  const handler = withCaps(async (url, init) => {
+    if (url.startsWith('https://api.openai.com/') && promptOf(init).startsWith('You are an uncompromising AI Compliance Gatekeeper')) return neverAnswered(init, grades);
+    return world.handler(url, init);
+  }, { slowJobs: ['grade'], reserveMs: 80, recordMs: 40 });
+  resetRateLimits();
+  const server = await startServer(app);
+  try {
+    await withSettings(SHORT_GATED_REPLY, () => capturingLogs(() => withOutboundHttp(handler, async () => {
+      const { response, body } = await postJson(server.baseUrl, '/api/ask', { question: 'A sponge was left inside me after surgery.', mode: 'personal', sessionId: 'sess-late-grader', history: [] });
+      // The visitor is served the reply, not told to send the message again.
+      assert.equal(response.status, 200, JSON.stringify(body));
+      assert.equal(body.answer, draft);
+      assert.equal(body.evaluation.evaluator, 'deterministic_fallback');
+      assert.equal(body.evaluation.gate_status, 'PASSED');
+      assert.deepEqual(grades, [{ aborted: true }]);
+    })));
+  } finally {
+    await server.close();
+  }
+});
+
+test('a rewrite that hangs with about two seconds of the reply left gives way to the repairs in code, and the repaired reply is still served inside the deadline', async () => {
+  // A draft the gate blocks for a promise code can strike out.
+  const draft = `I am so sorry this happened. You are guaranteed to receive $100,000 from the hospital. When was the surgery? ${DISCLAIMER}`;
+  const world = fakeWorld({ answer: draft });
+  const rewrites = [];
+  const handler = withCaps(async (url, init) => {
+    const last = String(JSON.parse(init.body).messages?.at(-1)?.content || '');
+    if (url.startsWith('https://api.openai.com/') && last.startsWith('COMPLIANCE GATEKEEPER')) return neverAnswered(init, rewrites);
+    return world.handler(url, init);
+  }, { slowJobs: ['rewrite'], reserveMs: 80, recordMs: 40 });
+  resetRateLimits();
+  const server = await startServer(app);
+  try {
+    await withSettings(SHORT_GATED_REPLY, () => capturingLogs(() => withOutboundHttp(handler, async () => {
+      const { response, body } = await postJson(server.baseUrl, '/api/ask', { question: 'A sponge was left inside me after surgery.', mode: 'personal', sessionId: 'sess-late-rewrite', history: [] });
+      assert.equal(response.status, 200, JSON.stringify(body));
+      // Served with code's repair: the promise is struck out, and the rest of the draft kept.
+      assert.doesNotMatch(body.answer, /guaranteed/);
+      assert.match(body.answer, /When was the surgery\?/);
+      assert.equal(body.evaluation.gate_status, 'PASSED');
+      assert.deepEqual(body.evaluation.attempts.map(attempt => attempt.remediation_method ?? null), [null, 'deterministic']);
+      assert.deepEqual(rewrites, [{ aborted: true }]);
+    })));
+  } finally {
+    await server.close();
+  }
+});
+
+test('a step that is no model call, such as the case-law search, cannot hold a reply past its deadline: the visitor is asked to send the message again', async () => {
+  const world = fakeWorld({ answer: 'Never served.' });
+  let letGo;
+  const held = new Promise(resolve => { letGo = resolve; });
+  const searches = [];
+  // The search takes the request and does not answer until the test lets it go.
+  const handler = async (url, init) => {
+    if (url.startsWith('https://www.courtlistener.com/api/rest/v4/search/')) {
+      searches.push(url);
+      await held;
+      return jsonResponse({ results: [] });
+    }
+    return world.handler(url, init);
+  };
+  // A search another test made is answered from the cache, and would not be asked at all.
+  clearSearchCache();
+  resetRateLimits();
+  const server = await startServer(app);
+  try {
+    await withSettings({ ASK_REPLY_DEADLINE_MS: '600' }, () => capturingLogs(() => withOutboundHttp(handler, async () => {
+      // The search is let go well after the deadline whatever happens, so that a reply held past the deadline
+      // fails this test and does not hang it.
+      const late = setTimeout(letGo, 900);
+      const started = Date.now();
+      const { response, body } = await postJson(server.baseUrl, '/api/ask', { question: 'I was hurt.', mode: 'personal', sessionId: 'sess-slow-search', history: [] });
+      const waited = Date.now() - started;
+      assert.equal(response.status, 503);
+      assert.equal(body.retry, true);
+      assert.match(body.error, /taking longer than usual/);
+      assert.ok(waited < 900, `the visitor waited ${waited} ms`);
+      assert.ok(searches.length > 0, 'the search was never asked');
+      // What is left of the turn ends in the fake world before the test does.
+      await held;
+      await new Promise(resolve => setTimeout(resolve, 100));
+      clearTimeout(late);
+    })));
+  } finally {
+    clearSearchCache();
+    await server.close();
+  }
+  assert.ok(!world.calls.sql.some(call => /^INSERT INTO conversations/.test(call.query)), 'a turn that missed its deadline was saved');
+});
+
+test('a grader that never answers is given up at its limit, and the reply is served graded by code, inside its deadline', async () => {
+  const draft = `I am so sorry this happened. When was the surgery? ${DISCLAIMER}`;
+  const world = fakeWorld({ answer: draft });
+  const grades = [];
+  const handler = async (url, init) => {
+    if (url.startsWith('https://api.openai.com/') && promptOf(init).startsWith('You are an uncompromising AI Compliance Gatekeeper')) return neverAnswered(init, grades);
+    return world.handler(url, init);
+  };
+  const previous = process.env.GATEKEEPER_MODE;
+  process.env.GATEKEEPER_MODE = 'llm';
+  try {
+    // The grade is given 50 ms; every other call, a second.
+    const deadline = 3_000;
+    const started = Date.now();
+    const clock = replyClock({ deadlineAt: started + deadline, limitFor: (model, job) => (job === 'grade' ? 50 : 1_000) });
+    const { result, logs } = await capturingLogs(() => withOutboundHttp(handler, () => answerUserQuestion({
+      question: 'A sponge was left inside me after surgery.', mode: 'personal', sessionId: 'sess-hung-grader', history: [], clock,
+    })));
+    assert.ok(Date.now() - started < deadline, `the reply took ${Date.now() - started} ms`);
+    assert.equal(result.answer, draft);
+    // Graded by code, as when the grader fails: the gate records the grader's failure.
+    assert.equal(result.evaluation.evaluator, 'deterministic_fallback');
+    assert.equal(result.evaluation.gate_status, 'PASSED');
+    // Each OpenAI model of the grader's chain was asked in turn and cut off at its limit: a provider that fails goes last
+    // for the rest of the reply, not out of it, so its chain is walked in order.
+    // The suite has OpenAI's adapter only: a model of another provider has none, and fails as a provider with no key does.
+    const asked = SMALL_CHAIN.filter(model => providerOf(model) === 'openai');
+    assert.equal(result.evaluation.attempts[0].evaluator_error, `No model answered the grade job: ${SMALL_CHAIN.map(model => `${model} (${asked.includes(model) ? 'timeout' : 'auth'})`).join(', ')}.`);
+    assert.deepEqual(grades, asked.map(() => ({ aborted: true })));
+    assert.equal(clock.demoted('openai'), true);
+    assert.ok(logs.includes(`[AI] grade failed on "${SMALL_CHAIN[0]}" (timeout). openai goes last for the rest of this reply.${SMALL_CHAIN.length > 1 ? ' Trying the next model.' : ''}`), logs.join('\n'));
+  } finally {
+    if (previous === undefined) delete process.env.GATEKEEPER_MODE; else process.env.GATEKEEPER_MODE = previous;
+  }
+});
+
+test('when a reply runs short of time its grade gives way before it: a reply whose grade finds 300 ms left is served, graded by code', async () => {
+  const draft = `I am so sorry this happened. When was the surgery? ${DISCLAIMER}`;
+  const world = fakeWorld({ answer: draft });
+  // The reply's clock: 30 seconds, of which the drafting call takes all but 300 ms.
+  const deadlineAt = Date.now() + 30_000;
+  let ahead = 0;
+  const clock = replyClock({ deadlineAt, now: () => Date.now() + ahead });
+  const handler = async (url, init) => {
+    const response = await world.handler(url, init);
+    if (url.startsWith('https://api.openai.com/') && world.calls.openai.at(-1).kind === 'answer') ahead = deadlineAt - Date.now() - 300;
+    return response;
+  };
+  const previous = process.env.GATEKEEPER_MODE;
+  process.env.GATEKEEPER_MODE = 'llm';
+  try {
+    const { result } = await capturingLogs(() => withOutboundHttp(handler, () => answerUserQuestion({
+      question: 'A sponge was left inside me after surgery.', mode: 'personal', sessionId: 'sess-late-grade', history: [], clock,
+    })));
+    assert.equal(result.answer, draft);
+    assert.equal(result.evaluation.evaluator, 'deterministic_fallback');
+    assert.equal(result.evaluation.gate_status, 'PASSED');
+    assert.match(result.evaluation.attempts[0].evaluator_error, /No model answered the grade job: [^ ]+ \(no time left\)\./);
+    // The grader was never asked, and its provider is not to blame for the time.
+    assert.deepEqual(world.calls.openai.map(call => call.kind), ['classify', 'answer']);
+    assert.equal(clock.demoted('openai'), false);
+  } finally {
+    if (previous === undefined) delete process.env.GATEKEEPER_MODE; else process.env.GATEKEEPER_MODE = previous;
+  }
+});
+
+test("every model call of a reply is given the reply's clock: with under half a second of it left, the classifier, the side analyses and the reply ask nothing", async () => {
+  // A patient at step 3 is due a lead score and a case card; a family at step 2, a lead score. A call that was not
+  // given the clock would ask its model, with the cap for its kind.
+  const patient = [
+    { role: 'user', content: 'A sponge was left inside me during surgery.' }, { role: 'assistant', content: 'I am so sorry. When was the surgery?' },
+    { role: 'user', content: 'Three months ago, at a private hospital.' }, { role: 'assistant', content: 'Thank you. How was it found?' },
+  ];
+  const family = [{ role: 'user', content: 'My father died after a missed diagnosis.' }, { role: 'assistant', content: 'I am so sorry for your loss. When did he pass away?' }];
+  for (const [mode, history] of [['personal', patient], ['estate', family]]) {
+    const world = fakeWorld({ answer: 'Never asked for.' });
+    const clock = replyClock({ deadlineAt: Date.now() + 300 });
+    const { result: outcome } = await capturingLogs(() => withOutboundHttp(world.handler, async () => {
+      const failed = await answerUserQuestion({ question: 'It was found on a scan last week.', mode, sessionId: `sess-out-of-time-${mode}`, history, clock })
+        .then(() => null, error => error);
+      // The side analyses run beside the reply, which fails at once: they are let finish before anything is counted.
+      await new Promise(resolve => setTimeout(resolve, 50));
+      return failed;
+    }));
+    assert.equal(outcome?.code, 'ai_unavailable', mode);
+    assert.deepEqual(world.calls.openai.map(call => call.kind), [], mode);
+  }
 });
 
 test('a restored conversation offers the contact form again until it is sent', async () => {
@@ -4245,7 +4624,8 @@ async function withDigest(fn) {
 }
 
 test('a fallback to a reasoning model gets the parameters it takes, and a model that refuses one is passed over', async () => {
-  const { chatCompletionsWithFallback, requestFor, probeChatModelChain } = await import('../openaiModelFailover.js');
+  const { runJob } = await import('../providers.js');
+  const { requestFor } = await import('../provider-openai.js');
   const seen = [];
   const openai = { chat: { completions: { create: async request => {
     seen.push(request);
@@ -4253,11 +4633,11 @@ test('a fallback to a reasoning model gets the parameters it takes, and a model 
     if (request.model === 'gpt-5.4-mini') throw Object.assign(new Error("Unsupported parameter: 'logprobs'"), { status: 400, code: 'unsupported_parameter' });
     return { choices: [{ message: { content: 'ok' } }] };
   } } } };
-  const { result } = await capturingLogs(() => chatCompletionsWithFallback(openai, {
-    models: ['gpt-4o', 'gpt-5.4-mini', 'gpt-4.1'], messages: [{ role: 'user', content: 'hi' }],
-    temperature: 0.7, max_tokens: 1000, response_format: { type: 'json_object' },
-  }));
-  assert.equal(result.choices[0].message.content, 'ok');
+  const { result } = await capturingLogs(() => runJob({
+    job: 'grade', chain: ['gpt-4o', 'gpt-5.4-mini', 'gpt-4.1'], messages: [{ role: 'user', content: 'hi' }],
+    temperature: 0.7, maxTokens: 1000, json: true,
+  }, throughAdapter(openai)));
+  assert.equal(result.text, 'ok');
   assert.deepEqual(seen.map(request => request.model), ['gpt-4o', 'gpt-5.4-mini', 'gpt-4.1']);
   // The reasoning model gets no max_tokens or temperature, room to think, and the rest as written.
   assert.equal(seen[1].max_tokens, undefined);
@@ -4269,13 +4649,16 @@ test('a fallback to a reasoning model gets the parameters it takes, and a model 
   assert.equal(seen[2].temperature, 0.7);
   assert.deepEqual(requestFor('gpt-4.1', { max_tokens: 5 }), { model: 'gpt-4.1', max_tokens: 5 });
 
-  // Any other 400 still ends the chain: the request is wrong, not the model.
-  const refused = { chat: { completions: { create: async () => { throw Object.assign(new Error('bad request'), { status: 400, code: 'invalid_value' }); } } } };
-  await assert.rejects(chatCompletionsWithFallback(refused, { models: ['gpt-4o', 'gpt-4.1'], messages: [] }), /bad request/);
+  // Any other 400 moves the job on as well. When every model refuses the request, the request is wrong, not the
+  // model, and the last refusal is what the caller sees.
+  const refusedBy = [];
+  const refused = { chat: { completions: { create: async request => { refusedBy.push(request.model); throw Object.assign(new Error('bad request'), { status: 400, code: 'invalid_value' }); } } } };
+  await capturingLogs(() => assert.rejects(runJob({ job: 'reply', chain: ['gpt-4o', 'gpt-4.1'], messages: [] }, throughAdapter(refused)), /bad request/));
+  assert.deepEqual(refusedBy, ['gpt-4o', 'gpt-4.1']);
 
   // The health probe sends what a real call would.
   const probed = [];
-  await capturingLogs(() => probeChatModelChain({ chat: { completions: { create: async request => { probed.push(request); return {}; } } } }, ['gpt-5.4-mini']));
+  await capturingLogs(() => runJob({ job: 'health', chain: ['gpt-5.4-mini'] }, throughAdapter({ chat: { completions: { create: async request => { probed.push(request); return {}; } } } })));
   assert.equal(probed[0].max_tokens, undefined);
   assert.equal(probed[0].temperature, undefined);
   assert.ok(probed[0].max_completion_tokens > 1);
@@ -4283,6 +4666,106 @@ test('a fallback to a reasoning model gets the parameters it takes, and a model 
   // The default chains try gpt-4.1 before gpt-5.4-mini.
   for (const file of ['../server.js', '../ask.js', '../auction.js', '../courtlistener.js']) {
     assert.doesNotMatch(readFileSync(new URL(file, import.meta.url), 'utf8'), /'gpt-5\.4-mini,gpt-4\.1'/, file);
+  }
+});
+
+test('/health/models names, for each chain, the first model that answers a ping and the rest, and none for a chain where none answers', async () => {
+  const gone = () => jsonResponse({ error: { message: 'The model does not exist', type: 'invalid_request_error', code: 'model_not_found' } }, 404);
+  // Chains of OpenAI's models only, which the only adapter these tests have can ping one after another.
+  const ANSWER_CHAIN = ['gpt-6.1-terra', 'gpt-6-luna', 'gpt-5.4-mini'];
+  const SMALL_CHAIN = ['gpt-6-luna', 'gpt-6.1-terra', 'gpt-5.4-mini'];
+  const saved = { sqlClient: async () => [{ value: { answer: ANSWER_CHAIN, small: SMALL_CHAIN } }], app: 'nycmalpractice' };
+  const pinged = [];
+  const handler = async (url, init) => {
+    if (!url.startsWith('https://api.openai.com/')) throw new Error(`Unexpected outbound request in test: ${url}`);
+    const { model } = JSON.parse(init.body);
+    pinged.push(model);
+    // No embedding model answers, and the answer chain's first model is gone.
+    if (url === 'https://api.openai.com/v1/embeddings' || model === ANSWER_CHAIN[0]) return gone();
+    return chatCompletion('ok');
+  };
+  const server = await startServer(app);
+  try {
+    const { result: snapshot } = await capturingLogs(() => withModelSettings(saved, () => withOutboundHttp(handler, async () => (await fetch(`${server.baseUrl}/health/models`)).json())));
+    assert.deepEqual(snapshot, {
+      answer: { active: ANSWER_CHAIN[1], fallbacks_available: ANSWER_CHAIN.filter(model => model !== ANSWER_CHAIN[1]) },
+      aux: { active: SMALL_CHAIN[0], fallbacks_available: SMALL_CHAIN.slice(1) },
+      embedding: { active: null, fallbacks_available: EMBEDDING_CHAIN },
+      // With no provider state, as in these tests, every provider that has an adapter is up.
+      providers: { openai: 'up' },
+    });
+    // Each chain was pinged in order until one of its models answered, and no further.
+    assert.deepEqual(pinged.sort(), [ANSWER_CHAIN[0], ANSWER_CHAIN[1], SMALL_CHAIN[0], ...EMBEDDING_CHAIN].sort());
+  } finally {
+    await server.close();
+  }
+});
+
+test('/health/models shows a provider marked down, since when and why, and every provider as up when the provider state cannot be read', async () => {
+  const handler = async url => {
+    if (!url.startsWith('https://api.openai.com/')) throw new Error(`Unexpected outbound request in test: ${url}`);
+    return url.endsWith('/embeddings') ? jsonResponse({ object: 'list', data: [{ object: 'embedding', index: 0, embedding: [0.1] }], model: 'x', usage: { prompt_tokens: 1, total_tokens: 1 } }) : chatCompletion('ok');
+  };
+  const since = '2026-11-21T15:00:00.000Z';
+  const server = await startServer(app);
+  try {
+    for (const [state, expected] of [
+      [{ snapshot: async () => ({ openai: { downSince: since, reason: 'timeout' } }) }, { downSince: since, reason: 'timeout' }],
+      [{ snapshot: async () => { throw new Error('relation "ai_provider_state" does not exist'); } }, 'up'],
+    ]) {
+      configureProviders({ tell: null, state });
+      try {
+        const { result: snapshot } = await capturingLogs(() => withOutboundHttp(handler, async () => (await fetch(`${server.baseUrl}/health/models`)).json()));
+        assert.deepEqual(snapshot.providers, { openai: expected });
+        assert.deepEqual(Object.keys(snapshot), ['answer', 'aux', 'embedding', 'providers']);
+      } finally {
+        configureProviders({ tell: null });
+      }
+    }
+  } finally {
+    await server.close();
+  }
+});
+
+test('a reply waits for what its model calls told the provider state before it is sent: when it is answered, when it is too slow, and when no model can answer', async () => {
+  // A provider state each of whose reports, made when the reply ends, takes `takesMs` to finish, and records when it did.
+  const slowState = takesMs => {
+    const finished = [];
+    const report = what => new Promise(resolve => setTimeout(() => { finished.push({ what, at: Date.now() }); resolve(); }, takesMs));
+    return { finished, isDown: async () => false, ping: async () => true, replyFailed: provider => report(`failed ${provider}`), replySucceeded: provider => report(`answered ${provider}`), snapshot: async () => ({}) };
+  };
+  // The drafting call is taken and never answered, until the reply's clock cuts it off.
+  const draftHangs = world => async (url, init) => {
+    if (url.startsWith('https://api.openai.com/') && promptOf(init).startsWith('You are an expert')) return neverAnswered(init, []);
+    return world.handler(url, init);
+  };
+  // The classifier's answer is told; the reply that is too slow is no failure of the provider's, and is not.
+  const cases = [
+    ['answered', world => world.handler, {}, 200, 200, ['answered openai']],
+    ['too slow', draftHangs, { ASK_REPLY_DEADLINE_MS: '1000' }, 1_200, 503, ['answered openai']],
+    ['no model answers', everyModelFails, {}, 200, 503, ['failed openai']],
+  ];
+  resetRateLimits();
+  const server = await startServer(app);
+  try {
+    for (const [label, route, settings, takesMs, status, reports] of cases) {
+      const state = slowState(takesMs);
+      const world = fakeWorld({ answer: `I am so sorry this happened. When was the surgery? ${DISCLAIMER}` });
+      configureProviders({ tell: null, state });
+      try {
+        await withSettings(settings, () => capturingLogs(() => withOutboundHttp(route(world), async () => {
+          const { response } = await postJson(server.baseUrl, '/api/ask', { question: 'A sponge was left inside me after surgery.', mode: 'personal', sessionId: `sess-provider-state-${label.replace(/ /g, '-')}`, history: [] });
+          const respondedAt = Date.now();
+          assert.equal(response.status, status, label);
+          assert.deepEqual(state.finished.map(entry => entry.what), reports, label);
+          assert.ok(state.finished.every(entry => entry.at <= respondedAt), label);
+        })));
+      } finally {
+        configureProviders({ tell: null });
+      }
+    }
+  } finally {
+    await server.close();
   }
 });
 
@@ -4312,6 +4795,7 @@ test('the site-wide AI cap returns a calm retry response without calling OpenAI'
       assert.equal(body.code, 'ai_budget_exceeded');
       assert.equal(body.retry, true);
       assert.match(body.error, /spending limit/);
+      assert.deepEqual(body.deadlineNotices, []);
     });
     assert.equal(providerCalls, 0);
   } finally {
@@ -4342,7 +4826,7 @@ test('every chat message is recorded with how it ended, and a run of failures te
   try {
     const { logs } = await capturingLogs(() => withoutMail(() => withOutboundHttp(handler, async () => {
       // One failure among ten: recorded, no alert.
-      assert.equal((await postJson(server.baseUrl, '/api/ask', { question: 'I was hurt.', mode: REVIEW_APP.mode, sessionId: 'sess-fail-1', history: [] })).response.status, 500);
+      assert.equal((await postJson(server.baseUrl, '/api/ask', { question: 'I was hurt.', mode: REVIEW_APP.mode, sessionId: 'sess-fail-1', history: [] })).response.status, 503);
       // Three among ten: the operator is told, once.
       failedOfTen = 3;
       await postJson(server.baseUrl, '/api/ask', { question: 'Hello?', mode: REVIEW_APP.mode, sessionId: 'sess-fail-2', history: [] });
@@ -5616,12 +6100,11 @@ test('a visitor cannot hand the server a recorded packet', async () => {
 // ─── The gate's model grader, asked for by a setting ──────────────────────────
 
 // A stand-in OpenAI client for the gate's model path: it answers the grader's requests with `evaluate` and the
-// rewrite's with `remediate`, and keeps what it was asked.
+// rewrite's with `remediate`, and keeps what it was asked. `deps` hands it to the gate, behind the app's own OpenAI
+// adapter.
 function scriptedOpenAI(handlers) {
   const calls = [];
-  return {
-    calls,
-    count: kind => calls.filter(call => call.kind === kind).length,
+  const client = {
     chat: {
       completions: {
         create: async request => {
@@ -5637,14 +6120,18 @@ function scriptedOpenAI(handlers) {
       },
     },
   };
+  return { calls, count: kind => calls.filter(call => call.kind === kind).length, deps: throughAdapter(client) };
 }
 
-// The grader's JSON for a mode's rubric: everything passes except what is listed.
-function verdictsFor(mode, { failed = {} } = {}) {
+// The grader's JSON for a mode's rubric: everything passes except what is listed, failed or violated.
+function verdictsFor(mode, { failed = {}, violated = {} } = {}) {
   const rubric = loadRubric(mode);
   return JSON.stringify({
     required_checks: rubric.required_criteria.map(c => ({ id: c.id, name: c.name, passed: !(c.id in failed), evidence_or_gap: failed[c.id] || 'Satisfied.' })),
-    prohibited_checks: rubric.prohibited_criteria.map(c => ({ id: c.id, name: c.name, violated: false, offending_quote: 'None', remediation_instruction: '' })),
+    prohibited_checks: rubric.prohibited_criteria.map(c => ({
+      id: c.id, name: c.name, violated: c.id in violated,
+      offending_quote: violated[c.id] || 'None', remediation_instruction: c.id in violated ? 'Remove it.' : '',
+    })),
     coaching: 'No changes needed.',
   });
 }
@@ -5658,7 +6145,7 @@ test('gatekeeper: GATEKEEPER_MODE=llm asks the model grader even in a test envir
   const graded = async (over = {}) => {
     const openai = scriptedOpenAI({ evaluate: () => verdictsFor('personal'), remediate: () => 'unused' });
     const { evaluation } = await evaluateAndRemediateDraft({
-      openai, auxModels: ['aux-model'], answerModels: ['answer-model'], messages,
+      deps: openai.deps, smallModels: ['small-model'], answerModels: ['answer-model'], messages,
       draftText: `I am sorry this happened. When was the surgery? ${DISCLAIMER}`, turn: 1, mode: 'personal', retrievedCases: [], ...over,
     });
     return { evaluator: evaluation.evaluator, asked: openai.count('evaluate') };
@@ -5671,9 +6158,10 @@ test('gatekeeper: GATEKEEPER_MODE=llm asks the model grader even in a test envir
     assert.deepEqual(await graded(), { evaluator: 'llm', asked: 1 });
     process.env.GATEKEEPER_MODE = ' LLM ';
     assert.deepEqual(await graded(), { evaluator: 'llm', asked: 1 });
-    // What the caller says outright still decides, and with no client there is no model to ask.
+    // What the caller says outright still decides, and with no grader chain there is no model to ask.
     assert.deepEqual(await graded({ deterministicOnly: true }), { evaluator: 'deterministic', asked: 0 });
     assert.equal((await evaluateAndRemediateDraft({ draftText: `I am sorry this happened. When was the surgery? ${DISCLAIMER}`, turn: 1, mode: 'personal' })).evaluation.evaluator, 'deterministic');
+    assert.deepEqual(await graded({ smallModels: [] }), { evaluator: 'deterministic', asked: 0 });
     process.env.GATEKEEPER_MODE = 'deterministic';
     assert.deepEqual(await graded(), { evaluator: 'deterministic', asked: 0 });
     process.env.GATEKEEPER_MODE = 'something else';
@@ -5681,6 +6169,79 @@ test('gatekeeper: GATEKEEPER_MODE=llm asks the model grader even in a test envir
   } finally {
     if (previous === undefined) delete process.env.GATEKEEPER_MODE; else process.env.GATEKEEPER_MODE = previous;
   }
+});
+
+// A draft that asks for contact details in the chat, which only the model grader can judge (PROH-MM-03).
+const ASKS_FOR_PHONE = 'Please type your phone number here so an attorney can call you.';
+
+test('the gate records which model wrote the reply it serves and which model graded it, and null where no model did', async () => {
+  const drafter = { provider: 'openai', model: 'drafting-model' };
+  const grader = { provider: 'openai', model: 'small-model' };
+  const clean = `I am so sorry this happened. When was the surgery? ${DISCLAIMER}`;
+  const noRewrite = () => { throw new Error('no rewrite should be requested'); };
+  const gate = (openai, over) => evaluateAndRemediateDraft({
+    deps: openai.deps, smallModels: ['small-model'], answerModels: ['answer-model'], messages: [{ role: 'user', content: 'A sponge was left inside me.' }],
+    writtenBy: drafter, turn: 1, mode: 'personal', retrievedCases: [], deterministicOnly: false, ...over,
+  });
+  const by = ({ evaluation }) => [evaluation.writtenBy, evaluation.gradedBy];
+
+  // A draft the grader passes was written by its drafter and graded by the grader.
+  assert.deepEqual(by(await gate(scriptedOpenAI({ evaluate: () => verdictsFor('personal'), remediate: noRewrite }), { draftText: clean })), [drafter, grader]);
+
+  // A draft the grader blocks is rewritten: the rewrite's model wrote what is served, and the grader graded that.
+  const rewritten = await gate(scriptedOpenAI({
+    evaluate: (_request, n) => n === 1 ? verdictsFor('personal', { violated: { 'PROH-MM-03': ASKS_FOR_PHONE } }) : verdictsFor('personal'),
+    remediate: () => clean,
+  }), { draftText: `${ASKS_FOR_PHONE} ${DISCLAIMER}` });
+  assert.equal(rewritten.evaluation.attempts[1].remediation.method, 'llm_rewrite');
+  assert.deepEqual(by(rewritten), [{ provider: 'openai', model: 'answer-model' }, grader]);
+
+  // Only the disclaimer was missing: code appended it to the drafter's text, and the grader's verdicts carried over.
+  const appended = await gate(scriptedOpenAI({ evaluate: () => verdictsFor('personal'), remediate: noRewrite }), { draftText: 'I am so sorry this happened. When was the surgery?' });
+  assert.equal(appended.evaluation.attempts[1].evaluator, 'carried_forward');
+  assert.deepEqual(by(appended), [drafter, grader]);
+
+  // A recorded draft served as it stands was written by no model.
+  assert.deepEqual(by(await gate(scriptedOpenAI({ evaluate: () => verdictsFor('personal'), remediate: noRewrite }), { draftText: clean, writtenBy: null })), [null, grader]);
+
+  // Graded by code, because the gate was told to or because the grader gave nothing usable: graded by no model.
+  const byCode = await gate(scriptedOpenAI({ evaluate: () => verdictsFor('personal'), remediate: noRewrite }), { draftText: clean, deterministicOnly: true });
+  assert.deepEqual([byCode.evaluation.evaluator, ...by(byCode)], ['deterministic', drafter, null]);
+  const { result: down } = await capturingLogs(() => gate(scriptedOpenAI({ evaluate: () => '{}', remediate: noRewrite }), { draftText: clean }));
+  assert.deepEqual([down.evaluation.evaluator, ...by(down)], ['deterministic_fallback', drafter, null]);
+});
+
+test('gatekeeper: when the reply runs short of time the second grade gives way first, then the rewrite, each to what the gate does in code when that step fails', async () => {
+  // The reply's clock: 30 seconds, and a step of the gate that runs long leaves 300 ms of them.
+  const run = (openai, draftText, clock) => capturingLogs(() => evaluateAndRemediateDraft({
+    deps: openai.deps, smallModels: ['small-model'], answerModels: ['answer-model'], messages: [{ role: 'user', content: 'A sponge was left inside me.' }],
+    draftText, turn: 1, mode: 'personal', retrievedCases: [], deterministicOnly: false, clock,
+  }));
+  const blocked = `${ASKS_FOR_PHONE} ${DISCLAIMER}`;
+  const rewritten = `Please type your phone number and your address here. ${DISCLAIMER}`;
+  const verdicts = () => verdictsFor('personal', { violated: { 'PROH-MM-03': ASKS_FOR_PHONE } });
+
+  // The rewrite takes all but 300 ms: the second grade is not asked, and the first grade's finding is kept, as
+  // when the second grade fails.
+  let time = 0;
+  const lateRewrite = scriptedOpenAI({ evaluate: verdicts, remediate: () => { time = 30_000 - 300; return rewritten; } });
+  const { result: second } = await run(lateRewrite, blocked, replyClock({ deadlineAt: 30_000, now: () => time }));
+  assert.deepEqual([lateRewrite.count('evaluate'), lateRewrite.count('remediate')], [1, 1]);
+  assert.equal(second.finalText, rewritten);
+  assert.deepEqual(second.evaluation.attempts.map(attempt => attempt.evaluator), ['llm', 'deterministic_fallback']);
+  assert.match(second.evaluation.attempts[1].evaluator_error, /No model answered the grade job: small-model \(no time left\)/);
+  const carried = second.evaluation.prohibited_checks.find(check => check.id === 'PROH-MM-03');
+  assert.deepEqual([carried.violated, carried.source], [true, 'unresolved']);
+  assert.equal(second.evaluation.gate_status, 'BLOCKED');
+
+  // The first grade takes all but 300 ms: the rewrite is not asked either, and code repairs what it can.
+  time = 0;
+  const lateGrade = scriptedOpenAI({ evaluate: () => { time = 30_000 - 300; return verdicts(); }, remediate: () => rewritten });
+  const { result: first } = await run(lateGrade, blocked, replyClock({ deadlineAt: 30_000, now: () => time }));
+  assert.deepEqual([lateGrade.count('evaluate'), lateGrade.count('remediate')], [1, 0]);
+  assert.equal(first.evaluation.attempts[0].evaluator, 'llm');
+  assert.doesNotMatch(JSON.stringify(first.evaluation.attempts.map(attempt => attempt.remediation?.method)), /llm_rewrite/);
+  assert.match(JSON.stringify(first.evaluation), /No model answered the rewrite job: answer-model \(no time left\)/);
 });
 
 // ─── The model measurement: which job a model call is for ────────────────────
@@ -5727,8 +6288,61 @@ test('the measurement tells each model call by the job it was for', async () => 
   assert.deepEqual([...new Set(world.calls.openai.map(call => call.kind))].sort(), Object.keys(JOBS).sort());
   assert.deepEqual([...SMALL_JOBS, ...REPLY_JOBS].sort(), Object.values(JOBS).sort());
   // The reply and the rewrite go to the answer chain; the rest to the small one.
-  for (const call of world.calls.openai) assert.equal(call.model, (REPLY_JOBS.includes(jobOf(call.request)) ? ANSWER_MODELS : AUX_MODELS)[0], call.kind);
+  for (const call of world.calls.openai) assert.equal(call.model, (REPLY_JOBS.includes(jobOf(call.request)) ? ANSWER_CHAIN : SMALL_CHAIN)[0], call.kind);
   assert.equal(jobOf({}), 'reply');
+});
+
+test('each job asks for its chain as it starts: with chains saved in the settings, the reply and the rewrite go to the saved reply chain, and every other job, the grade included, to the saved small-job chain', async () => {
+  const { jobOf, REPLY_JOBS } = await import('../measure/app.mjs');
+  // Chains that are not the built-in ones, saved after every file of the app was loaded.
+  const saved = { answer: ['gpt-6-luna', 'gpt-6.1-terra'], small: ['gpt-5.4-mini', 'gpt-6-luna'] };
+  assert.notEqual(saved.answer[0], ANSWER_CHAIN[0]);
+  assert.notEqual(saved.small[0], SMALL_CHAIN[0]);
+  const read = [];
+  const sqlClient = async strings => {
+    read.push(strings.join('?').replace(/\s+/g, ' ').trim());
+    return [{ value: saved }];
+  };
+  const world = fakeWorld({ answer: `Thank you. ${DISCLAIMER}`, leadScore: leadScoreOf(84) });
+  // The grader blocks the first draft it sees, so that a rewrite is asked for as well.
+  let gradings = 0;
+  const handler = async (url, init) => {
+    if (url.startsWith('https://api.openai.com/')) {
+      const request = JSON.parse(init.body);
+      if (String(request.messages[0].content).startsWith('You are an uncompromising AI Compliance Gatekeeper')) {
+        world.calls.openai.push({ kind: 'gatekeeperEvaluator', model: request.model, request });
+        return chatCompletion(verdictsFor('personal', (gradings += 1) === 1 ? { failed: { 'REQ-MM-01': 'No assessment yet.' } } : {}));
+      }
+    }
+    return world.handler(url, init);
+  };
+  const previous = process.env.GATEKEEPER_MODE;
+  process.env.GATEKEEPER_MODE = 'llm';
+  try {
+    await capturingLogs(() => withModelSettings({ sqlClient, app: 'nycmalpractice' }, () => withOutboundHttp(handler, async () => {
+      clearSearchCache();
+      const history = [
+        { role: 'user', content: 'A sponge was left inside me.' }, { role: 'assistant', content: 'I am sorry. When was the surgery?' },
+        { role: 'user', content: 'Three months ago.' }, { role: 'assistant', content: 'How was it found?' },
+      ];
+      await answerUserQuestion({ question: 'On a scan last week.', mode: 'personal', sessionId: 'settings-jobs-1', history });
+      // A second reply, for a family, from a recorded packet: the row is not read again for it.
+      await answerUserQuestion({
+        question: 'He died two weeks after the surgery.', mode: 'estate', sessionId: 'settings-jobs-2',
+        history: [{ role: 'user', content: 'My father had heart surgery.' }, { role: 'assistant', content: 'I am so sorry for your loss. What happened?' }],
+        recorded: { caseType: 'surgical_error', cases: [] },
+      });
+    })));
+  } finally {
+    if (previous === undefined) delete process.env.GATEKEEPER_MODE; else process.env.GATEKEEPER_MODE = previous;
+    clearSearchCache();
+  }
+  assert.deepEqual([...new Set(world.calls.openai.map(call => jobOf(call.request)))].sort(), ['caseCard', 'classify', 'grade', 'leadScore', 'reply', 'rewrite']);
+  for (const call of world.calls.openai) assert.equal(call.model, (REPLY_JOBS.includes(jobOf(call.request)) ? saved.answer : saved.small)[0], call.kind);
+  // One read of the row for every job of both replies: the settings keep what they read for a minute.
+  assert.deepEqual(read, ['SELECT value FROM app_settings WHERE key = ?']);
+  // And with the settings given no database again, the jobs are back on the built-in chains.
+  assert.deepEqual(await chains(), { answer: ANSWER_CHAIN, small: SMALL_CHAIN, source: 'defaults', override: null });
 });
 
 // ─── The Models section of the admin page: its three routes ───────────────────

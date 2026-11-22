@@ -38,6 +38,7 @@ As the conversation develops, the AI scores the lead in the background. Qualifie
 
 **Admin**
 - Admin dashboard at `/admin.html` — contact requests (read the conversation, deliver by hand to an approved firm), auctions (cancel a stuck one), leads with refunds and decline reasons, and firms with their activity
+- The Models section: the order of models each job runs with, which providers answer, what has been measured, and a form to change the order
 - Manually send portal links, toggle firm active status, update profiles
 - Protected via `ADMIN_SECRET` header (`x-admin-secret`)
 
@@ -111,7 +112,7 @@ Seven tables in Neon Postgres (separate database from other AntiGravity apps):
 ## Tech Stack
 
 - **Backend:** Node.js / Express (ESM)
-- **AI:** OpenAI gpt-6.1-terra (replies) + gpt-6-luna (classification, lead scoring, case card, grading a reply), each falling back to the other and then to gpt-5.4-mini; chosen by the owner from the measurement in `docs/measurements/` (`measure/chosen.json` records the choice and why, including where a chosen model misses the bar that report sets), set in `models.js`
+- **AI:** OpenAI gpt-6.1-terra (replies) + gpt-6-luna (classification, lead scoring, case card, grading a reply), each falling back to the other and then to gpt-5.4-mini; chosen by the owner from the measurement in `docs/measurements/` (`measure/chosen.json` records the choice and why, including where a chosen model misses the bar that report sets). These are the built-in chains of `models.js`: the chains each job runs with are kept in the database, saved from the admin page and checked before they are saved (`model-settings.js`), and the built-in ones are used until chains are saved and whenever they cannot be read. Every model call goes through `providers.js`, which walks the chain with each model's time limit (`models.js`), the spending caps and the state of each provider; it has adapters for OpenAI, Anthropic and Google, of which only those whose key is set are used. `npm run models:upload` sends the measurements to the site, so that a chain can be checked against them
 - **Case Law:** CourtListener API (NY Supreme Court, Appellate Division — no family court)
 - **Database:** Neon Postgres (`@neondatabase/serverless`)
 - **Payments:** Stripe (subscriptions + per-lead charges + refunds)
@@ -156,7 +157,7 @@ Server runs at `http://localhost:3003`.
 | Variable | Description |
 |---|---|
 | `DATABASE_URL` | Neon Postgres connection string (separate DB from other apps) |
-| `OPENAI_API_KEY` | OpenAI API key |
+| `OPENAI_API_KEY` | OpenAI API key. No setting chooses the models: they are the chains saved from the admin page, with the built-in chains of `models.js` behind them |
 | `COURTLISTENER_TOKEN` | CourtListener API token (optional) |
 | `STRIPE_SECRET_KEY` | Stripe secret key |
 | `STRIPE_PUBLISHABLE_KEY` | Stripe publishable key |
@@ -171,7 +172,7 @@ Server runs at `http://localhost:3003`.
 | `SMTP_PASS` | SMTP password |
 | `APP_URL` | Public app URL (e.g. `https://nycmalpractice.ai`) |
 | `CRON_SECRET` | Bearer token for cron endpoint auth |
-| `ADMIN_SECRET` | Header secret for admin API routes |
+| `ADMIN_SECRET` | Header secret for admin API routes. `ADMIN_SECRET_FOR_UPLOAD` is the admin secret again, in the local `.env` only, for `npm run models:upload` |
 | `NOTIFICATION_EMAIL` | Operator notices: new firms, unplaced leads, declined cards, failed refunds, chat and contact-form failures, failed nightly steps, and a daily summary (`DAILY_DIGEST=off` stops the summary) |
 
 ---

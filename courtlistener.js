@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Jerome W. Dewald. All rights reserved.
 
-import { chatCompletionsWithFallback } from './openaiModelFailover.js';
-import { AUX_MODELS } from './models.js';
+import { runJob } from './providers.js';
+import { chains } from './model-settings.js';
 
 const CL_BASE = 'https://www.courtlistener.com/api/rest/v4';
 
@@ -274,7 +274,9 @@ const CLASSIFIER_FALLBACK = { type: 'other', terms: 'medical malpractice standar
 // a visitor's second message could already pass, and what was cut was the middle of the account.
 const CLASSIFIER_TEXT_LIMIT = 4000;
 
-export async function extractCaseType(text, openai) {
+// `deps` is handed on to runJob (providers.js): tests pass fake adapters. `clock` is the reply's, when the
+// classification is part of one.
+export async function extractCaseType(text, deps = {}, clock = null) {
   // The visitor's messages are passed oldest first, and read whole. Only an account longer than the limit is cut,
   // and then it keeps both ends: the opening says what happened, the latest message what is being asked now.
   const whole = String(text ?? '');
@@ -282,8 +284,10 @@ export async function extractCaseType(text, openai) {
   const excerpt = whole.length > CLASSIFIER_TEXT_LIMIT ? `${whole.slice(0, half)} … ${whole.slice(-half)}` : whole;
 
   try {
-    const res = await chatCompletionsWithFallback(openai, {
-      models: AUX_MODELS,
+    const { small } = await chains();
+    const res = await runJob({
+      job: 'classify',
+      chain: small,
       messages: [{
         role: 'user',
         content: `Classify this NYC malpractice inquiry into one category.
@@ -305,11 +309,12 @@ Respond ONLY with JSON: {"type": "misdiagnosis", "terms": "delayed cancer diagno
 
 Text: ${excerpt}`,
       }],
-      response_format: { type: 'json_object' },
-      max_tokens: 120,
-    });
+      json: true,
+      maxTokens: 120,
+      clock,
+    }, deps);
 
-    const parsed = JSON.parse(res.choices[0].message.content);
+    const parsed = JSON.parse(res.text);
     // The caller reads .type and .terms, so anything that is not an object is no answer.
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : { ...CLASSIFIER_FALLBACK };
   } catch {

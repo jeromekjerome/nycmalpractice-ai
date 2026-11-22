@@ -13,14 +13,12 @@ import { rateLimit } from './rate-limit.js';
 import { alertOperatorOnce, tellOwnerOfProviders, tellOwnerOfModelChains, recordInteraction, deepHealth, runSteps, recordJobRun, reportFailedSteps, sendDailyDigest } from './operations.js';
 import nodemailer from 'nodemailer';
 import { createSubscriptionCheckout, createPortalSession, constructWebhookEvent, getSubscriptionDetails, getCustomerCard, liveSubscription } from './stripe.js';
-import OpenAI from 'openai';
-import { probeAllModelChains } from './openaiModelFailover.js';
-import { configureProviders, providerPing, providerStates, adaptersFor } from './providers.js';
+import { runJob, replyClock, MIN_TIME_LEFT_MS, configureProviders, withoutKeys, providerPing, providerStates, adaptersFor } from './providers.js';
 import { modelWatch } from './model-watch.js';
 import { providerState } from './provider-state.js';
 import { configureModelSettings, chains, measurements, saveChains, recordMeasurements, checkMeasurementRows, KEY_NAMES } from './model-settings.js';
 import { MODELS } from './model-registry.js';
-import { ANSWER_MODELS as answerModels, AUX_MODELS as auxModels, EMBEDDING_MODELS as embeddingModels, DEFAULTS } from './models.js';
+import { DEFAULTS, limitFor, DEFAULT_ASK_REPLY_DEADLINE_MS, replyReserveMs } from './models.js';
 import { APP_URL, APP_ID, CONTACT_CONSENT_TEXT, CONTACT_FORM_FROM_STEP } from './site.js';
 import { mentionsPublicHospital, deadlineNotices } from './deadlines.js';
 import { buildSummaryEmail } from './summary.js';
@@ -49,12 +47,11 @@ async function pingProvider(provider) {
 // request the app sent it. providers.js asks the state before a reply's jobs and tells it how each reply went.
 const stateOfProviders = providerState({ sqlClient: sql, ping: pingProvider, tell: tellOwnerOfProviders });
 configureProviders({ tell: tellOwnerOfProviders, state: stateOfProviders });
-// Each AI call is cut off after 30 seconds and retried once; it could wait 10 minutes.
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 30_000, maxRetries: 1 });
+// What /health/models shows before its first check: the built-in chains. Each check pings the chains in use.
 let modelHealthSnapshot = {
-  answer: { active: answerModels[0] || null, fallbacks_available: answerModels.slice(1) },
-  aux: { active: auxModels[0] || null, fallbacks_available: auxModels.slice(1) },
-  embedding: { active: embeddingModels[0] || null, fallbacks_available: embeddingModels.slice(1) },
+  answer: { active: DEFAULTS.answer[0] || null, fallbacks_available: DEFAULTS.answer.slice(1) },
+  aux: { active: DEFAULTS.small[0] || null, fallbacks_available: DEFAULTS.small.slice(1) },
+  embedding: { active: DEFAULTS.embedding[0] || null, fallbacks_available: DEFAULTS.embedding.slice(1) },
 };
 const MODEL_HEALTH_TTL_MS = Number.parseInt(process.env.MODEL_HEALTH_TTL_MS || '60000', 10);
 let modelHealthLastCheckedAt = 0;
@@ -99,14 +96,16 @@ async function finishBeforeReply(label, work, deadline) {
   return outcome;
 }
 
-// The longest a visitor waits for a reply (45 seconds unless ASK_REPLY_DEADLINE_MS says otherwise). Past it the
-// page is told to send the message again, and keeps it in the box; the host used to cut the request off with
-// its own error page, and the question was lost. The work after the reply (saving the conversation, closing
-// auctions) must also end within REQUEST_BUDGET_MS of the request's start, inside the host's 60-second limit;
-// each step used to get 20 seconds of its own, so a slow reply could run to 80.
-const DEFAULT_ASK_REPLY_DEADLINE_MS = 45_000;
+// The longest a visitor waits for a reply (DEFAULT_ASK_REPLY_DEADLINE_MS in models.js, 45 seconds, unless
+// ASK_REPLY_DEADLINE_MS says otherwise). Past it the page is told to send the message again, and keeps it in the
+// box; the host used to cut the request off with its own error page, and the question was lost. The work after
+// the reply (saving the conversation, closing auctions) must also end within REQUEST_BUDGET_MS of the request's
+// start, inside the host's 60-second limit; each step used to get 20 seconds of its own, so a slow reply could
+// run to 80.
 const REQUEST_BUDGET_MS = 57_000;
 const SLOW_REPLY = 'This is taking longer than usual, and your message was not answered. It is still in the box below: please send it again.';
+
+const AI_NOT_ANSWERING = 'The AI service is not answering just now, and your message was not answered. It is still in the box below: please send it again in a minute.';
 
 // The work's result, or null if it is not done in time. A failure that comes after the deadline is only logged.
 function withinDeadline(work, ms) {
@@ -204,6 +203,14 @@ app.post('/api/ask', limitChat, async (req, res) => {
   const finishBy = () => Math.min(followUpDeadline(), requestStart + REQUEST_BUDGET_MS);
   const closingAuctions = sweepExpiredAuctions();
 
+  // One clock for the whole reply, from the request's start: each model call of the reply is given its own
+  // limit, or what is left of the clock if that is less, and a provider that fails once in the reply goes last
+  // for the rest of it (providers.js). The clock ends its reserve before the deadline, so that a step of the gate
+  // cut off at the clock's end still leaves the gate time to grade the drafted reply by code. withinDeadline
+  // keeps the full deadline, for the work that is no model call.
+  const replyDeadlineMs = Number(process.env.ASK_REPLY_DEADLINE_MS) || DEFAULT_ASK_REPLY_DEADLINE_MS;
+  const clock = replyClock({ deadlineAt: requestStart + replyDeadlineMs - replyReserveMs(replyDeadlineMs), limitFor });
+
   let history;
   let historyTrusted = true;
   let databaseAlert = null;
@@ -221,20 +228,38 @@ app.post('/api/ask', limitChat, async (req, res) => {
   }
   // Every message is recorded with how it ended; a run of failures tells the operator (operations.js).
   const record = (outcome, extra = {}) => recordInteraction({ sessionId, question, mode, outcome, latencyMs: Date.now() - requestStart, ...extra });
+  // A reply nobody could give (too slow, no model answering, a spending cap reached) is always answered the same
+  // way: a 503 that asks the visitor to send the message again, with the deadline notices their own words already
+  // trigger (deadlines.js reads the words alone, in either mode). The page shows them, as it does for a reply.
+  const unanswered = (error, extra = {}) => ({
+    error, ...extra, retry: true,
+    deadlineNotices: deadlineNotices([...history, { role: 'user', content: question }]),
+  });
   const beforeReply = async () => {
     await finishBeforeReply('closing expired auctions', closingAuctions, finishBy());
     if (databaseAlert) await finishBeforeReply('the database alert', databaseAlert, finishBy());
+    // The reply is over: the provider state is told how it went for each provider (providers.js), with the check of a
+    // provider and the email that can follow (provider-state.js).
+    await finishBeforeReply('the provider state', clock.end(), finishBy());
   };
 
   try {
-    const result = await withinDeadline(answerUserQuestion({ question, mode, sessionId, history, allowLeadScoring: historyTrusted }),
-      Number(process.env.ASK_REPLY_DEADLINE_MS) || DEFAULT_ASK_REPLY_DEADLINE_MS);
+    const answering = answerUserQuestion({ question, mode, sessionId, history, allowLeadScoring: historyTrusted, clock }).catch(err => {
+      // The reply's own call was cut off at the deadline, or there was no time left to make it: a reply that
+      // missed its deadline, which the visitor is asked to send again.
+      if (err?.code === 'ai_unavailable' && clock.remaining() < MIN_TIME_LEFT_MS) {
+        console.error('[ask] the reply ran out of time:', err.message);
+        return null;
+      }
+      throw err;
+    });
+    const result = await withinDeadline(answering, replyDeadlineMs);
     if (!result) {
       // Nothing from this turn is saved, so the visitor can simply send it again.
       console.error('[ask] no reply in time; the visitor was asked to send the message again');
       await finishBeforeReply('recording the message', record('slow'), finishBy());
       await beforeReply();
-      return res.status(503).json({ error: SLOW_REPLY, retry: true });
+      return res.status(503).json(unanswered(SLOW_REPLY));
     }
 
     await record('ok', { caseType: result.caseType, gateStatus: result.evaluation?.gate_status || null });
@@ -264,20 +289,21 @@ app.post('/api/ask', limitChat, async (req, res) => {
       deadlineNotice: mentionsPublicHospital(updatedHistory) ? 'public_hospital' : null,
     });
   } catch (err) {
-    console.error('Error in /api/ask:', err);
+    // A 400 that every provider answered carries the provider's own words, which can quote a key: one cleaned, cut line.
+    if (err?.allRefused === true) console.error(`Error in /api/ask: every AI provider refused the request (${err.status ?? 400}): ${withoutKeys(err.message).slice(0, 300)}`);
+    else console.error('Error in /api/ask:', err);
     await finishBeforeReply('recording the message', record('error'), finishBy());
     // An auction being closed alongside this message is finished first: once the reply is sent the function
     // may be suspended, leaving the auction part-way through.
     await beforeReply();
     if (err.code === 'ai_budget_exceeded' || err.code === 'ai_budget_unavailable') {
-      return res.status(503).json({
-        error: err.code === 'ai_budget_exceeded'
-          ? 'The AI service has reached its spending limit. Please try again later.'
-          : 'The AI service is temporarily unavailable. Please try again later.',
-        code: err.code,
-        retry: true,
-      });
+      return res.status(503).json(unanswered(err.code === 'ai_budget_exceeded'
+        ? 'The AI service has reached its spending limit. Please try again later.'
+        : 'The AI service is temporarily unavailable. Please try again later.', { code: err.code }));
     }
+    // Every model of a chain failed, and the reply still had time: the service is not answering.
+    // So does a request every provider refused as malformed (providers.js marks that error): nothing could answer.
+    if (err.code === 'ai_unavailable' || err.allRefused === true) return res.status(503).json(unanswered(AI_NOT_ANSWERING));
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -1180,8 +1206,23 @@ app.get('/health/deep', async (_req, res) => {
 });
 app.get('/health/models', async (_req, res) => {
   await refreshModelHealthSnapshot();
-  res.json(modelHealthSnapshot);
+  // And each provider that has an adapter: 'up', or marked down since when and why (provider-state.js).
+  res.json({ ...modelHealthSnapshot, providers: await providerStates() });
 });
+
+// One chain's part of the health snapshot: the first model that answers a ping, and the rest of the chain. Each
+// ping goes through the spending caps. Whatever stops the chain (no model answered, the cap was reached, an error
+// that is no provider's) leaves it with no model active.
+async function chainHealth(name, chain) {
+  const shape = active => ({ active, fallbacks_available: chain.filter(model => model !== active) });
+  try {
+    return shape((await runJob({ job: 'health', chain })).model);
+  } catch (err) {
+    // A provider's own words can quote a key, so they are cleaned and cut.
+    console.error(`[Health] ${name} model chain has no callable model: ${withoutKeys(err.message).slice(0, 300)}`);
+    return shape(null);
+  }
+}
 
 async function refreshModelHealthSnapshot({ force = false } = {}) {
   const now = Date.now();
@@ -1189,13 +1230,16 @@ async function refreshModelHealthSnapshot({ force = false } = {}) {
   if (!force && isFresh) return modelHealthSnapshot;
   if (modelHealthRefreshPromise) return modelHealthRefreshPromise;
 
-  modelHealthRefreshPromise = probeAllModelChains(openai, {
-    answerModels,
-    auxModels,
-    embeddingModels,
-  })
-    .then((snapshot) => {
-      modelHealthSnapshot = snapshot;
+  // The reply and small-job chains in use (model-settings.js), under the names this page has always given them; the
+  // embedding chain is no setting.
+  modelHealthRefreshPromise = chains()
+    .then(({ answer, small }) => Promise.all([
+      chainHealth('answer', answer),
+      chainHealth('aux', small),
+      chainHealth('embedding', DEFAULTS.embedding),
+    ]))
+    .then(([answer, aux, embedding]) => {
+      modelHealthSnapshot = { answer, aux, embedding };
       modelHealthLastCheckedAt = Date.now();
       console.log('[Health] Model callable check:', JSON.stringify(modelHealthSnapshot));
       return modelHealthSnapshot;

@@ -198,6 +198,33 @@ test('server-side errors surface the generic AI fallback', async ({ page }) => {
   await expect(page.locator('#conversation .msg-user')).toHaveCount(0);
 });
 
+test('when every AI provider fails, the question goes back in the box and the deadline notice is shown', async ({ page }) => {
+  await mockSession(page);
+  await mockCaseTypes(page);
+  await page.route('**/api/ask', route => route.fulfill({
+    status: 503,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      error: 'The AI service is not answering just now, and your message was not answered. It is still in the box below: please send it again in a minute.',
+      retry: true,
+      deadlineNotices: ['public_hospital'],
+    }),
+  }));
+  await page.goto('/');
+  await page.locator('#userInput').fill('I had surgery at Bellevue.');
+  await page.locator('#userInput').press('Enter');
+  await expect(page.locator('#conversation .msg-notice')).toContainText('not answering just now');
+  await expect(page.locator('#userInput')).toHaveValue('I had surgery at Bellevue.');
+  await expect(page.locator('#conversation .msg-user')).toHaveCount(0);
+  // The notice the visitor's own words call for is shown though no reply came, once however often they try again.
+  const notices = page.locator('#conversation .deadline-notice');
+  await expect(notices).toHaveCount(1);
+  await expect(notices).toContainText('a written notice of the claim generally must be filed within 90 days');
+  await page.locator('#userInput').press('Enter');
+  await expect(page.locator('#conversation .msg-notice')).toHaveCount(2);
+  await expect(notices).toHaveCount(1);
+});
+
 
 
 test('the landing page guides claimants and quick-starts a case', async ({ page }) => {

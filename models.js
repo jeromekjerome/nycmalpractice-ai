@@ -61,9 +61,3 @@ export const LIMITS_MS = Object.freeze(Object.fromEntries(Object.entries(limits)
 export function limitFor(model, job) {
   return Object.hasOwn(LIMITS_MS, model) && Object.hasOwn(LIMITS_MS[model], job) ? LIMITS_MS[model][job] : capFor(job);
 }
-
-// The built-in chains under their old names, for the callers that have not yet moved to runJob and the settings
-// (ask.js, auction.js, courtlistener.js, gatekeeper.js and server.js). They go when those callers move.
-export const ANSWER_MODELS = DEFAULTS.answer;
-export const AUX_MODELS = DEFAULTS.small;
-export const EMBEDDING_MODELS = DEFAULTS.embedding;

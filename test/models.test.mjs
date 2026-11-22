@@ -103,10 +103,20 @@ test('the example settings and the readme name no model OpenAI retires, and no s
   }
 });
 
-test('ask.js, auction.js, courtlistener.js and server.js name no model and read models.js', () => {
-  for (const file of ['ask.js', 'auction.js', 'courtlistener.js', 'server.js']) {
-    const source = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
-    assert.doesNotMatch(source, /['"](?:gpt-|text-embedding-)/, `${file} still names a model`);
-    assert.match(source, /from '\.\/models\.js'/, `${file} does not import models.js`);
+test('ask.js, auction.js, courtlistener.js, server.js and operations.js name no model and ask model-settings.js for their chains as each job starts, and the gate and providers.js name none either', () => {
+  const source = file => readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
+  for (const file of ['ask.js', 'auction.js', 'courtlistener.js', 'server.js', 'operations.js', 'gatekeeper.js', 'providers.js', 'model-settings.js']) {
+    assert.doesNotMatch(source(file), /['"](?:gpt-|text-embedding-)/, `${file} still names a model`);
   }
+  for (const file of ['ask.js', 'auction.js', 'courtlistener.js', 'server.js', 'operations.js']) {
+    assert.match(source(file), /import \{[^}]*\bchains\b[^}]*\} from '\.\/model-settings\.js'/, `${file} does not ask model-settings.js for their chains`);
+    assert.match(source(file), /= await chains\(\);/, `${file} does not ask for its chains`);
+  }
+  // The gate and providers.js are given their chains by their callers.
+  for (const file of ['gatekeeper.js', 'providers.js']) {
+    assert.doesNotMatch(source(file), /from '\.\/(?:models|model-settings)\.js'/, `${file} reads chains of its own`);
+  }
+  // The old module that walked the chains is gone, and so are the old names of the chains.
+  assert.equal(existsSync(new URL('../openaiModelFailover.js', import.meta.url)), false, 'openaiModelFailover.js is still there');
+  assert.doesNotMatch(source('models.js'), /\b(?:ANSWER_MODELS|AUX_MODELS|EMBEDDING_MODELS)\b/, 'models.js still exports the old names of the chains');
 });

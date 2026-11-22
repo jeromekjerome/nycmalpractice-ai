@@ -1,20 +1,17 @@
 // Copyright (c) 2026 Jerome W. Dewald. All rights reserved.
 
 import { neon } from '@neondatabase/serverless';
-import OpenAI from 'openai';
 import nodemailer from 'nodemailer';
 import { getActiveFirms, createMagicLink, getFirm, recordDecline, recentDeclineCounts, setFirmCard, claimCardDeclinedNotice, clearCardDeclined } from './firms.js';
 import { chargeCustomer, createRefund, cardsOnFile } from './stripe.js';
-import { chatCompletionsWithFallback } from './openaiModelFailover.js';
-import { AUX_MODELS } from './models.js';
+import { runJob } from './providers.js';
+import { chains } from './model-settings.js';
 import { renderCurrentLawForPrompt } from './gatekeeper.js';
 import { APP_URL, MAX_FIRMS_PER_LEAD, caseTypeLabel } from './site.js';
 import { randomInt } from 'node:crypto';
 import { isDemo, demoMailer } from './demo.js';
 
 const sql    = neon(process.env.DATABASE_URL);
-// Each AI call is cut off after 30 seconds and retried once; it could wait 10 minutes.
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 30_000, maxRetries: 1 });
 
 export const TIER_CONFIG = {
   cold:    { label: 'Cold',    minScore: 55, maxScore: 69, reserve: 25,  auctionHours: 0, color: '#6b7a94' },
@@ -40,13 +37,16 @@ function likelyOutOfTime(mark) {
   return typeof value === 'number' && Number.isFinite(value) && value <= 2;
 }
 
-export async function scoreLead(question, history, caseType, mode) {
+// `clock` is the reply's (replyClock in providers.js), when the score is part of one.
+export async function scoreLead(question, history, caseType, mode, { clock = null } = {}) {
   try {
+    const { small } = await chains();
     const histText = history.map(h => `${h.role}: ${h.content}`).join('\n');
     const currentLaw = renderCurrentLawForPrompt();
 
-    const res = await chatCompletionsWithFallback(openai, {
-      models: AUX_MODELS,
+    const res = await runJob({
+      job: 'leadScore',
+      chain: small,
       messages: [{
         role: 'user',
         content: `You are a NYC medical malpractice case evaluator for a law firm lead marketplace.
@@ -79,11 +79,12 @@ A viable lead requires score >= 55 AND confidence >= 0.65.
 sol_status: score 10 if well within SOL, lower if approaching deadline, 1-2 if likely expired.
 Malpractice SOL in NY: 2.5 years from act/omission or the end of continuous treatment (personal); 2 years from death (wrongful death). A missed cancer diagnosis runs from discovery (Lavern's Law, 7-year outer limit); a foreign object allows 1 year from discovery. Public hospitals: 90-day notice of claim and 1 year and 90 days to sue.`,
       }],
-      response_format: { type: 'json_object' },
-      max_tokens: 300,
+      json: true,
+      maxTokens: 300,
+      clock,
     });
 
-    const result = JSON.parse(res.choices[0].message.content);
+    const result = JSON.parse(res.text);
     // A rejection is a verdict, kept apart from no verdict at all (null: an error or a timeout): it clears a
     // qualifying score from an earlier message, which used to go to firms even after the claim fell apart.
     const rejected = !result.viable || result.confidence < 0.65 || result.score < 55;

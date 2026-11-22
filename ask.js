@@ -3,7 +3,7 @@
 import { searchMalpracticeCases, extractCaseType } from './courtlistener.js';
 import { rememberCases, recallCases } from './case-memory.js';
 import { scoreLead } from './auction.js';
-import { runJob } from './providers.js';
+import { runJob, withoutKeys } from './providers.js';
 import { chains } from './model-settings.js';
 import { evaluateAndRemediateDraft, renderRubricForPrompt, renderCurrentLawForPrompt } from './gatekeeper.js';
 
@@ -342,7 +342,7 @@ export function normalizeCaseAnalysis(raw) {
   };
 }
 
-async function analyzeMalpracticeSituation(question, history, cases, caseType, mode, clock = null) {
+export async function analyzeMalpracticeSituation(question, history, cases, caseType, mode, clock = null) {
   try {
     const { small } = await chains();
     const typeName    = CASE_TYPE_NAMES[caseType] || 'Medical Malpractice';
@@ -395,7 +395,8 @@ Rules:
 
     return normalizeCaseAnalysis(JSON.parse(res.text));
   } catch (err) {
-    console.error('Case analysis error:', err.message);
+    // A provider's own message can quote back the key it was sent.
+    console.error('Case analysis error:', withoutKeys(err?.message ?? err));
     return null;
   }
 }

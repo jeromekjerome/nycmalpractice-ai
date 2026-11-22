@@ -6205,6 +6205,63 @@ function verdictsFor(mode, { failed = {}, violated = {} } = {}) {
   });
 }
 
+// A provider's 400 that quotes back, masked, the key it was sent, as OpenAI's does. When every model of a chain answers
+// so, the 400 itself is what the caller is given.
+const QUOTED_KEY = 'sk-proj-********************************abcd';
+const keyQuoted = () => Object.assign(new Error(`Incorrect API key provided: ${QUOTED_KEY}. You can find your API key at https://platform.openai.com/account/api-keys.`), { status: 400 });
+
+test("gatekeeper: a provider's error that quotes a key is kept with the audit and logged without it, the grader's and the rewrite's", async () => {
+  const messages = [
+    { role: 'system', content: 'You are an expert NYC medical malpractice advisor.' },
+    { role: 'user', content: 'A sponge was left inside me during surgery.' },
+  ];
+  // The grader is refused: the reply is graded by code, and the grader's error is kept with the audit, which a firm's lead
+  // page shows.
+  const graderRefused = { chat: { completions: { create: async () => { throw keyQuoted(); } } } };
+  const { result: graded, logs: gradeLogs } = await capturingLogs(() => evaluateAndRemediateDraft({
+    deps: throughAdapter(graderRefused), smallModels: ['small-model'], answerModels: ['answer-model'], messages,
+    draftText: `I am so sorry this happened. When was the surgery? ${DISCLAIMER}`, turn: 1, mode: 'personal', retrievedCases: [], deterministicOnly: false,
+  }));
+  assert.equal(graded.evaluation.evaluator, 'deterministic_fallback');
+  assert.match(graded.evaluation.attempts[0].evaluator_error, /^Incorrect API key provided: \[key withheld\]\. You can find your API key/);
+
+  // The rewrite is refused: nothing code can repair is left, the reply is served blocked, and the rewrite's error is kept
+  // in the audit's notes.
+  const verdict = 'You will definitely win this case';
+  const rewriteRefused = scriptedOpenAI({
+    evaluate: (_request, n) => (n === 1 ? verdictsFor('personal', { violated: { 'PROH-MM-02': verdict } }) : verdictsFor('personal')),
+    remediate: () => { throw keyQuoted(); },
+  });
+  const { result: rewritten, logs: rewriteLogs } = await capturingLogs(() => evaluateAndRemediateDraft({
+    deps: rewriteRefused.deps, smallModels: ['small-model'], answerModels: ['answer-model'], messages,
+    draftText: `${verdict}. ${DISCLAIMER}`, turn: 1, mode: 'personal', retrievedCases: [], deterministicOnly: false,
+  }));
+  assert.equal(rewriteRefused.count('remediate'), 1);
+  assert.match(JSON.stringify(rewritten.evaluation), /\(LLM rewrite failed: Incorrect API key provided: \[key withheld\]\. You can find your API key/);
+
+  // Neither the audits nor the lines logged hold the key, and the lines say what failed.
+  for (const text of [JSON.stringify(graded.evaluation), JSON.stringify(rewritten.evaluation), ...gradeLogs, ...rewriteLogs]) {
+    assert.ok(!text.includes(QUOTED_KEY) && !/sk-proj-/.test(text), text);
+  }
+  assert.ok(gradeLogs.some(line => /LLM evaluator unavailable.*\[key withheld\]/.test(line)), gradeLogs.join('\n'));
+  assert.ok(rewriteLogs.some(line => /LLM remediation failed.*\[key withheld\]/.test(line)), rewriteLogs.join('\n'));
+});
+
+test("the case card's failure is logged without a key the provider's error quotes", async () => {
+  const { analyzeMalpracticeSituation } = await import('../ask.js');
+  // A small-job chain of OpenAI's models only, so that every model of it answers the 400 and the 400 itself is what fails.
+  const saved = { sqlClient: async () => [{ value: { answer: ['gpt-6.1-terra'], small: ['gpt-6-luna'] } }], app: 'nycmalpractice' };
+  const { result, logs } = await capturingLogs(() => withModelSettings(saved, () => withOutboundHttp(async url => {
+    if (!url.startsWith('https://api.openai.com/')) throw new Error(`Unexpected outbound request in test: ${url}`);
+    return jsonResponse({ error: { message: keyQuoted().message, type: 'invalid_request_error', code: 'invalid_api_key' } }, 400);
+  }, () => analyzeMalpracticeSituation('It was found on a scan last week.', [{ role: 'user', content: 'A sponge was left inside me.' }], [], 'surgical_error', 'personal'))));
+  assert.equal(result, null);
+  const line = logs.find(text => text.startsWith('Case analysis error:'));
+  assert.ok(line, logs.join('\n'));
+  assert.match(line, /\[key withheld\]/);
+  assert.ok(!line.includes(QUOTED_KEY) && !/sk-proj-/.test(line), line);
+});
+
 test('gatekeeper: GATEKEEPER_MODE=llm asks the model grader even in a test environment, and nothing else does', async () => {
   const messages = [
     { role: 'system', content: 'You are an expert NYC medical malpractice advisor.' },

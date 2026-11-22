@@ -174,6 +174,31 @@ test('the leading system messages become one system text, and consecutive messag
   assert.ok(!('system' in client.sent[1].body));
 });
 
+test("a conversation that begins with the assistant's turn is sent to Claude beginning with the user's, as the Messages API needs: the assistant's turns before the user's first are left out, and an ordinary conversation is sent as it is", async () => {
+  // The history the page sends, used when the stored conversation cannot be read, can begin with the assistant's turn:
+  // cut to its last forty messages, or sent wrong.
+  const client = fakeClient();
+  const call = messages => anthropicAdapter(client).call({ model: 'claude-haiku-5-5', entry: entryFor('claude-haiku-5-5'), job: 'reply', system: 'You answer plainly.', messages, maxTokens: 10 });
+  await call([
+    { role: 'system', content: 'Instructions.' },
+    { role: 'assistant', content: 'An earlier reply, whose question the history no longer holds.' },
+    { role: 'assistant', content: 'And another.' },
+    { role: 'user', content: 'My question' },
+    { role: 'assistant', content: 'My answer' },
+    { role: 'user', content: 'My next question' },
+  ]);
+  assert.equal(client.sent[0].body.system, 'You answer plainly.\n\nInstructions.');
+  assert.deepEqual(client.sent[0].body.messages, [
+    { role: 'user', content: 'My question' },
+    { role: 'assistant', content: 'My answer' },
+    { role: 'user', content: 'My next question' },
+  ]);
+  // A conversation that begins with the user's turn is sent as it is.
+  const ordinary = [{ role: 'user', content: 'One' }, { role: 'assistant', content: 'Two' }, { role: 'user', content: 'Three' }];
+  await call(ordinary);
+  assert.deepEqual(client.sent[1].body.messages, ordinary);
+});
+
 test('the signal is handed to the SDK, and with a model the registry does not know no effort is asked', async () => {
   const client = fakeClient();
   const signal = new AbortController().signal;

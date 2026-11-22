@@ -40,12 +40,14 @@ function effortFor(entry, job) {
 }
 
 // What a job's messages become. The Messages API takes the system text apart, and a conversation of user and
-// assistant turns that ends with the user's: a request that ends with the assistant's turn is a prefill, which the
-// current models refuse. The callers write OpenAI-style messages, in which a system message may come anywhere. The
-// leading run of them (and the `system` given apart) is the top-level system text. One that comes after the
-// conversation has begun, such as the instruction the gate puts after a blocked draft, becomes a user turn with the
-// same words. Consecutive turns of one role are joined into one, with a blank line between, so that the turns
-// alternate. No word of any prompt changes.
+// assistant turns that begins with the user's and ends with the user's: its first message must be the user's, and a
+// request that ends with the assistant's turn is a prefill, which the current models refuse. The callers write
+// OpenAI-style messages, in which a system message may come anywhere. The leading run of them (and the `system` given
+// apart) is the top-level system text. One that comes after the conversation has begun, such as the instruction the
+// gate puts after a blocked draft, becomes a user turn with the same words. Consecutive turns of one role are joined
+// into one, with a blank line between, so that the turns alternate. No word of any prompt changes, but for one case:
+// the assistant's turns before the user's first are left out. A conversation can begin so only when it is the
+// history the page sent (used when the stored conversation cannot be read), cut to its last messages or sent wrong.
 export function messagesFor({ system, messages }) {
   const leading = system ? [String(system)] : [];
   const turns = [];
@@ -61,6 +63,7 @@ export function messagesFor({ system, messages }) {
     if (last?.role === as && typeof last.content === 'string' && typeof content === 'string') last.content = `${last.content}\n\n${content}`;
     else turns.push({ role: as, content });
   }
+  while (turns[0]?.role === 'assistant') turns.shift();
   return { ...(leading.length ? { system: leading.join('\n\n') } : {}), messages: turns };
 }
 

@@ -17,6 +17,7 @@
 import { readFileSync } from 'fs';
 import { auditDraftCitations, flagUnanchoredCitations, textOutsideCitations, VERIFY_PLACEHOLDER } from './citator.js';
 import { runJob } from './providers.js';
+import { withoutKeys } from './without-keys.js';
 import {
   RUBRIC_FILES, CURRENT_LAW_FILE, SERVICE_DESCRIPTION, DEFAULT_HUMAN_VERIFICATION_CHECKLIST, DEFAULT_GATE_TARGETS, normalizeMode,
 } from './gate-config.js';
@@ -66,8 +67,10 @@ function criteriaOf(rubric) {
   };
 }
 
+// An error's words as the gate keeps them in its audit and logs them, with nothing shaped like a key: a provider's own
+// message can quote back the key it was sent, and the audit reaches a firm's lead page. Cleaned before it is cut short.
 function errorText(err) {
-  return typeof err?.message === 'string' && err.message ? err.message : String(err);
+  return withoutKeys(typeof err?.message === 'string' && err.message ? err.message : String(err));
 }
 
 function findDeterministicCriterion(rubric, mode, type) {

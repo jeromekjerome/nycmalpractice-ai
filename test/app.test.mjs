@@ -507,6 +507,7 @@ test('POST /api/ask saves the conversation and the lead score before it replies,
         });
         assert.equal(response.status, 200);
         assert.equal(body.leadTier, 'hot');
+        assert.doesNotMatch(JSON.stringify(body), /scoredBy/, 'the visitor was told which model scored the lead');
         assert.equal(body.contactForm, false, 'the contact form was offered before the referral step');
         // Checked at the moment the reply arrives, with no waiting.
         assert.ok(slow.finished.includes('conversation'), 'the conversation was not saved before the reply');
@@ -515,6 +516,8 @@ test('POST /api/ask saves the conversation and the lead score before it replies,
       const kept = JSON.parse(upsert.params.find(param => typeof param === 'string' && param.startsWith('{"viable"')));
       assert.equal(kept.tier, 'hot');
       assert.ok(kept.scoredAt, 'the score is kept with the time it was given');
+      // And with the provider and model that gave it: the tier sets the price, and the fallback scorers differ.
+      assert.deepEqual(kept.scoredBy, { provider: 'openai', model: SMALL_CHAIN[0] });
       assert.ok(!world.calls.sql.some(call => /INSERT INTO auctions|FROM firms WHERE active/.test(call.query)), 'a lead went to firms without the visitor asking');
     } finally {
       await server.close();
@@ -701,8 +704,10 @@ test('POST /api/contact checks the name, the phone number and the consent', asyn
 
 test('POST /api/contact with consent hands the lead off with the contact details before it replies', async () => {
   await withoutMail(async () => {
-    // A hot lead opens an auction; the winner will see the details.
-    const hot = contactWorld({ leadScore: { ...leadScoreOf(84), tier: 'hot', reserve: 200, scoredAt: '2026-11-14T09:59:00Z' } });
+    // A hot lead opens an auction; the winner will see the details. The score on record names the model that gave it,
+    // which no firm is shown.
+    const scoredBy = { provider: 'anthropic', model: 'claude-haiku-5-5' };
+    const hot = contactWorld({ leadScore: { ...leadScoreOf(84), tier: 'hot', reserve: 200, scoredAt: '2026-11-14T09:59:00Z', scoredBy } });
     const slowHot = slowFollowUpWorld(hot, 120);
     let server = await startServer(app);
     try {
@@ -727,9 +732,11 @@ test('POST /api/contact with consent hands the lead off with the contact details
     // The firm also gets the gate's audit of the last reply, for its supervising attorney, as the privacy policy says.
     assert.deepEqual(auction.evaluation, GATE_AUDIT);
     assert.match(readFileSync(new URL('../public/privacy.html', import.meta.url), 'utf8'), /the firm receives our automated check of the AI's last reply/);
+    // Nothing the auction keeps for the firms says which model scored the lead.
+    assert.doesNotMatch(JSON.stringify(hot.calls.sql.filter(call => /INSERT INTO auctions/.test(call.query)).map(call => call.params)), /scoredBy|claude-haiku/);
 
     // A cold lead goes to each matching firm, and the lead row keeps what the firm bought.
-    const cold = contactWorld({ leadScore: { ...leadScoreOf(60), tier: 'cold', reserve: 25 }, firms: [{ id: 7, name: 'Test Firm', email: 'firm@example.test', customer: 'cus_7', card: 'pm_7' }] });
+    const cold = contactWorld({ leadScore: { ...leadScoreOf(60), tier: 'cold', reserve: 25, scoredBy }, firms: [{ id: 7, name: 'Test Firm', email: 'firm@example.test', customer: 'cus_7', card: 'pm_7' }] });
     server = await startServer(app);
     try {
       await withOutboundHttp(cold.handler, async () => {
@@ -742,6 +749,7 @@ test('POST /api/contact with consent hands the lead off with the contact details
     const lead = leadDataOf(cold.calls.sql.find(call => /^INSERT INTO leads/.test(call.query)));
     assert.equal(lead.contact.phone, '5551234567');
     assert.equal(lead.score, 60);
+    assert.doesNotMatch(JSON.stringify(cold.calls.sql.filter(call => /INSERT INTO leads/.test(call.query)).map(call => call.params)), /scoredBy|claude-haiku/);
   });
 });
 
@@ -2986,10 +2994,26 @@ test('a later rejection clears an earlier qualifying score, so the contact form 
   const { scoreLead } = await import('../auction.js');
   const verdict = await withOutboundHttp(async () => chatCompletion(JSON.stringify({ viable: false, score: 20, confidence: 0.9 })),
     () => scoreLead('Actually I ran the red light myself.', history, REVIEW_APP.caseType, REVIEW_APP.mode));
-  assert.deepEqual(verdict, { viable: false, score: 20, confidence: 0.9 });
+  assert.deepEqual(verdict, { viable: false, score: 20, confidence: 0.9, scoredBy: { provider: 'openai', model: SMALL_CHAIN[0] } });
   const none = await capturingLogs(() => withOutboundHttp(async () => jsonResponse({ error: { message: 'The request failed.', type: 'invalid_request_error' } }, 400),
     () => scoreLead('More facts.', history, REVIEW_APP.caseType, REVIEW_APP.mode)));
   assert.equal(none.result, null, 'an outage was read as a rejection');
+});
+
+test("the lead scorer's failure is logged without a key the provider's error quotes", async () => {
+  const { scoreLead } = await import('../auction.js');
+  // A small-job chain of OpenAI's models only, so that every model of it answers the 400 and the 400 itself is what fails.
+  const saved = { sqlClient: async () => [{ value: { answer: ['gpt-6.1-terra'], small: ['gpt-6-luna'] } }], app: REVIEW_APP.appId };
+  const quoted = 'sk-proj-********************************abcd';
+  const { result, logs } = await capturingLogs(() => withModelSettings(saved, () => withOutboundHttp(async url => {
+    if (!url.startsWith('https://api.openai.com/')) throw new Error(`Unexpected outbound request in test: ${url}`);
+    return jsonResponse({ error: { message: `Incorrect API key provided: ${quoted}.`, type: 'invalid_request_error', code: 'invalid_api_key' } }, 400);
+  }, () => scoreLead('It happened last week.', [{ role: 'user', content: 'Something went wrong.' }], REVIEW_APP.caseType, REVIEW_APP.mode))));
+  assert.equal(result, null);
+  const line = logs.find(text => text.startsWith('scoreLead error:'));
+  assert.ok(line, logs.join('\n'));
+  assert.match(line, /\[key withheld\]/);
+  assert.ok(!line.includes(quoted) && !/sk-proj-/.test(line), line);
 });
 
 test('a claim the scorer marks as likely out of time is never a lead, whatever its total', async () => {
@@ -3006,7 +3030,7 @@ test('a claim the scorer marks as likely out of time is never a lead, whatever i
 
   for (const value of [1, 2, '1', ' 2 ', 0]) {
     const { result, logs } = await verdictFor(answered(value));
-    assert.deepEqual(result, { viable: false, score: 63, confidence: 0.75 }, `a time-limit mark of ${JSON.stringify(value)}`);
+    assert.deepEqual(result, { viable: false, score: 63, confidence: 0.75, scoredBy: { provider: 'openai', model: SMALL_CHAIN[0] } }, `a time-limit mark of ${JSON.stringify(value)}`);
     assert.equal(overrides(logs), 1, 'overruling the model is logged, once');
   }
   // Any other mark leaves the verdict to the total, as before. So does a mark that is missing or is not a number.
@@ -3019,7 +3043,7 @@ test('a claim the scorer marks as likely out of time is never a lead, whatever i
   assert.equal(noMarks.result.tier, 'cold');
   // A claim the model itself rejected is rejected as before, and nothing was overruled.
   const rejected = await verdictFor({ ...answered(1), viable: false });
-  assert.deepEqual(rejected.result, { viable: false, score: 63, confidence: 0.75 });
+  assert.deepEqual(rejected.result, { viable: false, score: 63, confidence: 0.75, scoredBy: { provider: 'openai', model: SMALL_CHAIN[0] } });
   assert.equal(overrides(rejected.logs), 0);
 
   // On the visitor's path no lead tier comes back, and a qualifying score kept from an earlier message is
@@ -5082,6 +5106,48 @@ test('the daily summary names the models the override let in that have no measur
   assert.ok(summaries[1].includes(`<p>The model chains were saved under the override (by owner, ${newYork} New York time) with gpt-6.2-sol as a reply model, which has no measurement on record. This is repeated in each daily summary until it has one.</p>`), summaries[1]);
   assert.doesNotMatch(summaries[2], /override/);
   for (const summary of summaries) assert.match(summary, /the last 24 hours/);
+});
+
+test("the daily summary gives the day's replies by the model that wrote them, says plainly when any was written by a model other than the first of the reply chain, and goes out without the line when it cannot be read", async () => {
+  const { sendDailyDigest } = await import('../operations.js');
+  // The replies of the last 24 hours as ai_usage holds them, by model; 'broken' makes the query fail. The reply chain in
+  // force is the built-in one, whose first model is ANSWER_CHAIN[0].
+  let replies = [[ANSWER_CHAIN[0], 41]];
+  const queries = [];
+  const handler = async (url, init) => {
+    if (!url.endsWith('/sql')) throw new Error(`Unexpected outbound request in test: ${url}`);
+    const query = JSON.parse(init.body).query.replace(/\s+/g, ' ').trim();
+    queries.push(query);
+    if (/FROM ai_usage WHERE created_at > NOW\(\) - INTERVAL '24 hours' AND operation = 'reply' AND status = 'ok' GROUP BY model/.test(query)) {
+      if (replies === 'broken') return jsonResponse({ message: 'relation "ai_usage" does not exist', code: '42P01' }, 400);
+      return rowsResponse([['model', TEXT], ['replies', INT]], replies.map(([model, count]) => [model, String(count)]));
+    }
+    return jsonResponse(EMPTY_ROWS);
+  };
+  const summaries = [];
+  const { logs } = await capturingLogs(() => withDigest(() => withOperatorMail(async sent => {
+    await withOutboundHttp(handler, async () => {
+      await sendDailyDigest();
+      replies = [[ANSWER_CHAIN[0], 38], ['claude-haiku-5-5', 3]];
+      await sendDailyDigest();
+      replies = 'broken';
+      await sendDailyDigest();
+    });
+    summaries.push(...sent.map(mail => String(mail.html)));
+  })));
+  assert.equal(summaries.length, 3);
+  // The line, with its counts. Every reply by the first of the reply chain: nothing more to say.
+  assert.ok(summaries[0].includes(`<p>Replies by the model that wrote them: ${ANSWER_CHAIN[0]} 41.</p>`), summaries[0]);
+  assert.doesNotMatch(summaries[0], /other than/);
+  // A day with replies by a fallback says so.
+  assert.ok(summaries[1].includes(`<p>Replies by the model that wrote them: ${ANSWER_CHAIN[0]} 38, claude-haiku-5-5 3.</p>`), summaries[1]);
+  assert.ok(summaries[1].includes(`<p><strong>3 of the 41 replies were written by a model other than ${ANSWER_CHAIN[0]}, the first of the reply chain</strong>: claude-haiku-5-5 3.</p>`), summaries[1]);
+  // A query that fails costs the line only: the rest of the summary goes out as it was.
+  assert.doesNotMatch(summaries[2], /Replies by the model/);
+  for (const line of ['the last 24 hours', 'Chat messages', 'Estimated AI spend', 'The nightly job ran every step.']) assert.ok(summaries[2].includes(line), line);
+  assert.ok(logs.some(line => /The replies by model could not be read/.test(line)), logs.join('\n'));
+  // The line's query is one of its own, so that it fails alone.
+  assert.ok(queries.some(query => /^SELECT \(SELECT count\(\*\) FROM user_interactions/.test(query) && !/operation = 'reply'/.test(query)), queries.join('\n'));
 });
 
 test("the site sets providers.js to tell the owner through one telling, of a provider's 400 and of a provider marked down or back up, and keeps the provider state in its own database", () => {

@@ -270,7 +270,9 @@ app.post('/api/ask', limitChat, async (req, res) => {
     const updatedHistory = [...history, { role: 'user', content: question }, { role: 'assistant', content: result.answer }];
     // A qualifying lead score is kept with the conversation. The lead goes to firms only from
     // /api/contact, once the visitor has given contact details and agreed to be contacted. A rejection clears an
-    // earlier score; no verdict (an error or a timeout) leaves it as it was.
+    // earlier score; no verdict (an error or a timeout) leaves it as it was. The score is kept with when it was given
+    // and which provider and model gave it (scoredBy), which the firms' pages and emails, and the visitor, are not
+    // shown: they are given the score's fields by name.
     const verdict = result.leadScore;
     const leadScore = verdict?.tier ? { ...verdict, scoredAt: new Date().toISOString() } : null;
     const clearLeadScore = verdict?.viable === false;

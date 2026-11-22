@@ -168,6 +168,37 @@ function overrideLine({ overriddenBy, overriddenOn, models }) {
     `which ${models.length > 1 ? 'have' : 'has'} no measurement on record. This is repeated in each daily summary until ${models.length > 1 ? 'each has' : 'it has'} one.</p>`;
 }
 
+// The daily summary's line on the day's replies, by the model that wrote them (ai_usage: each reply job that came back
+// through the caps), and a plain word when any was written by a model other than the first of the reply chain in
+// force. No email tells of that: a provider is marked down only when it answers nothing in a reply, so while another
+// of its jobs answers, its main reply model can fail every time and Claude write every reply. A query of its own, so
+// that when it fails the summary goes out without this line alone.
+async function repliesByModel() {
+  try {
+    const [rows, { answer }] = await Promise.all([
+      sql`
+        SELECT model, count(*)::int AS replies FROM ai_usage
+        WHERE created_at > NOW() - INTERVAL '24 hours' AND operation = 'reply' AND status = 'ok'
+        GROUP BY model ORDER BY replies DESC, model`,
+      chains(),
+    ]);
+    return { rows: rows.map(row => ({ model: String(row.model), replies: Number(row.replies) || 0 })), first: answer[0] };
+  } catch (err) {
+    console.error('[digest] The replies by model could not be read, so the summary goes without them:', withoutKeys(err?.message ?? err));
+    return null;
+  }
+}
+
+function repliesLine({ rows, first }) {
+  const counted = list => list.map(row => `${escapeHtml(row.model)} ${row.replies}`).join(', ');
+  if (!rows.length) return '<p>Replies by the model that wrote them: none.</p>';
+  const others = rows.filter(row => row.model !== first);
+  const total = rows.reduce((sum, row) => sum + row.replies, 0);
+  const byOthers = others.reduce((sum, row) => sum + row.replies, 0);
+  return `<p>Replies by the model that wrote them: ${counted(rows)}.</p>` +
+    (others.length ? `<p><strong>${byOthers} of the ${total} replies were written by a model other than ${escapeHtml(first)}, the first of the reply chain</strong>: ${counted(others)}.</p>` : '');
+}
+
 // ─── /health/deep ─────────────────────────────────────────────────────────────
 // The newest columns the code needs: a deploy whose database changes were not made fails the check. The provider state
 // (provider-state.js) and the model settings (model-settings.js) work without their tables, on every provider up and
@@ -260,6 +291,8 @@ export async function sendDailyDigest({ failed = [] } = {}) {
          AND NOT EXISTS (SELECT 1 FROM auctions a WHERE a.session_id = c.session_id AND a.status IN ('open', 'closing')))::int AS unplaced`;
   // Never fails: a settings table that cannot be read names no override.
   const override = await unmeasuredOverride();
+  // Never fails: a query that cannot be read leaves its line out.
+  const replies = await repliesByModel();
   const row = (label, value) => `<tr><td style="color:#666;padding:4px 12px 4px 0">${label}</td><td><strong>${escapeHtml(value ?? 0)}</strong></td></tr>`;
   const html = `
     <div style="font-family:sans-serif;max-width:600px">
@@ -278,6 +311,7 @@ export async function sendDailyDigest({ failed = [] } = {}) {
         ${row('Requests no firm holds (last 7 days)', day?.unplaced)}
       </table>
       ${day?.unplaced ? `<p>Deliver waiting requests by hand from the <a href="${escapeHtml(APP_URL)}/admin.html">admin page</a>.</p>` : ''}
+      ${replies ? repliesLine(replies) : ''}
       ${override ? overrideLine(override) : ''}
       <p>${failed.length ? `The nightly job had ${failed.length} failed step${failed.length === 1 ? '' : 's'}: ${failed.map(f => escapeHtml(f.step)).join(', ')}.` : 'The nightly job ran every step.'}</p>
     </div>`;

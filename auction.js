@@ -4,7 +4,7 @@ import { neon } from '@neondatabase/serverless';
 import nodemailer from 'nodemailer';
 import { getActiveFirms, createMagicLink, getFirm, recordDecline, recentDeclineCounts, setFirmCard, claimCardDeclinedNotice, clearCardDeclined } from './firms.js';
 import { chargeCustomer, createRefund, cardsOnFile } from './stripe.js';
-import { runJob } from './providers.js';
+import { runJob, withoutKeys } from './providers.js';
 import { chains } from './model-settings.js';
 import { renderCurrentLawForPrompt } from './gatekeeper.js';
 import { APP_URL, MAX_FIRMS_PER_LEAD, caseTypeLabel } from './site.js';
@@ -92,13 +92,17 @@ Malpractice SOL in NY: 2.5 years from act/omission or the end of continuous trea
     if (outOfTime && !rejected) {
       console.log(`[lead] not a lead: the scorer marked the time limit ${result.dimensions.sol_status} of 10 (likely out of time) and still called the claim viable at ${result.score}`);
     }
+    // The provider and model that gave the verdict, kept with a qualifying score (server.js): the tier sets the price,
+    // and the fallback scorers differ. No firm and no visitor is shown it.
+    const scoredBy = { provider: res.provider, model: res.model };
     if (rejected || outOfTime) {
-      return { viable: false, score: Number(result.score) || 0, confidence: Number(result.confidence) || 0 };
+      return { viable: false, score: Number(result.score) || 0, confidence: Number(result.confidence) || 0, scoredBy };
     }
     const tier = getTier(result.score);
-    return { ...result, tier, reserve: TIER_CONFIG[tier].reserve };
+    return { ...result, tier, reserve: TIER_CONFIG[tier].reserve, scoredBy };
   } catch (err) {
-    console.error('scoreLead error:', err.message);
+    // A provider's own message can quote back the key it was sent.
+    console.error('scoreLead error:', withoutKeys(err?.message ?? err));
     return null;
   }
 }

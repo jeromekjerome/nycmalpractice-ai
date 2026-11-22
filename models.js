@@ -13,16 +13,17 @@
 // that setting: they are used until chains are saved, and whenever the saved ones cannot be read or name a model
 // the registry no longer has. The embedding chain is no setting: the health check alone uses it.
 //
-// The answer and small defaults are the owner's choice of 21 November 2026, made from the measurement in
+// The answer and small defaults are the owner's choice of 22 November 2026, made from the measurement in
 // docs/measurements/ and written down, with the reasons, in measure/chosen.json; test/models.test.mjs holds the
-// three together.
-// They replaced gpt-4o and gpt-4o-mini (fallbacks gpt-4.1 and gpt-4.1-mini), which OpenAI shuts down on
+// three together. Each chain is OpenAI's model, then Anthropic's, then Google's, so that a provider that fails
+// leaves the next one to answer.
+// The first models replaced gpt-4o and gpt-4o-mini (fallbacks gpt-4.1 and gpt-4.1-mini), which OpenAI shuts down on
 // 14 January 2027. To change a model, measure it first (npm run models:measure) and record the new choice.
 import { capFor } from './providers.js';
 
 export const DEFAULTS = Object.freeze({
-  answer: Object.freeze(['gpt-6.1-terra', 'gpt-6-luna', 'gpt-5.4-mini']),
-  small: Object.freeze(['gpt-6-luna', 'gpt-6.1-terra', 'gpt-5.4-mini']),
+  answer: Object.freeze(['gpt-6.1-terra', 'claude-haiku-5-5', 'gemini-3.5-flash-lite']),
+  small: Object.freeze(['gpt-6-luna', 'claude-haiku-5-5', 'gemini-3.5-flash-lite']),
   embedding: Object.freeze(['text-embedding-3-small', 'text-embedding-3-large']),
 });
 

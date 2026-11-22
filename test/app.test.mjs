@@ -1016,7 +1016,11 @@ test('extractCaseType reads a long account whole, and keeps both ends of one too
 test('scoreLead uses the small-job chain with failover and the current-law notes', async () => {
   const modelsTried = [];
   let scoringPrompt;
-  await capturingLogs(() => withOutboundHttp(async (url, init) => {
+  // A small-job chain of OpenAI's models, saved, which the only adapter these tests have can walk from one model to the
+  // next (the built-in chain's second model is Claude's: a failover to it is shown with the second provider's tests).
+  const small = ['gpt-6-luna', 'gpt-6.1-terra'];
+  const saved = { sqlClient: async () => [{ value: { answer: ['gpt-6.1-terra'], small } }], app: 'nycmalpractice' };
+  await capturingLogs(() => withModelSettings(saved, () => withOutboundHttp(async (url, init) => {
     const request = JSON.parse(init.body);
     modelsTried.push(request.model);
     scoringPrompt = request.messages[0].content;
@@ -1026,9 +1030,9 @@ test('scoreLead uses the small-job chain with failover and the current-law notes
     const score = await scoreLead('I found out in March.', QUALIFYING_HISTORY, 'misdiagnosis', 'personal');
     assert.equal(score.tier, 'hot');
     assert.equal(score.reserve, 200);
-  }));
+  })));
   assert.equal(modelsTried.length, 2);
-  assert.deepEqual(modelsTried, SMALL_CHAIN.slice(0, 2));
+  assert.deepEqual(modelsTried, small);
   assert.match(scoringPrompt, /The Grieving Families Act is not law/);
   assert.match(scoringPrompt, /It did not change medical malpractice law/);
 });
@@ -3961,6 +3965,57 @@ test("every model call of a reply is given the reply's clock: with under half a 
   }
 });
 
+// A reply made by the app's own wiring with Claude's adapter registered, in a process of its own
+// (test/second-provider.child.mjs): this process keeps ANTHROPIC_API_KEY empty, and providers.js makes its adapters once.
+// The child gets this process's made-up settings, a made-up Anthropic key and no mail login, runs in an empty folder,
+// answers every outbound request itself, and prints one line, RESULT and its findings as JSON.
+const SECOND_PROVIDER_CHILD = fileURLToPath(new URL('./second-provider.child.mjs', import.meta.url));
+function inSecondProviderChild(scenario, settings = {}) {
+  const folder = mkdtempSync(join(tmpdir(), 'second-provider-'));
+  try {
+    const env = { ...process.env, ANTHROPIC_API_KEY: 'test-anthropic-key', GEMINI_API_KEY: '', ...settings };
+    delete env.SMTP_USER;
+    const child = spawnSync(process.execPath, [SECOND_PROVIDER_CHILD, scenario], { cwd: folder, env, encoding: 'utf8', timeout: 60_000 });
+    const line = String(child.stdout ?? '').split(/\r?\n/).find(text => text.startsWith('RESULT '));
+    assert.ok(child.status === 0 && line, `the child failed (status ${child.status}):\n${child.stdout}\n${child.stderr}`);
+    return JSON.parse(line.slice('RESULT '.length));
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+}
+
+test('with the built-in chains, a hung OpenAI costs a reply one limit, and Claude answers the rest of the reply', () => {
+  // Claude is second in both built-in chains.
+  assert.equal(providerOf(SMALL_CHAIN[1]), 'anthropic');
+  assert.equal(providerOf(ANSWER_CHAIN[1]), 'anthropic');
+  // A connection to OpenAI opens and never answers. The classifier, the reply's first model call, is cut off at its
+  // limit (300 ms here); OpenAI then goes last for the rest of the reply, and Claude classifies and writes the reply
+  // without anything waiting on OpenAI again. The gate grades by code, as in the suite.
+  const outcome = inSecondProviderChild('hung-openai', { GATEKEEPER_MODE: 'deterministic' });
+  assert.deepEqual(outcome.asked, [
+    { provider: 'openai', model: SMALL_CHAIN[0], job: 'classify', aborted: true },
+    { provider: 'anthropic', model: SMALL_CHAIN[1], job: 'classify', aborted: false },
+    { provider: 'anthropic', model: ANSWER_CHAIN[1], job: 'reply', aborted: false },
+  ]);
+  assert.deepEqual(outcome.writtenBy, { provider: 'anthropic', model: ANSWER_CHAIN[1] });
+  assert.match(outcome.answer, /When was the surgery\?/);
+  assert.equal(outcome.demoted, true);
+  assert.ok(outcome.ms < 5_000, `the reply took ${outcome.ms} ms`);
+});
+
+test('a reply written by one provider and graded by another names both in the saved evaluation, and the browser is told neither', () => {
+  // OpenAI classifies and writes the reply; its grader answers with a server error, and Claude, next in the built-in
+  // small-job chain, grades the reply. The conversation is saved with the gate's audit.
+  const outcome = inSecondProviderChild('mixed-provenance', { GATEKEEPER_MODE: 'llm' });
+  assert.equal(outcome.status, 200);
+  assert.equal(outcome.evaluation.evaluator, 'llm');
+  assert.equal(outcome.evaluation.gate_status, 'PASSED');
+  for (const field of ['writtenBy', 'gradedBy']) assert.equal(field in outcome.evaluation, false, `the browser was told ${field}`);
+  assert.deepEqual(outcome.writtenBy, { provider: 'openai', model: ANSWER_CHAIN[0] });
+  assert.deepEqual(outcome.gradedBy, { provider: 'anthropic', model: SMALL_CHAIN[1] });
+  assert.deepEqual(outcome.asked.filter(call => call.job === 'grade').map(call => `${call.provider} ${call.model}`), [`openai ${SMALL_CHAIN[0]}`, `anthropic ${SMALL_CHAIN[1]}`]);
+});
+
 test('a restored conversation offers the contact form again until it is sent', async () => {
   const exchange = n => Array.from({ length: n }, (_, i) => [
     { role: 'user', content: 'Message ' + (i + 1) },
@@ -5058,15 +5113,15 @@ test('the owner is emailed when a provider is marked down, with since when, why 
   const { tellOwnerOfProviders } = await import('../operations.js');
   const since = new Date(Date.now() - 7 * 60_000 - 10_000).toISOString();
   const newYork = new Date(since).toLocaleString('en-US', { timeZone: 'America/New_York', dateStyle: 'medium', timeStyle: 'short' });
-  // This app's built-in chains are every one OpenAI's.
-  assert.ok([...DEFAULTS.answer, ...DEFAULTS.small].every(model => /^gpt-/.test(model)));
+  // Chains that are every one OpenAI's (saved, as the built-in chains name three providers).
+  const onlyOpenAI = { sqlClient: async () => [{ value: { answer: ['gpt-6.1-terra'], small: ['gpt-6-luna'] } }], app: 'nycmalpractice' };
   await withOperatorMail(async sent => {
-    await capturingLogs(async () => {
+    await capturingLogs(() => withModelSettings(onlyOpenAI, async () => {
       await tellOwnerOfProviders({ kind: 'down', provider: 'openai', reason: 'timeout', since });
       // A provider that is in no chain: every chain has another provider to answer from.
       await tellOwnerOfProviders({ kind: 'down', provider: 'alpha-test', reason: 'quota', since });
       await tellOwnerOfProviders({ kind: 'up', provider: 'openai', reason: 'timeout', since });
-    });
+    }));
     assert.equal(sent.length, 3);
     const [down, elsewhere, up] = sent.map(mail => ({ subject: mail.subject, html: String(mail.html) }));
     assert.equal(down.subject, 'NYCMalpractice.ai: openai is marked down');
@@ -5081,10 +5136,9 @@ test('the owner is emailed when a provider is marked down, with since when, why 
     assert.ok(up.html.includes(`openai answered again, and is no longer marked down. It was marked down for 7 minutes, since ${newYork} New York time, because it did not answer in time.`), up.html);
     for (const mail of [down, elsewhere, up]) assert.doesNotMatch(mail.html, /undefined|null|NaN|Invalid Date/);
   });
-  // Chains saved with another provider behind OpenAI in each: the app answers from it meanwhile.
-  const mixed = { sqlClient: async () => [{ value: { answer: ['gpt-6.1-terra', 'claude-haiku-5-5'], small: ['gpt-6-luna', 'claude-haiku-5-5'] } }], app: 'nycmalpractice' };
+  // The built-in chains each have another provider behind OpenAI.
   await withOperatorMail(async sent => {
-    await capturingLogs(() => withModelSettings(mixed, () => tellOwnerOfProviders({ kind: 'down', provider: 'openai', reason: 'timeout', since })));
+    await capturingLogs(() => tellOwnerOfProviders({ kind: 'down', provider: 'openai', reason: 'timeout', since }));
     assert.equal(sent.length, 1);
     assert.ok(String(sent[0].html).includes('The app is answering from the next provider in each chain. It asks openai only after the others'), String(sent[0].html));
     assert.doesNotMatch(String(sent[0].html), /No chain has another provider/);

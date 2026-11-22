@@ -9,12 +9,13 @@ import { hasPrice } from '../ai-budget.js';
 import { capFor } from '../providers.js';
 import { SMALL_JOBS, REPLY_JOBS } from '../measure/app.mjs';
 import { chains, modelSettings } from '../model-settings.js';
+import { providerOf } from '../model-registry.js';
 import { DEFAULTS, LIMITS_MS, limitFor, DEFAULT_ASK_REPLY_DEADLINE_MS, replyReserveMs } from '../models.js';
 
 test('the built-in chains come from one place, and with no chains saved they are the ones every job runs with', async () => {
   assert.deepEqual(DEFAULTS, {
-    answer: ['gpt-6.1-terra', 'gpt-6-luna', 'gpt-5.4-mini'],
-    small: ['gpt-6-luna', 'gpt-6.1-terra', 'gpt-5.4-mini'],
+    answer: ['gpt-6.1-terra', 'claude-haiku-5-5', 'gemini-3.5-flash-lite'],
+    small: ['gpt-6-luna', 'claude-haiku-5-5', 'gemini-3.5-flash-lite'],
     embedding: ['text-embedding-3-small', 'text-embedding-3-large'],
   });
   assert.ok(Object.isFrozen(DEFAULTS) && Object.values(DEFAULTS).every(Object.isFrozen));
@@ -134,4 +135,49 @@ test('ask.js, auction.js, courtlistener.js, server.js and operations.js name no 
   // The old module that walked the chains is gone, and so are the old names of the chains.
   assert.equal(existsSync(new URL('../openaiModelFailover.js', import.meta.url)), false, 'openaiModelFailover.js is still there');
   assert.doesNotMatch(source('models.js'), /\b(?:ANSWER_MODELS|AUX_MODELS|EMBEDDING_MODELS)\b/, 'models.js still exports the old names of the chains');
+});
+
+// The names the privacy page gives each provider, as the label of its entry under "Third-Party Services".
+const PROVIDER_NAMES = { openai: 'OpenAI', anthropic: 'Anthropic', google: 'Google' };
+
+// The entries of the privacy page's list of third-party services, as { label, text, links }, from the page's HTML.
+function serviceEntries(html) {
+  const list = html.split('<h2>Third-Party Services</h2>')[1]?.split('</ul>')[0] ?? '';
+  return [...list.matchAll(/<li>\s*<strong>([^<]+)<\/strong>([\s\S]*?)<\/li>/g)].map(([, label, rest]) => ({
+    label: label.trim(),
+    text: rest.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(),
+    links: [...rest.matchAll(/href="(https:\/\/[^"]+)"/g)].map(([, href]) => href),
+  }));
+}
+
+// The providers the page names as AI processors: an entry whose label is the provider's name (a note in brackets
+// after it is allowed), says the visitor's conversation goes to it, and links to its privacy policy. Google Fonts
+// is another service, and its entry names Google without being the AI provider's.
+function namedProviders(html) {
+  return Object.entries(PROVIDER_NAMES)
+    .filter(([, name]) => serviceEntries(html).some(entry => entry.label.replace(/\s*\(.*\)$/, '') === name && /conversation/i.test(entry.text) && entry.links.length > 0))
+    .map(([provider]) => provider);
+}
+
+test('the privacy page names, among its AI processors, the provider of every model in the default chains', () => {
+  const page = readFileSync(new URL('../public/privacy.html', import.meta.url), 'utf8');
+  const wanted = new Set([...DEFAULTS.answer, ...DEFAULTS.small].map(model => providerOf(model)));
+  assert.ok(wanted.size > 0 && [...wanted].every(provider => provider in PROVIDER_NAMES), `a default model has a provider the page has no name for: ${[...wanted]}`);
+  const named = namedProviders(page);
+  for (const provider of wanted) {
+    assert.ok(named.includes(provider), `the default chains send visitors' conversations to ${PROVIDER_NAMES[provider]}, which the privacy page does not name among its AI processors`);
+  }
+});
+
+test("the privacy page's check does not take Google Fonts for Google, or a mention for an entry, or an entry that does not say what is sent", () => {
+  const entry = (label, body) => `<h2>Third-Party Services</h2><ul><li><strong>${label}</strong> ${body}</li></ul>`;
+  const fonts = entry('Google Fonts', 'Supplies the typefaces. See <a href="https://policies.google.com/privacy">Google\'s Privacy Policy</a>.');
+  assert.deepEqual(namedProviders(fonts), []);
+  assert.deepEqual(namedProviders(entry('Anthropic', 'Gets your conversation. See <a href="https://www.anthropic.com/legal/privacy">its policy</a>.')), ['anthropic']);
+  assert.deepEqual(namedProviders(entry('Google (Gemini)', 'Gets your conversation. See <a href="https://policies.google.com/privacy">its policy</a>.')), ['google']);
+  assert.deepEqual(namedProviders(entry('Anthropic', 'Gets your conversation, with no policy to read.')), []);
+  assert.deepEqual(namedProviders(entry('Anthropic', 'Gets what you type. See <a href="https://www.anthropic.com/legal/privacy">its policy</a>.')), []);
+  assert.deepEqual(namedProviders('<h2>Other</h2><ul><li><strong>OpenAI</strong> your conversation <a href="https://openai.com/privacy">x</a></li></ul>'), []);
+  // This page's entries before the second provider: a label with its colon, and the policy's address as plain text.
+  assert.deepEqual(namedProviders(entry('OpenAI:', 'Your conversation messages are sent to OpenAI. Its privacy policy applies: openai.com/privacy')), []);
 });

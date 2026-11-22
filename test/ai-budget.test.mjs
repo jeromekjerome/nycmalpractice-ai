@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from './runner.mjs';
-import { chatCompletionsWithFallback } from '../openaiModelFailover.js';
+import { runJob } from '../providers.js';
+import { openaiAdapter } from '../provider-openai.js';
 import { estimateAiCost, runWithAiBudget } from '../ai-budget.js';
 
 function budgetWorld({ inserted = true, fail = false } = {}) {
@@ -58,9 +59,8 @@ test('AI budget exhaustion and database failures prevent provider calls without 
   assert.equal(providerCalls, 0);
 
   const budget = async () => { throw Object.assign(new Error('cap reached'), { code: 'ai_budget_exceeded' }); };
-  await assert.rejects(chatCompletionsWithFallback({ chat: { completions: { create: async () => { providerCalls += 1; } } } }, {
-    models: ['gpt-4o', 'gpt-4.1'], messages: [],
-  }, { budget }), /cap reached/);
+  const adapters = { openai: openaiAdapter({ chat: { completions: { create: async () => { providerCalls += 1; } } } }) };
+  await assert.rejects(runJob({ job: 'reply', chain: ['gpt-4o', 'gpt-4.1'], messages: [] }, { adapters, budget }), /cap reached/);
   assert.equal(providerCalls, 0);
 });
 
@@ -75,4 +75,17 @@ test('AI usage recording preserves the original provider error and never stores 
   assert.equal(update.params[3], 0);
   assert.equal(update.params[4], 'provider_error');
   assert.ok(calls.every(call => !call.params.some(value => String(value).includes('private facts'))));
+});
+
+test('AI usage recording reads inputTokens and outputTokens, and still reads the OpenAI names', async () => {
+  const recorded = async usage => {
+    const { sql, calls } = budgetWorld();
+    await runWithAiBudget({
+      operation: 'answer-draft', model: 'gpt-4o', request: { messages: [] }, execute: async () => ({ usage }),
+    }, { sqlClient: sql, enabled: true });
+    return calls.find(call => /^UPDATE ai_usage/.test(call.query)).params;
+  };
+  assert.deepEqual(await recorded({ inputTokens: 300, outputTokens: 70 }), ['ok', 300, 70, estimateAiCost('gpt-4o', 300, 70), null, 42]);
+  assert.deepEqual(await recorded({ prompt_tokens: 40, completion_tokens: 20 }), ['ok', 40, 20, estimateAiCost('gpt-4o', 40, 20), null, 42]);
+  assert.deepEqual(await recorded({ inputTokens: 5, outputTokens: 6, prompt_tokens: 40, completion_tokens: 20 }), ['ok', 5, 6, estimateAiCost('gpt-4o', 5, 6), null, 42]);
 });

@@ -10,12 +10,17 @@ import { answerUserQuestion } from './ask.js';
 import { closeExpiredAuctions, createAuction, deliverColdLead, getAuctionStatus, placeBid, acceptLead, declineLead, notifyOperatorOfContactRequest, notifyOperator, TIER_CONFIG, DECLINE_REASONS, deliverLeadByHand, remindClosingAuctions, openAuctionsFor, portalAuctionLink } from './auction.js';
 import { registerFirm, sendVerificationCode, verifyPhoneCode, validateToken, updateFirmSubscription, getFirm, updateFirmProfile, createMagicLink, VerificationLimitError, recentDeclineCounts, linkOpensAuction, linkOpensLead, linkOpensAccount, approveFirm, setSubscriptionStatus, ensureStripeCustomer, changeUnverifiedPhone, setCustomerCard, findFirmByEmail } from './firms.js';
 import { rateLimit } from './rate-limit.js';
-import { alertOperatorOnce, recordInteraction, deepHealth, runSteps, recordJobRun, reportFailedSteps, sendDailyDigest } from './operations.js';
+import { alertOperatorOnce, tellOwnerOfProviders, tellOwnerOfModelChains, recordInteraction, deepHealth, runSteps, recordJobRun, reportFailedSteps, sendDailyDigest } from './operations.js';
 import nodemailer from 'nodemailer';
 import { createSubscriptionCheckout, createPortalSession, constructWebhookEvent, getSubscriptionDetails, getCustomerCard, liveSubscription } from './stripe.js';
 import OpenAI from 'openai';
 import { probeAllModelChains } from './openaiModelFailover.js';
-import { ANSWER_MODELS as answerModels, AUX_MODELS as auxModels, EMBEDDING_MODELS as embeddingModels } from './models.js';
+import { configureProviders, providerPing, providerStates, adaptersFor } from './providers.js';
+import { modelWatch } from './model-watch.js';
+import { providerState } from './provider-state.js';
+import { configureModelSettings, chains, measurements, saveChains, recordMeasurements, checkMeasurementRows, KEY_NAMES } from './model-settings.js';
+import { MODELS } from './model-registry.js';
+import { ANSWER_MODELS as answerModels, AUX_MODELS as auxModels, EMBEDDING_MODELS as embeddingModels, DEFAULTS } from './models.js';
 import { APP_URL, APP_ID, CONTACT_CONSENT_TEXT, CONTACT_FORM_FROM_STEP } from './site.js';
 import { mentionsPublicHospital, deadlineNotices } from './deadlines.js';
 import { buildSummaryEmail } from './summary.js';
@@ -26,6 +31,24 @@ import { isDemo, demoMailer, outboxMessages, outboxPage } from './demo.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
 const sql = neon(process.env.DATABASE_URL);
+
+// The chains each job runs with are a setting kept in this database (model-settings.js), with the built-in chains of
+// models.js behind it; the measurements that a save is checked against are this app's own. The owner is told
+// (operations.js), once a day, when the saved chains name a model the registry no longer has.
+configureModelSettings({ sqlClient: sql, app: APP_ID, tell: tellOwnerOfModelChains });
+
+// A provider's ping is a health check of its main model in the chains in use when it is sent (providerPing).
+async function pingProvider(provider) {
+  const { answer, small } = await chains();
+  return providerPing([answer, small])(provider);
+}
+
+// Whether each AI provider is answering, kept in this database for every server instance (provider-state.js). A
+// reply that fails on a provider sends it one ping, through the spending caps. The owner is told (operations.js) once
+// when a provider is marked down and once when it comes back, and once an hour for each provider that refuses a
+// request the app sent it. providers.js asks the state before a reply's jobs and tells it how each reply went.
+const stateOfProviders = providerState({ sqlClient: sql, ping: pingProvider, tell: tellOwnerOfProviders });
+configureProviders({ tell: tellOwnerOfProviders, state: stateOfProviders });
 // Each AI call is cut off after 30 seconds and retried once; it could wait 10 minutes.
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 30_000, maxRetries: 1 });
 let modelHealthSnapshot = {
@@ -920,6 +943,48 @@ app.get('/api/admin/leads', async (req, res) => {
   } catch (err) { serverError(req, res, err); }
 });
 
+// ─── Admin: the models ───────────────────────────────────────────────────────
+// The Models section of the admin page (admin.html): the chains each job runs with, the state of each provider, the
+// measurements on record, and the models the form may offer. The chains are a setting in the database, checked before
+// they are saved (model-settings.js); the measurements are sent by `npm run models:upload`.
+app.get('/api/admin/models', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const [current, onRecord, providers] = await Promise.all([chains(), measurements(), providerStates()]);
+    // The chat models the registry holds, and whether each one's provider has a key (by name only: never its value).
+    const registry = Object.entries(MODELS).filter(([, entry]) => entry.embedding !== true).map(([model, entry]) => ({
+      model, provider: entry.provider, hasKey: Boolean(process.env[KEY_NAMES[entry.provider]]), retiresOn: entry.retiresOn ?? null,
+    }));
+    const { answer, small, source, override } = current;
+    res.json({ chains: { answer, small }, source, override, providers, measurements: onRecord, registry });
+  } catch (err) { serverError(req, res, err); }
+});
+
+// Saves the chains when nothing is wrong with them. There is one admin secret and it is the owner's, so the owner is who
+// saved. `override` is the owner's "use anyway, not measured": only true counts.
+app.post('/api/admin/models/chains', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const { answer, small, override } = req.body || {};
+    const result = await saveChains({ answer, small }, { by: 'owner', override: override === true });
+    res.status(result.ok ? 200 : 422).json({ ok: result.ok, errors: result.errors, warnings: result.warnings });
+  } catch (err) { serverError(req, res, err); }
+});
+
+// The measurements `npm run models:upload` sends, for this app only. A body with any malformed row stores nothing.
+app.post('/api/admin/models/measurements', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const { app: appName, rows } = req.body || {};
+    if (appName !== APP_ID) return res.status(400).json({ error: `These measurements are for ${typeof appName === 'string' ? appName.slice(0, 60) : 'no app'}; this site holds those of ${APP_ID}.` });
+    const problems = checkMeasurementRows(rows);
+    if (problems.length) return res.status(400).json({ error: problems.slice(0, 10).join(' ') });
+    const result = await recordMeasurements(rows);
+    if (!result.ok) return res.status(500).json({ error: result.errors.join(' '), saved: result.saved });
+    res.json({ saved: result.saved });
+  } catch (err) { serverError(req, res, err); }
+});
+
 // ─── Case Types ───────────────────────────────────────────────────────────────
 app.get('/api/case-types', (_req, res) => {
   res.json({
@@ -1012,6 +1077,16 @@ function verifyCron(req, res) {
   return true;
 }
 
+// The models a chain or a default uses: what the monthly look at the providers' lists checks (model-watch.js).
+async function modelsInUse() {
+  const { answer, small } = await chains();
+  return [...answer, ...small, ...DEFAULTS.answer, ...DEFAULTS.small, ...DEFAULTS.embedding];
+}
+
+function watchProviderModels() {
+  return modelWatch({ today: new Date(), sqlClient: sql, adapters: adaptersFor(process.env), notify: notifyOperator, inUse: modelsInUse, registry: MODELS, site: 'NYCMalpractice.ai' });
+}
+
 // Combined nightly job — this is the path vercel.json actually schedules. Until it existed the
 // scheduled call got a 404 and nothing ran: expired auctions stayed open and overdue leads pending.
 // Runs close-auctions → overdue-leads → reset-declines → the 90-day conversation purge, in sequence.
@@ -1036,6 +1111,8 @@ app.get('/api/cron', async (req, res) => {
       ['report stuck auctions', reportStuckAuctions],
       ['decline overdue leads', declineOverdueLeads],
       ['recount declines', resetDeclineCounts],
+      // Once a month, and on the nights a model's retirement is 60, 30 or 7 days away: reads and tells, switches nothing.
+      ['watch the model lists of the providers', watchProviderModels],
     ]);
     await recordJobRun('nightly', failed).catch(err => console.error('Recording the nightly run failed:', err.message));
     await reportFailedSteps('nightly', failed);

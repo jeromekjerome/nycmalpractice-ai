@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { test } from './runner.mjs';
 import { estimateAiCost, hasPrice } from '../ai-budget.js';
 import { DEFAULTS } from '../models.js';
+import { MODELS, entryFor, providerOf } from '../model-registry.js';
 
 // Dollars per million tokens, input then output: OpenAI's standard rate, read from its pricing page on 2026-11-20.
 const PUBLISHED = {
@@ -16,19 +17,6 @@ const PUBLISHED = {
   'text-embedding-3-small': [0.02, 0], 'text-embedding-3-large': [0.13, 0],
 };
 const near = (actual, expected, what) => assert.ok(Math.abs(actual - expected) < 1e-6, `${what}: ${actual} is not ${expected}`);
-
-// The table is what these tests are about, so a price override set on this machine is put aside while one runs.
-function withRatesSetting(value, body) {
-  const before = process.env.OPENAI_MODEL_RATES_JSON;
-  if (value === undefined) delete process.env.OPENAI_MODEL_RATES_JSON;
-  else process.env.OPENAI_MODEL_RATES_JSON = value;
-  try {
-    return body();
-  } finally {
-    if (before === undefined) delete process.env.OPENAI_MODEL_RATES_JSON;
-    else process.env.OPENAI_MODEL_RATES_JSON = before;
-  }
-}
 
 // Runs the body with console.warn captured, and returns the lines it was given.
 function warnings(body) {
@@ -43,15 +31,15 @@ function warnings(body) {
   return lines;
 }
 
-test('the price table holds the published prices per million tokens', () => withRatesSetting(undefined, () => {
+test('the registry holds the published prices per million tokens', () => {
   for (const [model, [input, output]] of Object.entries(PUBLISHED)) {
     assert.equal(hasPrice(model), true, model);
     near(estimateAiCost(model, 1_000_000, 0), input, `${model} in`);
     near(estimateAiCost(model, 0, 1_000_000), output, `${model} out`);
   }
-}));
+});
 
-test('a dated snapshot is priced as its model, and a longer name is not mistaken for a shorter one', () => withRatesSetting(undefined, () => {
+test('a dated snapshot is priced as its model, and a longer name is not mistaken for a shorter one', () => {
   near(estimateAiCost('gpt-4o-2024-08-06', 1_000_000, 0), 2.5, 'snapshot');
   near(estimateAiCost('gpt-5.4-nano-2026-03-17', 0, 1_000_000), 1.25, 'snapshot of nano');
   near(estimateAiCost('gpt-5.4-mini', 0, 1_000_000), 4.5, 'mini is not gpt-5.4');
@@ -68,9 +56,9 @@ test('a dated snapshot is priced as its model, and a longer name is not mistaken
       near(estimateAiCost(odd, 1_000_000, 0), 20, `${String(odd)} in`);
     }
   });
-}));
+});
 
-test('a model with no price is charged at the cautious default and reported as unpriced', () => withRatesSetting(undefined, () => {
+test('a model with no price is charged at the cautious default and reported as unpriced', () => {
   assert.deepEqual(warnings(() => assert.equal(hasPrice('another-new-model'), false)), [], 'asking whether a model has a price reports nothing');
   const warned = warnings(() => {
     assert.equal(hasPrice('some-new-model'), false);
@@ -79,18 +67,33 @@ test('a model with no price is charged at the cautious default and reported as u
   });
   // Reported once for the model, however many calls go to it.
   assert.deepEqual(warned.map(line => JSON.parse(line)), [{ event: 'ai_price_missing', model: 'some-new-model' }]);
+});
 
-  // A price given in the environment counts as a price on record, and a setting that is not a table changes nothing.
-  withRatesSetting(JSON.stringify({ 'some-new-model': [1, 2] }), () => {
-    assert.equal(hasPrice('some-new-model'), true);
-    near(estimateAiCost('some-new-model', 1_000_000, 1_000_000), 3, 'configured');
-    near(estimateAiCost('gpt-4o', 1_000_000, 0), 2.5, 'the table still prices the rest');
-  });
-  for (const broken of ['null', 'not json', '[1,2]', '7', '{"gpt-4o":"cheap"}', '{"gpt-4o":[1]}', '{"gpt-4o":[-1,2]}']) {
-    withRatesSetting(broken, () => near(estimateAiCost('gpt-4o', 1_000_000, 0), 2.5, `setting ${broken}`));
+test('every model this app can reach has a price on record', () => {
+  for (const model of [...DEFAULTS.answer, ...DEFAULTS.small, ...DEFAULTS.embedding]) assert.equal(hasPrice(model), true, model);
+});
+
+test('every model in the default chains has a registry entry with a provider and a price', () => {
+  for (const model of [...DEFAULTS.answer, ...DEFAULTS.small, ...DEFAULTS.embedding]) {
+    const entry = entryFor(model);
+    assert.ok(entry, `${model} has an entry`);
+    assert.ok(['openai', 'anthropic', 'google'].includes(providerOf(model)), `${model} has a provider`);
+    assert.ok(Array.isArray(entry.price) && entry.price.length === 2 && entry.price.every(part => Number.isFinite(part) && part >= 0), `${model} has a price`);
   }
-}));
+});
 
-test('every model this app can reach has a price on record', () => withRatesSetting(undefined, () => {
-  for (const model of [...DEFAULTS.answer, ...DEFAULTS.aux, ...DEFAULTS.embedding]) assert.equal(hasPrice(model), true, model);
-}));
+test('the registry prices gpt-6.1-terra at 1 dollar in and 5 out per million tokens', () => {
+  near(estimateAiCost('gpt-6.1-terra', 1_000_000, 1_000_000), 6, 'terra in and out');
+});
+
+test('a dated snapshot takes the registry entry of its model, and a longer name takes none', () => {
+  assert.equal(entryFor('gpt-6-luna-2026-10-01'), entryFor('gpt-6-luna'));
+  assert.equal(providerOf('gpt-6-luna-2026-10-01'), 'openai');
+  assert.equal(entryFor('gpt-6-luna-pro'), null);
+  assert.equal(providerOf('gpt-6-luna-pro'), null);
+  for (const odd of ['constructor', '__proto__', '', undefined, null]) assert.equal(entryFor(odd), null, String(odd));
+});
+
+test('the two embedding models are marked as embeddings and no chat model is', () => {
+  assert.deepEqual(Object.keys(MODELS).filter(name => MODELS[name].embedding).sort(), ['text-embedding-3-large', 'text-embedding-3-small']);
+});

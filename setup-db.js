@@ -186,6 +186,58 @@ async function setup() {
   `;
   await sql`CREATE INDEX IF NOT EXISTS idx_ai_usage_created ON ai_usage(created_at)`;
 
+  // Whether each AI provider is answering, for every server instance (provider-state.js): since when a provider is
+  // marked down and why, when the next request may be let through to it, and its failed replies of the last five
+  // minutes. Without this table every provider counts as up.
+  await sql`
+    CREATE TABLE IF NOT EXISTS ai_provider_state (
+      provider        TEXT PRIMARY KEY,
+      down_since      TIMESTAMPTZ,
+      reason          TEXT,
+      retry_at        TIMESTAMPTZ,
+      failed_replies  TIMESTAMPTZ[] NOT NULL DEFAULT '{}',
+      updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+
+  // The app's settings, one row a setting (model-settings.js). The row model_chains holds the chains each job runs
+  // with, saved from the admin page; without it, or without this table, the built-in chains of models.js are used.
+  await sql`
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key         TEXT PRIMARY KEY,
+      value       JSONB NOT NULL,
+      updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+
+  // What the model measurement found for each model in each place, uploaded from the owner's machine. A model is saved
+  // in a chain only with a measurement here, or under the owner's recorded override (model-settings.js).
+  await sql`
+    CREATE TABLE IF NOT EXISTS model_measurements (
+      id           BIGSERIAL PRIMARY KEY,
+      app          TEXT NOT NULL,
+      model        TEXT NOT NULL,
+      role         TEXT NOT NULL CHECK (role IN ('answer','small')),
+      measured_on  DATE NOT NULL,
+      run_label    TEXT NOT NULL,
+      quality_ok   BOOLEAN NOT NULL,
+      bar_ok       BOOLEAN NOT NULL,
+      stats        JSONB NOT NULL,
+      UNIQUE (app, model, role, run_label)
+    )
+  `;
+
+  // Each provider's list of models as read on the first night of a month (model-watch.js), kept to tell the owner what
+  // was added since. The month is its first day.
+  await sql`
+    CREATE TABLE IF NOT EXISTS provider_model_lists (
+      provider  TEXT NOT NULL,
+      month     DATE NOT NULL,
+      models    JSONB NOT NULL,
+      PRIMARY KEY (provider, month)
+    )
+  `;
+
   // The last decisions found for each case type, used when CourtListener cannot be searched (case-memory.js).
   await sql`
     CREATE TABLE IF NOT EXISTS search_cache (

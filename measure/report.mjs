@@ -2,7 +2,8 @@
 // Source available for evaluation only; see LICENSE.
 
 // The model measurement's report. It reads the run files that run.mjs wrote, sets each run beside the bar a
-// model must pass, and writes docs/measurements/<date>-<app>.md for the owner to choose from.
+// model must pass, and writes docs/measurements/<date>-<app>.md for the owner to choose from. It also prints each
+// model's time limit for each job that follows from the runs (timeLimits), which an app's own limits are set from.
 //
 //   npm run models:report -- --app <app> --baseline <labels> [--small-baseline <labels>] [--replies <labels>]
 //                            [--smalls <labels>] [--pairs <labels>] [--samples <labels>] [--note "<text>"]...
@@ -11,6 +12,9 @@
 // --small-baseline names today's models' small-job runs; --replies and --smalls name the candidates' runs;
 // --pairs names reply runs in which both models were changed together, shown for information;
 // --samples names runs whose replies are set out in full beside today's, in a second file.
+//
+// A run may use a model of any of the three providers (OpenAI, Anthropic, Google): the report names each model's provider
+// from the registry (model-registry.js), and prices every call at that model's price.
 //
 // The bar, from the design (docs/superpowers/specs/2026-11-19-ai-providers-design.md, section 4):
 //   a reply model      passes the gate after the one rewrite at least as often as today's model's worst run
@@ -29,6 +33,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { MEASURE_DATABASE_URL } from './guard-fetch.mjs';
+import { entryFor, priceOn } from '../model-registry.js';
 import { VISITORS } from './visitors.mjs';
 import * as app from './app.mjs';
 
@@ -54,7 +59,14 @@ function percentile(values, share) {
 const keyOf = turn => `${turn.visitor}:${turn.turn}`;
 const rate = (list, test) => (list.length ? list.filter(test).length / list.length : 1);
 const visitorsIn = run => new Set(run.turns.map(turn => turn.visitor)).size || 1;
-const costOf = (calls, price) => calls.reduce((sum, call) => sum + price(call.model, call.inputTokens ?? 0, call.outputTokens ?? 0), 0);
+// `day` prices the calls at the price in force on that day ('YYYY-MM-DD'), for a price a provider has announced; without
+// it, at today's.
+const costOf = (calls, price, day = undefined) => calls.reduce((sum, call) => sum + price(call.model, call.inputTokens ?? 0, call.outputTokens ?? 0, '', day), 0);
+// A call that ran out of time: the limit cut it off (the clock a run is made under does that), which the SDKs and the
+// guard record as a timeout or an abort and never with a status. Its own time is the limit it was given, which is less
+// than it needed, so it is counted as over any limit and not as the time it took.
+const timedOut = failure => failure?.status === undefined && /timed out|timeout|abort/i.test(String(failure?.error ?? ''));
+const timeOf = failure => (timedOut(failure) ? Infinity : failure.ms);
 // The calls that were refused or never answered, by what they failed on: "429 x2, Request timed out. x1".
 function failureSummary(failures) {
   const counts = new Map();
@@ -77,16 +89,16 @@ function seminarTest({ visitors = VISITORS, seminarModes = app.SEMINAR_MODES } =
  * `price(model, inputTokens, outputTokens)` is the app's own price table (estimateAiCost). `visitors` and `adapter`
  * are the app's own (visitors.mjs, app.mjs) unless others are given.
  */
-export function replyStats(run, { price, visitors = VISITORS, adapter = app } = {}) {
+export function replyStats(run, { price, visitors = VISITORS, adapter = app, day = undefined } = {}) {
   const isSeminar = seminarTest({ visitors, seminarModes: adapter.SEMINAR_MODES });
   const replyJobs = adapter.REPLY_JOBS;
   const seminar = run.turns.filter(isSeminar);
   // The reply job's own calls: the drafts and the rewrites, which go to the same chain.
   const replyCalls = (run.calls ?? []).filter(call => replyJobs.includes(call.job));
   // And those of its calls that were refused or never answered. Each still took the time it took, so a call that
-  // ran out of time counts as slow.
+  // ran out of time counts as slow: as over any limit.
   const failures = (run.failed ?? []).filter(failure => replyJobs.includes(failure.job));
-  const replyTimes = [...replyCalls, ...failures].map(call => call.ms);
+  const replyTimes = [...replyCalls.map(call => call.ms), ...failures.map(timeOf)];
   // A first draft the model grader did not grade (its answer was cut off or could not be used, or never came) was
   // passed or failed by code alone, which says nothing of the rules only a model can judge. Such a draft is left
   // out of the pass rates and counted apart. An empty draft and a turn that failed are failures, and are counted.
@@ -110,13 +122,14 @@ export function replyStats(run, { price, visitors = VISITORS, adapter = app } = 
     turnsOverDeadline: run.turns.filter(turn => turn.ms > TURN_DEADLINE_MS).length,
     replyCallsFailed: failures.length,
     replyCallFailures: failureSummary(failures),
+    replyCallsTimedOut: failures.filter(timedOut).length,
     replyMedianMs: percentile(replyTimes, 0.5),
     replySlowestTenthMs: percentile(replyTimes, 0.9),
     // The whole turn: the reply, the side analyses, the grading and any rewrite. It leaves out the classification
     // and the search, which come first on the site.
     turnMedianMs: percentile(run.turns.map(turn => turn.ms), 0.5),
     turnSlowestTenthMs: percentile(run.turns.map(turn => turn.ms), 0.9),
-    costPerConversation: replyCalls.length ? costOf(replyCalls, price) / visitorsIn(run) : 0,
+    costPerConversation: replyCalls.length ? costOf(replyCalls, price, day) / visitorsIn(run) : 0,
   };
 }
 
@@ -170,7 +183,7 @@ export function selfAgreement(runs, pick, applies = () => true) {
  * What a small-job run says of its small model.
  * `reference` holds, for each turn, the answer today's model gives most often: { type, tier, verdict }.
  */
-export function smallStats(run, reference, baselineAverageLeadScore, { price, visitors = VISITORS, adapter = app } = {}) {
+export function smallStats(run, reference, baselineAverageLeadScore, { price, visitors = VISITORS, adapter = app, day = undefined } = {}) {
   const isSeminar = seminarTest({ visitors, seminarModes: adapter.SEMINAR_MODES });
   const smallJobs = adapter.SMALL_JOBS;
   const due = adapter.SIDE_JOBS_FROM_TURN;
@@ -203,8 +216,8 @@ export function smallStats(run, reference, baselineAverageLeadScore, { price, vi
     const made = smallCalls.filter(call => call.job === job);
     const failed = failures.filter(failure => failure.job === job);
     if (!made.length && !failed.length) continue;
-    // A call that failed is timed with its job, for as long as it took.
-    const times = [...made, ...failed].map(call => call.ms);
+    // A call that failed is timed with its job, for as long as it took: a call cut off at its time limit, as over any limit.
+    const times = [...made.map(call => call.ms), ...failed.map(timeOf)];
     jobs[job] = {
       calls: made.length,
       failed: failed.length,
@@ -213,7 +226,8 @@ export function smallStats(run, reference, baselineAverageLeadScore, { price, vi
       jsonValid: rate(made.filter(call => typeof call.json === 'boolean'), call => call.json),
     };
   }
-  const slowest = Object.entries(jobs).sort(([, a], [, b]) => b.slowestTenthMs - a.slowestTenthMs)[0] ?? null;
+  // (Compared, not subtracted: two jobs that were cut off are both Infinity.)
+  const slowest = Object.entries(jobs).sort(([, a], [, b]) => (b.slowestTenthMs > a.slowestTenthMs ? 1 : b.slowestTenthMs < a.slowestTenthMs ? -1 : 0))[0] ?? null;
 
   // A score a model wrote as text ("80") is still a score: left out, the average would be of fewer leads, or of
   // none, and the lead-score rule would pass with nothing judged.
@@ -236,18 +250,21 @@ export function smallStats(run, reference, baselineAverageLeadScore, { price, vi
     failedTurns: run.turns.filter(turn => turn.error).length,
     failedCalls: failures.length,
     failedCallSummary: failureSummary(failures),
-    medianMs: percentile([...smallCalls, ...failures].map(call => call.ms), 0.5),
+    callsTimedOut: failures.filter(timedOut).length,
+    // Answers that stopped at their allowance, which thinking can spend and leave no text.
+    cutOff: smallCalls.filter(call => call.finish === 'length').length,
+    medianMs: percentile([...smallCalls.map(call => call.ms), ...failures.map(timeOf)], 0.5),
     slowestTenthMs: slowest ? slowest[1].slowestTenthMs : null,
     slowestJob: slowest ? slowest[0] : null,
     jobs,
-    costPerConversation: inConversations.length ? costOf(inConversations, price) / visitorsIn(run) : 0,
+    costPerConversation: inConversations.length ? costOf(inConversations, price, day) / visitorsIn(run) : 0,
   };
 }
 
 // ─── The bar ──────────────────────────────────────────────────────────────────
 
 const percent = value => `${Math.round(value * 1000) / 10}%`;
-const seconds = ms => (ms === null || ms === undefined ? 'not timed' : `${(ms / 1000).toFixed(1)}s`);
+const seconds = ms => (ms === null || ms === undefined ? 'not timed' : ms === Infinity ? 'past its time limit' : `${(ms / 1000).toFixed(1)}s`);
 const money = value => `$${value.toFixed(3)}`;
 
 function verdict(rules) {
@@ -270,9 +287,11 @@ export function replyBar(stats, baselines) {
     { key: 'seminar', ok: stats.seminarFinalFailures <= mostSeminarFailures,
       reason: `${some(stats.seminarFinalFailures, 'seminar turn', 'seminar turns')} did not pass, more than in today's worst run (${mostSeminarFailures})` },
     { key: 'speed', ok: typeof stats.replySlowestTenthMs === 'number' && stats.replySlowestTenthMs <= REPLY_SLOWEST_TENTH_LIMIT_MS,
-      reason: typeof stats.replySlowestTenthMs === 'number'
-        ? `the slowest tenth of its replies takes ${seconds(stats.replySlowestTenthMs)}, over the ${seconds(REPLY_SLOWEST_TENTH_LIMIT_MS)} allowed`
-        : 'none of its replies was timed' },
+      reason: stats.replySlowestTenthMs === Infinity
+        ? `more than a tenth of its replies were cut off at the time limit they were given, which counts as over the ${seconds(REPLY_SLOWEST_TENTH_LIMIT_MS)} allowed`
+        : typeof stats.replySlowestTenthMs === 'number'
+          ? `the slowest tenth of its replies takes ${seconds(stats.replySlowestTenthMs)}, over the ${seconds(REPLY_SLOWEST_TENTH_LIMIT_MS)} allowed`
+          : 'none of its replies was timed' },
     // Not a rule of the design's bar but a condition of the measurement: the pass rates are counted over the
     // drafts the model grader graded, and too few of those is no measurement.
     { key: 'graded', ok: !(stats.ungradedFirstDrafts > UNGRADED_SHARE_ALLOWED * stats.turns),
@@ -300,7 +319,9 @@ export function smallBar(stats, baselineSelf, baselineCaught) {
       reason: `moves the average lead score by ${typeof stats.leadScoreShift === 'number' ? stats.leadScoreShift.toFixed(1) : '?'} points, more than ${LEAD_SCORE_TOLERANCE}` },
     { key: 'knownBad', ok: missed.length === 0, reason: `did not catch ${missed.join(', ')}` },
     { key: 'speed', ok: typeof stats.slowestTenthMs !== 'number' || stats.slowestTenthMs <= SMALL_SLOWEST_TENTH_LIMIT_MS,
-      reason: `the slowest tenth of its ${stats.slowestJob ?? 'slowest job'} calls takes ${seconds(stats.slowestTenthMs)}, over the ${seconds(SMALL_SLOWEST_TENTH_LIMIT_MS)} allowed` },
+      reason: stats.slowestTenthMs === Infinity
+        ? `more than a tenth of its ${stats.slowestJob ?? 'slowest job'} calls were cut off at the time limit they were given, which counts as over the ${seconds(SMALL_SLOWEST_TENTH_LIMIT_MS)} allowed`
+        : `the slowest tenth of its ${stats.slowestJob ?? 'slowest job'} calls takes ${seconds(stats.slowestTenthMs)}, over the ${seconds(SMALL_SLOWEST_TENTH_LIMIT_MS)} allowed` },
   ]);
 }
 
@@ -365,19 +386,11 @@ const byValue = speedOf => (a, b) => a.stats.costPerConversation - b.stats.costP
 const barCell = bar => (bar.ok ? 'passes' : bar.reasons.join('; '));
 
 /**
- * The report, as Markdown. Every argument is data: the runs are already read.
- * @param {object} options
- * @param {string} options.app
- * @param {string} options.date           YYYY-MM-DD
- * @param {object[]} options.baseline       today's models' runs
- * @param {object[]} options.smallBaseline  today's models' small-job runs
- * @param {object[]} options.replies        the reply candidates' runs
- * @param {object[]} options.smalls         the small-job candidates' runs
- * @param {object[]} [options.pairs]        reply runs with both models changed together, shown for information
- * @param {string[]} [options.notes]
- * @param {Function} options.price          estimateAiCost
+ * Judges the runs: every reply run against today's reply runs, and every small-job run against today's small-job runs.
+ * The report and the upload to the site (upload.mjs) both read their rows from here, so they cannot disagree.
+ * Gives each run as { run, stats, bar }, and the figures the small-job bar was set from.
  */
-export function renderReport({ app: appName, date, baseline, smallBaseline, replies, smalls, pairs = [], notes = [], price, visitors = VISITORS, adapter = app }) {
+export function scoreRuns({ baseline, smallBaseline = [], replies = [], smalls = [] }, { price, visitors = VISITORS, adapter = app } = {}) {
   const context = { price, visitors, adapter };
   const isSeminar = seminarTest({ visitors, seminarModes: adapter.SEMINAR_MODES });
   const leadDue = turn => !isSeminar(turn) && turn.turn >= adapter.SIDE_JOBS_FROM_TURN.leadScore;
@@ -412,22 +425,65 @@ export function renderReport({ app: appName, date, baseline, smallBaseline, repl
   };
   const baseSmall = smallBaseline.map(smallRow);
   const candidateSmall = smalls.map(smallRow);
+  return { baseReply, candidateReply, baseSmall, candidateSmall, reference, baselineSelf, baselineLeadScore, everyRunCaught };
+}
+
+/**
+ * The report, as Markdown. Every argument is data: the runs are already read.
+ * @param {object} options
+ * @param {string} options.app
+ * @param {string} options.date           YYYY-MM-DD
+ * @param {object[]} options.baseline       today's models' runs
+ * @param {object[]} options.smallBaseline  today's models' small-job runs
+ * @param {object[]} options.replies        the reply candidates' runs
+ * @param {object[]} options.smalls         the small-job candidates' runs
+ * @param {object[]} [options.pairs]        reply runs with both models changed together, shown for information
+ * @param {string[]} [options.notes]
+ * @param {Function} options.price          estimateAiCost
+ */
+export function renderReport({ app: appName, date, baseline, smallBaseline, replies, smalls, pairs = [], notes = [], price, visitors = VISITORS, adapter = app }) {
+  const isSeminar = seminarTest({ visitors, seminarModes: adapter.SEMINAR_MODES });
+  const leadDue = turn => !isSeminar(turn) && turn.turn >= adapter.SIDE_JOBS_FROM_TURN.leadScore;
+  const context = { price, visitors, adapter };
+  const { baseReply, candidateReply, baseSmall, candidateSmall, reference, baselineSelf, baselineLeadScore, everyRunCaught } = scoreRuns({ baseline, smallBaseline, replies, smalls }, { price, visitors, adapter });
 
   const turnsMeasured = baseline[0]?.turns.length ?? 0;
   const visitorsMeasured = baseline[0] ? visitorsIn(baseline[0]) : 0;
   const today = baseline[0] ? `\`${baseline[0].answer}\` for the reply and \`${baseline[0].aux}\` for the small jobs` : 'none';
+  const grader = baseline[0] ? `\`${baseline[0].aux}\`` : "today's small model";
   const out = [];
   out.push(`# Model measurement for ${appName}, ${date}`, '');
-  out.push(`${visitorsMeasured} synthetic visitors and ${turnsMeasured} turns, played through the app's own reply pipeline. Today's models are ${today}. `
+  out.push(`${visitorsMeasured} synthetic visitors and ${turnsMeasured} turns, played through the app's own reply pipeline. Today's models, the ones now live, are ${today}, and every candidate is set beside their runs. `
+    + 'Runs of models that are no longer live are history and are no part of the comparison. '
+    + `Every reply run was graded by ${grader}, held fixed whichever model wrote the reply, so that one grader judges them all. `
     + 'The case law for each turn was searched once and replayed for every run, so every model was given the same decisions. '
-    + "A reply model's runs were graded by today's small model. A small-job model's runs were given today's reply model's drafts.", '');
+    + "A small-job model's runs were given today's reply model's drafts.", '');
+
+  // Each model in these runs, whose it is and what it was asked to do, from the registry.
+  const roles = new Map();
+  const asked = (model, role) => roles.set(model, new Set([...(roles.get(model) ?? []), role]));
+  for (const run of [...baseline, ...replies, ...pairs]) { asked(run.answer, 'the reply'); asked(run.aux, pairs.includes(run) ? 'the small jobs' : 'grading every reply'); }
+  for (const run of [...smallBaseline, ...smalls]) { asked(run.answer, 'the reply'); asked(run.aux, 'the small jobs'); }
+  const dollarsOf = prices => `$${prices[0].toFixed(2)} / $${prices[1].toFixed(2)}`;
+  const priceWords = model => {
+    const now = priceOn(model, date);
+    if (!now) return 'no price on record';
+    const later = Object.keys(entryFor(model)?.priceFrom ?? {}).filter(day => day > date).sort();
+    return [dollarsOf(now), ...later.map(day => `then ${dollarsOf(priceOn(model, day))} from ${day}`)].join(', ');
+  };
+  const ROLE_ORDER = ['the reply', 'the small jobs', 'grading every reply'];
+  out.push('## The models and their providers', '');
+  out.push(table(
+    ['Model', 'Provider', 'Used for', 'Price a million tokens, in / out'],
+    [...roles].map(([model, used]) => [model, entryFor(model)?.provider ?? 'not in the registry', ROLE_ORDER.filter(role => used.has(role)).join(', '), priceWords(model)]),
+  ), '');
 
   // An app with no seminar has no seminar column.
   const hasSeminar = adapter.SEMINAR_MODES.length > 0;
   const failedCell = (count, summary) => (count ? `${count} (${summary})` : 0);
   out.push('## Reply models', '');
   out.push(table(
-    ['Run', 'Model', 'First draft passes', 'Passes after the rewrite', ...(hasSeminar ? ['Seminar passes'] : []), 'First drafts with a case that could not be anchored', 'Empty first drafts', 'Replies cut off', 'Bar'],
+    ['Run', 'Model', 'First draft passes', 'Passes after the rewrite', ...(hasSeminar ? ['Seminar passes'] : []), 'First drafts with a case that could not be anchored', 'Empty first drafts', 'Replies cut off at their allowance', 'Bar'],
     [...baseReply, ...candidateReply].map(({ run, stats, bar }) => [
       run.label, run.answer, percent(stats.firstPassRate), percent(stats.finalPassRate), ...(hasSeminar ? [percent(stats.seminarFinalPassRate)] : []), stats.unanchoredFirstDrafts, stats.emptyFirstDrafts, stats.cutOff, barCell(bar),
     ]),
@@ -453,12 +509,12 @@ export function renderReport({ app: appName, date, baseline, smallBaseline, repl
     const compared = value => (smallBaseline.length ? percent(value) : 'nothing to compare with');
     out.push(table(
       ['Run', 'Model', 'A usable answer when one was due', "Same case type as today's", 'Case type right, where the visitor was written with one', "Same lead tier as today's", "Same first verdict as today's", 'Average lead score', 'Known-bad drafts caught',
-        'Slowest job (slowest tenth)', 'Small-job calls that failed', 'Small jobs cost, a conversation', 'Bar'],
+        'Slowest job (slowest tenth)', 'Small-job calls that failed', 'Small-job answers cut off at their allowance', 'Small jobs cost, a conversation', 'Bar'],
       [...baseSmall, ...candidateSmall].map(({ run, stats, bar }) => [
         run.label, run.aux, percent(stats.jsonValidRate), compared(stats.typeAgreement), stats.typeRight === null ? 'none was' : percent(stats.typeRight), compared(stats.tierAgreement), compared(stats.verdictAgreement),
         stats.averageLeadScore === null ? 'none scored' : `${stats.averageLeadScore.toFixed(1)}${typeof stats.leadScoreShift === 'number' ? ` (${stats.leadScoreShift >= 0 ? '+' : ''}${stats.leadScoreShift.toFixed(1)})` : ''}`,
         `${stats.knownBadCaught.length} of ${(run.knownBad ?? []).length}`,
-        stats.slowestJob ? `${stats.slowestJob}, ${seconds(stats.slowestTenthMs)}` : 'not timed', failedCell(stats.failedCalls, stats.failedCallSummary), money(stats.costPerConversation), barCell(bar),
+        stats.slowestJob ? `${stats.slowestJob}, ${seconds(stats.slowestTenthMs)}` : 'not timed', failedCell(stats.failedCalls, stats.failedCallSummary), stats.cutOff, money(stats.costPerConversation), barCell(bar),
       ]),
     ), '');
     if (smallBaseline.length >= 2) {
@@ -498,6 +554,27 @@ export function renderReport({ app: appName, date, baseline, smallBaseline, repl
     };
     out.push('### The drafts that are wrong on purpose', '');
     out.push(table(['Draft', 'The rule it breaks', ...smallRuns.map(run => `${run.aux} (${run.label})`)], drafts.map(draft => [draft.key, draft.breaks, ...smallRuns.map(run => made(run, draft))])), '');
+  }
+
+  // The answers that stopped at their allowance and the calls that ran out of time, by model: a model whose answers were
+  // cut off was not given room enough to be judged, and a call the clock cut off is counted as over any limit.
+  const rowsGiven = [
+    ...[...baseReply, ...candidateReply].map(({ run, stats }) => ({ run, model: run.answer, cutOff: stats.cutOff, timedOut: stats.replyCallsTimedOut, answers: ['reply', 'replies'], calls: ['reply call', 'reply calls'] })),
+    ...[...baseSmall, ...candidateSmall].map(({ run, stats }) => ({ run, model: run.aux, cutOff: stats.cutOff, timedOut: stats.callsTimedOut, answers: ['answer', 'answers'], calls: ['small-job call', 'small-job calls'] })),
+  ];
+  const many = (count, [one, more]) => `${count} ${count === 1 ? one : more}`;
+  const cutOffRows = rowsGiven.filter(row => row.cutOff > 0);
+  const timedOutRows = rowsGiven.filter(row => row.timedOut > 0);
+  if (cutOffRows.length || timedOutRows.length) {
+    out.push('## Answers and calls that were cut off', '');
+    if (cutOffRows.length) {
+      out.push('### Answers cut off at their allowance', '');
+      out.push(...cutOffRows.map(row => `- \`${row.model}\` (${row.run.label}): ${many(row.cutOff, row.answers)} cut off at its allowance: raise the headroom and measure again before judging.`), '');
+    }
+    if (timedOutRows.length) {
+      out.push('### Calls cut off at their time limit', '');
+      out.push(...timedOutRows.map(row => `- \`${row.model}\` (${row.run.label}): ${many(row.timedOut, row.calls)}. It is counted as over any limit, so its slowest tenth is longer than what the table shows.`), '');
+    }
   }
 
   // What passes, cheapest first.
@@ -576,7 +653,25 @@ export function renderReport({ app: appName, date, baseline, smallBaseline, repl
       together(passingReply[0].stats.costPerConversation, passingSmall[0].stats.costPerConversation)]);
   }
   out.push(table(['', 'Reply model', 'Small-job model', 'Replies', 'Small jobs', 'Together'], costRows), '');
-  out.push("At OpenAI's published standard prices. Input that OpenAI has cached is billed lower, so a real conversation costs a little under these figures.", '');
+  out.push("At each provider's published standard prices (the registry's, model-registry.js). Input that a provider has cached is billed lower, so a real conversation costs a little under these figures.", '');
+
+  // Where a provider has announced a price for a later day, what the same conversation would cost then.
+  const later = [];
+  for (const row of candidateReply) {
+    for (const day of Object.keys(entryFor(row.run.answer)?.priceFrom ?? {}).filter(announced => announced > date).sort()) {
+      later.push([row.run.label, row.run.answer, money(replyStats(row.run, { ...context, day: date }).costPerConversation), money(replyStats(row.run, { ...context, day }).costPerConversation), day]);
+    }
+  }
+  for (const row of candidateSmall) {
+    for (const day of Object.keys(entryFor(row.run.aux)?.priceFrom ?? {}).filter(announced => announced > date).sort()) {
+      later.push([row.run.label, row.run.aux, money(smallStats(row.run, reference, baselineLeadScore, { ...context, day: date }).costPerConversation), money(smallStats(row.run, reference, baselineLeadScore, { ...context, day }).costPerConversation), day]);
+    }
+  }
+  if (later.length) {
+    out.push('## At a later price', '');
+    out.push('A provider has announced a new price for these models. The same calls, costed at the price from the day it takes effect, beside the price today:', '');
+    out.push(table(['Run', 'Model', 'A conversation costs now', 'A conversation costs at the later price', 'From'], later), '');
+  }
 
   out.push("## Where a small-job candidate differs from today's usual answer", '');
   if (!candidateSmall.length) out.push('No small-job candidate was measured.', '');
@@ -645,6 +740,74 @@ export function renderSamples({ app: appName, date, runs, visitorKeys, visitors 
   return out.join('\n');
 }
 
+// ─── Time limits ──────────────────────────────────────────────────────────────
+
+// The most a model is given for one job, whatever its times (the design, section 2): providers.js gives a call
+// no more. This file loads nothing of the app, so the caps are written here as well.
+const REPLY_CAP_MS = 20_000;
+const SMALL_CAP_MS = 8_000;
+// A job's limit is set by a model's times for it only from this many calls.
+const CALLS_FOR_A_LIMIT = 10;
+
+/**
+ * Each model's time limit for each job it did in the runs, as the design sets it (section 2): twice the slowest
+ * tenth of its calls for the job, never more than the cap for the job's kind (a reply job's or a small job's),
+ * rounded up to the next 100 ms. A job with fewer than ten calls is given, if it is a reply job after the first
+ * (the rewrite), the model's limit for the first (the reply), and otherwise the cap. A call that failed is timed
+ * with its job, for as long as it took, except that one the limits of the run cut off took longer than that limit and
+ * counts as over any limit (so a job with more than a tenth of its calls cut off is given the cap). `over` counts the
+ * calls that took longer than the limit: how often the job would have been cut off and passed to the next model.
+ * @returns {Array<{ model, job, calls, slowestTenthMs, limitMs, setBy: 'times' | 'cap' | 'few' | 'reply', over }>}
+ */
+export function timeLimits(runs, { adapter = app } = {}) {
+  const replyJobs = adapter.REPLY_JOBS;
+  const jobs = [...replyJobs, ...adapter.SMALL_JOBS];
+  const timesOf = new Map();
+  for (const run of runs) {
+    for (const call of [...(run.calls ?? []), ...(run.failed ?? [])]) {
+      if (!jobs.includes(call.job) || !Number.isFinite(call.ms)) continue;
+      if (!timesOf.has(call.model)) timesOf.set(call.model, new Map());
+      const byJob = timesOf.get(call.model);
+      // A call the limit in force cut off took longer than that limit: it is over any limit set from these times.
+      byJob.set(call.job, [...(byJob.get(call.job) ?? []), timedOut(call) ? Infinity : call.ms]);
+    }
+  }
+  const rows = [];
+  for (const [model, byJob] of timesOf) {
+    const limitOf = {};
+    for (const job of jobs) {
+      const times = byJob.get(job) ?? [];
+      const cap = replyJobs.includes(job) ? REPLY_CAP_MS : SMALL_CAP_MS;
+      const slowestTenthMs = percentile(times, 0.9);
+      let limitMs = cap;
+      let setBy = 'few';
+      if (times.length >= CALLS_FOR_A_LIMIT) {
+        limitMs = Math.min(Math.ceil((2 * slowestTenthMs) / 100) * 100, cap);
+        setBy = limitMs === cap ? 'cap' : 'times';
+      } else if (replyJobs.indexOf(job) > 0) {
+        limitMs = limitOf[replyJobs[0]];
+        setBy = 'reply';
+      }
+      limitOf[job] = limitMs;
+      if (times.length) rows.push({ model, job, calls: times.length, slowestTenthMs, limitMs, setBy, over: times.filter(ms => ms > limitMs).length });
+    }
+  }
+  return rows;
+}
+
+const SET_BY = {
+  times: 'twice the slowest tenth',
+  cap: 'the cap',
+  few: `the cap: fewer than ${CALLS_FOR_A_LIMIT} calls`,
+  reply: `the reply's: fewer than ${CALLS_FOR_A_LIMIT} calls`,
+};
+
+// The limits as a table, which the report command prints.
+export function renderLimits(rows) {
+  return table(['Model', 'Job', 'Calls', 'Slowest tenth', 'Limit', 'Set by', 'Calls over the limit'],
+    rows.map(row => [row.model, row.job, row.calls, seconds(row.slowestTenthMs), seconds(row.limitMs), SET_BY[row.setBy], row.over]));
+}
+
 // ─── The command ──────────────────────────────────────────────────────────────
 
 const LIST_FLAGS = { '--baseline': 'baseline', '--small-baseline': 'smallBaseline', '--replies': 'replies', '--smalls': 'smalls', '--pairs': 'pairs', '--samples': 'samples' };
@@ -693,10 +856,7 @@ async function main() {
   }
   // The price table is the app's own, and its file opens the database client as it loads: it is given the
   // measurement's address, which no database answers at. The report reads files and asks nothing of anyone.
-  // A price table in the local settings is set to nothing, not removed: the app loads the local settings as it
-  // starts, and that fills in whatever is not set.
   process.env.DATABASE_URL = MEASURE_DATABASE_URL;
-  process.env.OPENAI_MODEL_RATES_JSON = '';
   const { estimateAiCost } = await import('../ai-budget.js');
 
   let runs;
@@ -724,6 +884,10 @@ async function main() {
     writeFileSync(join(folder, `${date}-${app.APP}-samples.md`), renderSamples({ app: app.APP, date, runs: [runs.baseline[0], ...runs.samples], visitorKeys: app.SAMPLE_VISITORS }));
     console.log(`Wrote docs/measurements/${date}-${app.APP}-samples.md`);
   }
+  // The figures an app's own time limits are set from. The samples are runs given a second time, and are left out.
+  const timed = [...runs.baseline, ...runs.smallBaseline, ...runs.replies, ...runs.smalls, ...runs.pairs];
+  console.log(`\nEach model's time limit for each job, from ${timed.map(run => run.label).join(', ')}:\n`);
+  console.log(renderLimits(timeLimits(timed)));
   return 0;
 }
 

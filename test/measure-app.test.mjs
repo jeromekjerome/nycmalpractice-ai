@@ -4,7 +4,7 @@
 // What is this app's own in the model measurement: the adapter the tools reach the app through (measure/app.mjs),
 // the synthetic visitors and the drafts that are wrong on purpose (measure/visitors.mjs). The tools themselves are
 // tested in measure.test.mjs, which is the same file in both apps. How each model call is told by its job is
-// tested in app.test.mjs, beside the prompts it is told by.
+// tested in app.test.mjs, beside the prompts it is told by, and here in the request shape of each provider.
 import assert from 'node:assert/strict';
 import { test } from './runner.mjs';
 import { MEASURE_DATABASE_URL } from '../measure/guard-fetch.mjs';
@@ -12,6 +12,7 @@ import { VISITORS, KNOWN_BAD } from '../measure/visitors.mjs';
 import * as app from '../measure/app.mjs';
 import { evaluateAndRemediateDraft, loadRubric } from '../gatekeeper.js';
 import { PERSONAS, CASES } from '../demo/synthetic-data.mjs';
+import { LIMITS_MS, DEFAULT_ASK_REPLY_DEADLINE_MS, replyReserveMs } from '../models.js';
 
 test("the measurement reaches the app through one file, in this app's words, and loads the app only in a measurement run", async () => {
   assert.equal(app.APP, 'nycmalpractice');
@@ -32,6 +33,49 @@ test("the measurement reaches the app through one file, in this app's words, and
   for (const call of [() => app.reply({}), () => app.find([], 'x'), () => app.classify([], 'x')]) {
     await assert.rejects(call(), /measure: the app is loaded only in a measurement run/);
   }
+});
+
+test("each measured turn is given the clock a visitor's reply gets: the reply deadline less its reserve, from its start, and this app's limit for each model and job", async () => {
+  // Outside a measurement run no clock is made either, since making one loads the app.
+  await assert.rejects(app.clockForTurn(), /measure: the app is loaded only in a measurement run/);
+  const saved = process.env.DATABASE_URL;
+  process.env.DATABASE_URL = MEASURE_DATABASE_URL;
+  try {
+    const before = Date.now();
+    const clock = await app.clockForTurn();
+    const left = clock.remaining();
+    const due = DEFAULT_ASK_REPLY_DEADLINE_MS - replyReserveMs(DEFAULT_ASK_REPLY_DEADLINE_MS);
+    assert.ok(left <= due && left >= due - (Date.now() - before), `${left} ms left`);
+    for (const [model, jobs] of Object.entries(LIMITS_MS)) {
+      for (const [job, limit] of Object.entries(jobs)) assert.equal(clock.limitFor(model, job), limit, `${model} ${job}`);
+    }
+    // Each turn has its own: a provider that failed in one turn keeps its place in the next.
+    clock.demote('openai');
+    assert.equal((await app.clockForTurn()).demoted('openai'), false);
+  } finally {
+    process.env.DATABASE_URL = saved;
+  }
+});
+
+test("the runner's two models become the app's chains, one model each, the small model under the app's own word for it, and only in a measurement run", async () => {
+  const { chains, configureModelSettings } = await import('../model-settings.js');
+  const models = { answer: 'gpt-6.2-sol', aux: 'gpt-5.4-nano' };
+  await assert.rejects(app.useModels(models), /measure: the app is loaded only in a measurement run/);
+  assert.equal((await chains()).source, 'defaults');
+  const saved = process.env.DATABASE_URL;
+  process.env.DATABASE_URL = MEASURE_DATABASE_URL;
+  try {
+    await app.useModels(models);
+    assert.deepEqual(await chains(), { answer: ['gpt-6.2-sol'], small: ['gpt-5.4-nano'], source: 'measurement', override: null });
+    // A chain of several, in the order they are tried, is handed over whole.
+    await app.useModels({ answer: ['gpt-6.1-terra', 'claude-haiku-5-5'], aux: ['gpt-6-luna', 'claude-haiku-5-5', 'gemini-3.5-flash-lite'] });
+    assert.deepEqual(await chains(), { answer: ['gpt-6.1-terra', 'claude-haiku-5-5'], small: ['gpt-6-luna', 'claude-haiku-5-5', 'gemini-3.5-flash-lite'], source: 'measurement', override: null });
+  } finally {
+    process.env.DATABASE_URL = saved;
+    // The suite's own settings again: no database, and the built-in chains.
+    configureModelSettings({ sqlClient: null });
+  }
+  assert.equal((await chains()).source, 'defaults');
 });
 
 test("the synthetic visitors are the demo's personas and one seeded family, in both modes, and hold nothing but what they say", () => {
@@ -81,4 +125,50 @@ test('each known-bad draft belongs to a visitor and a turn, passes the checks co
     assert.equal(evaluation.first_pass_compliant, true, `${bad.key} is caught by code`);
     assert.equal(evaluation.attempts[0].draft_text, bad.draft, bad.key);
   }
+});
+
+// A request as each provider's adapter sends it, for the job's own messages: the adapters are given a client that
+// keeps the body and answers with nothing, so that what jobOf reads is what really leaves the app.
+async function sentTo(provider, job, messages, { system } = {}) {
+  const [{ anthropicAdapter }, { googleAdapter }, { openaiAdapter }] = await Promise.all([import('../provider-anthropic.js'), import('../provider-google.js'), import('../provider-openai.js')]);
+  let body = null;
+  const keep = async (request) => { body = request; return { choices: [{ message: { content: '' } }], content: [], usage: {} }; };
+  const adapter = {
+    openai: openaiAdapter({ chat: { completions: { create: keep } } }),
+    anthropic: anthropicAdapter({ messages: { create: keep } }),
+    google: googleAdapter({ chat: { completions: { create: keep } } }),
+  }[provider];
+  await adapter.call({ model: 'm', entry: {}, job, system, messages, json: job !== 'reply' && job !== 'rewrite', maxTokens: 100 });
+  return body;
+}
+
+test("the measurement tells each model call by its job from each provider's own request shape, where Anthropic carries the system text apart", async () => {
+  // Each job's messages open as this app's prompts do (ask.js, auction.js, courtlistener.js and the gate).
+  const small = {
+    classify: [{ role: 'user', content: 'Classify this NYC malpractice inquiry into one category.\n\nCategories: ...' }],
+    leadScore: [{ role: 'user', content: 'You are a NYC medical malpractice case evaluator for a law firm lead marketplace.' }],
+    caseCard: [{ role: 'user', content: 'You are a NYC medical malpractice case analyst evaluating the position of the injured patient.' }],
+    // The grader's prompt is a system message: Anthropic's adapter moves it to the top-level `system`, and Google's
+    // keeps it as the first message.
+    grade: [{ role: 'system', content: 'You are an uncompromising AI Compliance Gatekeeper and Enablement Coach for a legal site.' }, { role: 'user', content: 'The draft: ...' }],
+    reply: [{ role: 'system', content: 'You are an expert NYC medical malpractice advisor.' }, { role: 'user', content: 'What is the deadline?' }],
+    rewrite: [{ role: 'system', content: 'You are an expert NYC medical malpractice advisor.' }, { role: 'user', content: 'What is the deadline?' }, { role: 'assistant', content: 'The draft.' }, { role: 'system', content: 'COMPLIANCE GATEKEEPER — AUTOMATIC REMEDIATION\nRewrite it.' }],
+  };
+  assert.deepEqual(Object.keys(small).sort(), [...app.SMALL_JOBS, ...app.REPLY_JOBS].sort());
+  for (const provider of ['openai', 'anthropic', 'google']) {
+    for (const [job, messages] of Object.entries(small)) assert.equal(app.jobOf(await sentTo(provider, job, messages)), job, `${provider} ${job}`);
+  }
+  // Anthropic: the grader's opening is the top-level system text, and its messages hold the draft alone.
+  const anthropicGrade = await sentTo('anthropic', 'grade', small.grade);
+  assert.match(anthropicGrade.system, /^You are an uncompromising AI Compliance Gatekeeper/);
+  assert.equal(anthropicGrade.messages[0].content, 'The draft: ...');
+  // The system text may also come apart from the job's own `system` argument, ahead of the messages.
+  assert.equal(app.jobOf(await sentTo('anthropic', 'grade', [{ role: 'user', content: 'The draft: ...' }], { system: 'You are an uncompromising AI Compliance Gatekeeper and Enablement Coach.' })), 'grade');
+  // The rewrite's instruction is the last message in every shape, as a user turn for Anthropic and Google.
+  assert.equal((await sentTo('anthropic', 'rewrite', small.rewrite)).messages.at(-1).role, 'user');
+  assert.equal((await sentTo('google', 'rewrite', small.rewrite)).messages.at(-1).role, 'user');
+  // A request that is none of these is the reply, and a system text given as blocks is read as its text.
+  assert.equal(app.jobOf({ system: [{ type: 'text', text: 'You are a NYC medical malpractice case analyst' }], messages: [] }), 'caseCard');
+  assert.equal(app.jobOf({ system: 'Be brief.', messages: [{ role: 'user', content: [{ type: 'text', text: 'Hello' }] }] }), 'reply');
+  assert.equal(app.jobOf({}), 'reply');
 });

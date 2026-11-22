@@ -39,6 +39,21 @@
     .transcript-msg { white-space: pre-wrap; font-size: 0.82rem; line-height: 1.5; padding: 0.6rem 0.75rem; border-radius: 8px; margin-bottom: 0.5rem; border: 1px solid var(--border); }
     .transcript-msg.user { background: rgba(158,58,90,0.08); }
     #adminMsg { font-size: 0.82rem; margin-bottom: 1rem; display: none; }
+    .models-line { margin-bottom: 0.75rem; display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+    .models-chains { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; margin-bottom: 1rem; }
+    @media (max-width: 700px) { .models-chains { grid-template-columns: 1fr; } }
+    .models-sub { font-size: 0.95rem; margin: 0.5rem 0; }
+    .chain-list { list-style: none; padding: 0; margin: 0 0 0.5rem; }
+    .chain-row { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; padding: 0.35rem 0; border-bottom: 1px solid var(--border); }
+    .chain-row select { padding: 4px 6px; background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-family: 'Inter', sans-serif; font-size: 0.78rem; }
+    .chain-row .muted-note { min-width: 4.5rem; }
+    .action-btn:disabled { opacity: 0.4; cursor: default; }
+    .models-save { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; margin-bottom: 0.75rem; }
+    .models-override { font-size: 0.85rem; display: flex; gap: 0.4rem; align-items: center; }
+    ul.models-errors, ul.models-warnings { margin: 0 0 0.5rem 1.2rem; font-size: 0.82rem; }
+    ul.models-errors { color: #fca5a5; }
+    ul.models-warnings { color: #fbbf24; }
+    p.models-saved { color: #4ade80; font-size: 0.85rem; }
   </style>
 </head>
 <body>
@@ -94,6 +109,25 @@
       <table>
         <thead><tr><th>#</th><th>Firm</th><th>Case</th><th>Tier</th><th>Price</th><th>Status</th><th>Refund</th><th>Decline reason</th><th>Delivered</th></tr></thead>
         <tbody id="leadsBody"></tbody>
+      </table>
+    </div>
+
+    <!-- Models: the order of models each job runs with, and what has been measured -->
+    <div class="section-title">Models</div>
+    <div class="glass-panel" id="modelsSection" style="padding:1.25rem;overflow-x:auto">
+      <p class="muted-note" style="margin-bottom:0.75rem">Each job tries the first model of its chain, then the next if the first fails. A change reaches every job within a minute. A model can be saved only with a measurement on record that meets what its place needs, unless you tick the box below. <button class="action-btn" onclick="loadModels()">↻ Refresh</button></p>
+      <div id="modelsProviders" class="models-line"></div>
+      <div id="modelsOverrideNote"></div>
+      <div class="models-chains" id="modelsChains"></div>
+      <div class="models-save">
+        <label class="models-override"><input type="checkbox" id="modelsOverride"> use anyway, not measured</label>
+        <button class="action-btn primary" id="modelsSave" data-action="save-chains">Save the chains</button>
+      </div>
+      <div id="modelsResult" aria-live="polite"></div>
+      <h3 class="models-sub">Measurements on record</h3>
+      <table>
+        <thead><tr><th>Model</th><th>Place</th><th>Run</th><th>Measured</th><th>Result</th></tr></thead>
+        <tbody id="modelsMeasurements"></tbody>
       </table>
     </div>
 
@@ -184,6 +218,7 @@
         </tr>
       `).join('');
       loadOperations();
+      loadModels();
     }
 
     // ── Requests, auctions and leads ──────────────────────────────────────────
@@ -356,6 +391,151 @@
     }
 
     function closeTranscript() { document.getElementById('transcriptModal').style.display = 'none'; }
+
+    // ── Models ────────────────────────────────────────────────────────────────
+    // The rules a measurement can miss, in plain words (measure/report.mjs holds the bars). Each reads after "misses:".
+    // This app has no seminar, so its replies have no seminar rule.
+    const RULE_WORDS = {
+      answer: {
+        finalPass: 'more turns did not pass the gate after the rewrite than in today\'s worst run',
+        unanchored: 'more first drafts cite a case that could not be anchored than in today\'s worst run',
+        speed: 'too slow: the slowest tenth of its replies takes over the time allowed',
+        graded: 'too many first drafts went ungraded by the model grader for the run to count',
+        baseline: 'there was no run of today\'s model to set it beside',
+      },
+      small: {
+        json: 'does not give a usable answer every time',
+        type: 'agrees with today\'s model on the case type less often than today\'s model agrees with itself',
+        tier: 'agrees with today\'s model on the lead tier less often than today\'s model agrees with itself',
+        verdict: 'agrees with today\'s grader on a draft\'s first verdict less often than today\'s grader agrees with itself',
+        leadScore: 'moves the average lead score by more than 3 points',
+        knownBad: 'does not catch a draft that is wrong on purpose which today\'s model catches',
+        speed: 'too slow: the slowest tenth of its calls takes over the time allowed',
+        baseline: 'there was no run of today\'s model to set it beside',
+      },
+    };
+    const PLACES = { answer: 'Reply', small: 'Small job' };
+
+    let modelsState = null;
+    let chainDraft = { answer: [], small: [] };
+
+    async function loadModels() {
+      try {
+        modelsState = await adminGet('/api/admin/models');
+        chainDraft = { answer: [...(modelsState.chains?.answer || [])], small: [...(modelsState.chains?.small || [])] };
+        renderModels();
+      } catch (e) {
+        showMessage('Could not load the models: ' + e.message, true);
+      }
+    }
+
+    // What a measurement says, for the owner: whether it meets the bar, or the part it meets and the rules it missed.
+    function resultOf(m) {
+      if (m.barOk) return 'meets the bar';
+      const words = (m.failed || []).map(rule => (RULE_WORDS[m.role] || {})[rule] || rule);
+      const missed = words.length ? 'misses: ' + words.join('; ') : 'does not meet the bar (the rules it missed were not recorded)';
+      return (m.qualityOk ? 'meets the quality part; ' : 'does not meet the quality part; ') + missed;
+    }
+
+    function providerLine(providers) {
+      const names = Object.keys(providers || {});
+      if (!names.length) return '<span class="muted-note">No provider state is available.</span>';
+      return names.map(name => {
+        const state = providers[name];
+        return state === 'up'
+          ? `<span class="badge b-active">${esc(name)}: up</span>`
+          : `<span class="badge b-inactive">${esc(name)}: down since ${esc(when(state.downSince))}${state.reason ? ' (' + esc(state.reason) + ')' : ''}</span>`;
+      }).join(' ');
+    }
+
+    function renderModels() {
+      const state = modelsState;
+      if (!state) return;
+      document.getElementById('modelsProviders').innerHTML = '<strong>Providers</strong> ' + providerLine(state.providers);
+      const over = state.override;
+      document.getElementById('modelsOverrideNote').innerHTML = over && over.models && over.models.length
+        ? `<p class="muted-note">The chains in use were saved under the override by ${esc(over.overriddenBy)} on ${esc(when(over.overriddenOn))}, with ${over.models.map(item => esc(item.model) + ' as a ' + (item.role === 'answer' ? 'reply' : 'small-job') + ' model').join(', ')}.</p>`
+        : '';
+      const registry = state.registry || [];
+      const sourceNote = state.source === 'settings' ? 'saved' : 'built-in, nothing saved yet';
+      document.getElementById('modelsChains').innerHTML = ['answer', 'small'].map(role => {
+        const rows = chainDraft[role].map((model, at) => {
+          const known = registry.find(entry => entry.model === model);
+          const options = (known ? registry : registry.concat([{ model, provider: '?', hasKey: true }])).map(entry =>
+            `<option value="${esc(entry.model)}"${entry.model === model ? ' selected' : ''}>${esc(entry.model)} (${esc(entry.provider)}${entry.hasKey ? '' : ', no key'})</option>`).join('');
+          return `<li class="chain-row">
+            <span class="muted-note">${at === 0 ? 'main' : 'fallback ' + at}</span>
+            <select data-chain="${role}" data-at="${at}" aria-label="${role === 'answer' ? 'Reply' : 'Small-job'} chain, place ${at + 1}">${options}</select>
+            <button class="action-btn" data-action="up" data-chain="${role}" data-at="${at}"${at === 0 ? ' disabled' : ''}>Up</button>
+            <button class="action-btn" data-action="down" data-chain="${role}" data-at="${at}"${at === chainDraft[role].length - 1 ? ' disabled' : ''}>Down</button>
+            <button class="action-btn" data-action="remove" data-chain="${role}" data-at="${at}">Remove</button>
+          </li>`;
+        }).join('');
+        return `<div class="chain-box" id="chain-${role}">
+          <h3 class="models-sub">${role === 'answer' ? 'Reply chain' : 'Small-job chain'} <span class="muted-note">(${esc(sourceNote)})</span></h3>
+          <ol class="chain-list">${rows}</ol>
+          <button class="action-btn" data-action="add" data-chain="${role}">Add a model</button>
+        </div>`;
+      }).join('');
+      const measured = state.measurements || [];
+      document.getElementById('modelsMeasurements').innerHTML = measured.length
+        ? measured.map(m => `<tr>
+            <td>${esc(m.model)}</td>
+            <td>${esc(PLACES[m.role] || m.role)}</td>
+            <td class="muted-note">${esc(m.runLabel)}</td>
+            <td style="white-space:nowrap;color:var(--muted)">${esc(m.measuredOn)}</td>
+            <td style="font-size:0.78rem">${esc(resultOf(m))}</td>
+          </tr>`).join('')
+        : '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:1.5rem">No measurement is on record yet: every model needs the override until `npm run models:upload` has been run.</td></tr>';
+    }
+
+    // The chain editor keeps its draft in chainDraft; the buttons and selects carry their place in data attributes.
+    document.getElementById('modelsChains').addEventListener('click', event => {
+      const btn = event.target.closest('button[data-action]');
+      if (!btn) return;
+      const role = btn.dataset.chain;
+      const at = Number(btn.dataset.at);
+      const chain = chainDraft[role];
+      if (btn.dataset.action === 'up' && at > 0) [chain[at - 1], chain[at]] = [chain[at], chain[at - 1]];
+      if (btn.dataset.action === 'down' && at < chain.length - 1) [chain[at + 1], chain[at]] = [chain[at], chain[at + 1]];
+      if (btn.dataset.action === 'remove') chain.splice(at, 1);
+      if (btn.dataset.action === 'add') {
+        const next = ((modelsState && modelsState.registry) || []).find(entry => !chain.includes(entry.model));
+        if (next) chain.push(next.model);
+      }
+      renderModels();
+    });
+    document.getElementById('modelsChains').addEventListener('change', event => {
+      const select = event.target.closest('select[data-chain]');
+      if (select) chainDraft[select.dataset.chain][Number(select.dataset.at)] = select.value;
+    });
+
+    document.getElementById('modelsSave').addEventListener('click', async () => {
+      const result = document.getElementById('modelsResult');
+      const btn = document.getElementById('modelsSave');
+      btn.disabled = true;
+      try {
+        const res = await fetch('/api/admin/models/chains', {
+          method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-secret': adminSecret },
+          body: JSON.stringify({ answer: chainDraft.answer, small: chainDraft.small, override: document.getElementById('modelsOverride').checked }),
+        });
+        const data = await res.json().catch(() => ({}));
+        const list = (items, label) => (items && items.length ? `<p class="models-${label}"><strong>${label === 'errors' ? 'Not saved' : 'Note'}</strong></p><ul class="models-${label}">${items.map(item => `<li>${esc(item)}</li>`).join('')}</ul>` : '');
+        if (res.status === 200 && data.ok) {
+          result.innerHTML = '<p class="models-saved">The chains were saved.</p>' + list(data.warnings, 'warnings');
+          showMessage('Chains saved');
+          await loadModels();
+        } else if (data.errors) {
+          result.innerHTML = list(data.errors, 'errors') + list(data.warnings, 'warnings');
+        } else {
+          result.innerHTML = `<p class="models-errors">${esc(data.error || 'The chains could not be saved.')}</p>`;
+        }
+      } catch (e) {
+        showMessage('Failed: ' + e.message, true);
+      } finally {
+        btn.disabled = false;
+      }
+    });
 
     function esc(value) {
       return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');

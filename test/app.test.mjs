@@ -47,9 +47,34 @@ let activeFetch = realFetch;
 globalThis.fetch = (...args) => activeFetch(...args);
 
 const { default: app } = await import('../server.js');
+
+// server.js has set providers.js to email the owner when a provider answers 400, and to keep the provider state in its
+// database. Many tests here make a fake provider fail on purpose, and none of them may send mail, so the suite starts
+// with nobody told and no state; the tests of the telling set it themselves (withOperatorMail).
+const { configureProviders } = await import('../providers.js');
+configureProviders({ tell: null });
+
+// server.js has also given the model settings its database (model-settings.js). The suite starts with none, so that
+// every job runs on the built-in chains and no test's fake database is asked for the settings unless it means to be;
+// the tests of the settings give them a database of their own (withModelSettings).
+const { configureModelSettings, chains } = await import('../model-settings.js');
+configureModelSettings({ sqlClient: null });
+
+// Runs fn with the model settings over the database client a test gives them, and with none again after it.
+async function withModelSettings(options, fn) {
+  configureModelSettings(options);
+  try {
+    return await fn();
+  } finally {
+    configureModelSettings({ sqlClient: null });
+  }
+}
+
 const { clearSearchCache, extractCaseType, searchMalpracticeCases } = await import('../courtlistener.js');
 // The chains the app runs with, read from models.js: a test of what the app calls repeats no model's name.
-const { ANSWER_MODELS, AUX_MODELS } = await import('../models.js');
+const { ANSWER_MODELS, AUX_MODELS, DEFAULTS } = await import('../models.js');
+// The chains the app runs with in these tests, the built-in ones, as the jobs will read them (model-settings.js).
+const { answer: ANSWER_CHAIN, small: SMALL_CHAIN } = await chains();
 const { scoreLead } = await import('../auction.js');
 const { CONVERSATION_RETENTION_DAYS } = await import('../retention.js');
 const { CONTACT_CONSENT_TEXT } = await import('../site.js');
@@ -418,6 +443,8 @@ test('GET /api/cron with the cron secret closes auctions, declines overdue leads
     assert.ok(queries.some(query => /FROM auctions WHERE status = 'open' AND closes_at <= NOW\(\)/.test(query)), 'expired auctions were not looked up');
     assert.ok(queries.some(query => /^UPDATE leads SET status = 'declined', declined_at = NOW\(\), decline_reason = 'expired' WHERE id = \(SELECT id FROM leads WHERE status = 'pending' AND accept_deadline < NOW\(\) ORDER BY accept_deadline LIMIT 1 FOR UPDATE SKIP LOCKED\) AND status = 'pending' RETURNING/.test(query)), 'overdue leads were not declined');
     assert.ok(queries.some(query => /^UPDATE firms SET auction_decline_count = \(SELECT count\(\*\) FROM leads l WHERE l\.firm_id = firms\.id AND l\.status = 'declined' AND l\.auction_id IS NOT NULL AND l\.declined_at > NOW\(\) - INTERVAL '30 days'\)/.test(query)), 'decline counts were not brought up to date');
+    // The last step asks which providers' model lists are kept for the month.
+    assert.ok(queries.some(query => /^SELECT provider FROM provider_model_lists WHERE month = \$1/.test(query)), "the providers' model lists were not looked at");
   } finally {
     await server.close();
   }
@@ -4355,7 +4382,8 @@ test('a contact request that fails tells the operator at once, without the visit
 test('/health/deep reports the database, its columns and the nightly job, for an uptime monitor', async () => {
   const previous = process.env.HEALTH_DEEP_CACHE_MS;
   process.env.HEALTH_DEEP_CACHE_MS = '0';
-  const columns = ['firms.card_declined_at', 'leads.decline_reason', 'user_interactions.outcome', 'job_runs.ran_at', 'ai_usage.created_at', 'auctions.reminder_sent_at'];
+  const columns = ['firms.card_declined_at', 'leads.decline_reason', 'user_interactions.outcome', 'job_runs.ran_at', 'ai_usage.created_at', 'auctions.reminder_sent_at',
+    'ai_provider_state.failed_replies', 'app_settings.value', 'model_measurements.bar_ok', 'provider_model_lists.models'];
   const pgTime = ms => new Date(ms).toISOString().replace('T', ' ').replace('Z', '+00');
   let world = {};
   const handler = async (url, init) => {
@@ -4383,6 +4411,36 @@ test('/health/deep reports the database, its columns and the nightly job, for an
       world = { down: true };
       assert.deepEqual(await check(), { status: 503, body: { ok: false, database: 'down', schema: 'unknown', nightlyJob: 'unknown' } });
     }));
+  } finally {
+    if (previous === undefined) delete process.env.HEALTH_DEEP_CACHE_MS; else process.env.HEALTH_DEEP_CACHE_MS = previous;
+    await server.close();
+  }
+});
+
+test("/health/deep fails a database that lacks the provider state's table, the model settings' two or the model watch's, and names the columns it looked for", async () => {
+  const previous = process.env.HEALTH_DEEP_CACHE_MS;
+  process.env.HEALTH_DEEP_CACHE_MS = '0';
+  // Every column the check looks for except those of the four newest tables, as in a deploy whose npm run setup-db
+  // was not run.
+  const older = ['firms.card_declined_at', 'leads.decline_reason', 'user_interactions.outcome', 'job_runs.ran_at', 'ai_usage.created_at', 'auctions.reminder_sent_at'];
+  const asked = [];
+  const handler = async (url, init) => {
+    const { query, params } = JSON.parse(init.body);
+    const q = query.replace(/\s+/g, ' ').trim();
+    if (/^SELECT 1$/.test(q)) return rowsResponse([['?column?', INT]], [['1']]);
+    if (/FROM information_schema\.columns/.test(q)) {
+      asked.push(...String(params[0]).replace(/"/g, '').split(/[{},]/).filter(Boolean));
+      return rowsResponse([['col', TEXT]], older.map(col => [col]));
+    }
+    if (/FROM job_runs/.test(q)) return rowsResponse([['last_ok', BOOL], ['last_run', TIMESTAMPTZ]], [['t', new Date(Date.now() - 3600_000).toISOString().replace('T', ' ').replace('Z', '+00')]]);
+    return jsonResponse(EMPTY_ROWS);
+  };
+  const server = await startServer(app);
+  try {
+    const { result, logs } = await capturingLogs(() => withOutboundHttp(handler, async () => (await fetch(`${server.baseUrl}/health/deep`)).json()));
+    assert.deepEqual(result, { ok: false, database: 'ok', schema: 'missing columns', nightlyJob: 'ok' });
+    for (const table of ['ai_provider_state', 'app_settings', 'model_measurements', 'provider_model_lists']) assert.ok(asked.includes(table), `${table} was not looked for`);
+    assert.ok(logs.includes('[health] the database is missing columns the code uses: ai_provider_state.failed_replies, app_settings.value, model_measurements.bar_ok, provider_model_lists.models'), logs.join('\n'));
   } finally {
     if (previous === undefined) delete process.env.HEALTH_DEEP_CACHE_MS; else process.env.HEALTH_DEEP_CACHE_MS = previous;
     await server.close();
@@ -4420,6 +4478,178 @@ test('the nightly job runs every step when one fails, records the run, and tells
   } finally {
     await server.close();
   }
+});
+
+// Runs fn with the operator's mail kept in a list instead of sent, and with providers.js telling the owner as the
+// site sets it up (server.js).
+async function withOperatorMail(fn) {
+  const nodemailer = (await import('nodemailer')).default;
+  const { tellOwnerOfProviders } = await import('../operations.js');
+  const sent = [];
+  const original = nodemailer.createTransport;
+  nodemailer.createTransport = () => ({ sendMail: async message => { sent.push(message); } });
+  configureProviders({ tell: tellOwnerOfProviders });
+  try {
+    await fn(sent);
+  } finally {
+    configureProviders({ tell: null });
+    nodemailer.createTransport = original;
+  }
+}
+
+test('the daily summary names the models the override let in that have no measurement on record, who used it and when, for as long as one has none', async () => {
+  const { sendDailyDigest } = await import('../operations.js');
+  const overriddenOn = '2026-11-21T20:04:00.000Z';
+  const saved = {
+    answer: ['gpt-6.2-sol', 'gpt-6.1-terra'], small: ['gpt-5.4-nano', 'gpt-6-luna'],
+    override: { overriddenBy: 'owner', overriddenOn, models: [{ model: 'gpt-6.2-sol', role: 'answer' }, { model: 'gpt-5.4-nano', role: 'small' }, { model: 'gpt-6-luna', role: 'small' }] },
+  };
+  // gpt-6-luna was let in for missing the bar: it has a measurement on record, and is not named.
+  const measured = [{ model: 'gpt-6-luna', role: 'small', measured_on: '2026-11-20', run_label: 'small-gpt-6-luna', quality_ok: true, bar_ok: false }];
+  const sqlClient = async strings => {
+    const query = strings.join('?').replace(/\s+/g, ' ').trim();
+    if (/FROM app_settings/.test(query)) return [{ value: saved }];
+    if (/FROM model_measurements/.test(query)) return measured;
+    throw new Error(`The fake settings do not know this statement: ${query}`);
+  };
+  const newYork = new Date(overriddenOn).toLocaleString('en-US', { timeZone: 'America/New_York', dateStyle: 'medium', timeStyle: 'short' });
+  const summaries = [];
+  await withDigest(() => withOperatorMail(async sent => {
+    await withModelSettings({ sqlClient, app: 'nycmalpractice' }, () => withOutboundHttp(async () => jsonResponse(EMPTY_ROWS), async () => {
+      await sendDailyDigest();
+      measured.push({ model: 'gpt-5.4-nano', role: 'small', measured_on: '2026-11-22', run_label: 'small-gpt-5.4-nano', quality_ok: true, bar_ok: true });
+      await sendDailyDigest();
+      measured.push({ model: 'gpt-6.2-sol', role: 'answer', measured_on: '2026-11-22', run_label: 'reply-gpt-6.2-sol', quality_ok: true, bar_ok: true });
+      await sendDailyDigest();
+    }));
+    summaries.push(...sent.map(mail => String(mail.html)));
+  }));
+  assert.equal(summaries.length, 3);
+  assert.ok(summaries[0].includes(`<p>The model chains were saved under the override (by owner, ${newYork} New York time) with gpt-6.2-sol as a reply model and gpt-5.4-nano as a small-job model, which have no measurement on record. This is repeated in each daily summary until each has one.</p>`), summaries[0]);
+  assert.ok(summaries[1].includes(`<p>The model chains were saved under the override (by owner, ${newYork} New York time) with gpt-6.2-sol as a reply model, which has no measurement on record. This is repeated in each daily summary until it has one.</p>`), summaries[1]);
+  assert.doesNotMatch(summaries[2], /override/);
+  for (const summary of summaries) assert.match(summary, /the last 24 hours/);
+});
+
+test("the site sets providers.js to tell the owner through one telling, of a provider's 400 and of a provider marked down or back up, and keeps the provider state in its own database", () => {
+  const server = readFileSync(new URL('../server.js', import.meta.url), 'utf8');
+  assert.match(server, /const stateOfProviders = providerState\(\{ sqlClient: sql, ping: pingProvider, tell: tellOwnerOfProviders \}\);/);
+  // A provider's ping is a health check of its main model in the chains in use when it is sent.
+  assert.match(server, /async function pingProvider\(provider\) \{\s+const \{ answer, small \} = await chains\(\);\s+return providerPing\(\[answer, small\]\)\(provider\);\s+\}/);
+  assert.match(server, /configureProviders\(\{ tell: tellOwnerOfProviders, state: stateOfProviders \}\);/);
+  assert.match(server, /import \{[^}]*\btellOwnerOfProviders\b[^}]*\} from '\.\/operations\.js'/);
+  assert.match(server, /import \{ providerState \} from '\.\/provider-state\.js'/);
+  // The table is made with the others, by npm run setup-db, and never on first use.
+  const setup = readFileSync(new URL('../setup-db.js', import.meta.url), 'utf8').replace(/\s+/g, ' ');
+  assert.match(setup, /CREATE TABLE IF NOT EXISTS ai_provider_state \( provider TEXT PRIMARY KEY, down_since TIMESTAMPTZ, reason TEXT, retry_at TIMESTAMPTZ, failed_replies TIMESTAMPTZ\[\] NOT NULL DEFAULT '\{\}', updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW\(\) \)/);
+});
+
+test("the nightly job's watch of the providers' model lists keeps its table in setup-db.js, is one step of the job and asks the chains in use", () => {
+  const setup = readFileSync(new URL('../setup-db.js', import.meta.url), 'utf8').replace(/\s+/g, ' ');
+  assert.match(setup, /CREATE TABLE IF NOT EXISTS provider_model_lists \( provider TEXT NOT NULL, month DATE NOT NULL, models JSONB NOT NULL, PRIMARY KEY \(provider, month\) \)/);
+  const server = readFileSync(new URL('../server.js', import.meta.url), 'utf8');
+  assert.match(server, /\['watch the model lists of the providers', watchProviderModels\],\s+\]\);/);
+  assert.match(server, /modelWatch\(\{ today: new Date\(\), sqlClient: sql, adapters: adaptersFor\(process\.env\), notify: notifyOperator, inUse: modelsInUse, registry: MODELS, site: 'NYCMalpractice\.ai' \}\)/);
+  assert.match(server, /return \[\.\.\.answer, \.\.\.small, \.\.\.DEFAULTS\.answer, \.\.\.DEFAULTS\.small, \.\.\.DEFAULTS\.embedding\];/);
+});
+
+test('the site keeps its model chains in its own database, under its own name in the measurements, and tells the owner of a saved model the registry does not have through operations.js', () => {
+  const server = readFileSync(new URL('../server.js', import.meta.url), 'utf8');
+  assert.match(server, /configureModelSettings\(\{ sqlClient: sql, app: APP_ID, tell: tellOwnerOfModelChains \}\);/);
+  assert.match(server, /import \{[^}]*\btellOwnerOfModelChains\b[^}]*\} from '\.\/operations\.js'/);
+  assert.match(server, /import \{[^}]*\bconfigureModelSettings\b[^}]*\} from '\.\/model-settings\.js'/);
+  // The measurements a run records are named by the app's adapter (measure/app.mjs), and the site by site.js: the two agree.
+  assert.match(readFileSync(new URL('../site.js', import.meta.url), 'utf8'), /export const APP_ID = 'nycmalpractice';/);
+  assert.match(readFileSync(new URL('../measure/app.mjs', import.meta.url), 'utf8'), /export const APP = 'nycmalpractice';/);
+});
+
+test("the model settings' two tables are made by npm run setup-db, as the design gives them, and never on first use", () => {
+  const setup = readFileSync(new URL('../setup-db.js', import.meta.url), 'utf8').replace(/\s+/g, ' ');
+  assert.match(setup, /CREATE TABLE IF NOT EXISTS app_settings \( key TEXT PRIMARY KEY, value JSONB NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW\(\) \)/);
+  assert.match(setup, /CREATE TABLE IF NOT EXISTS model_measurements \( id BIGSERIAL PRIMARY KEY, app TEXT NOT NULL, model TEXT NOT NULL, role TEXT NOT NULL CHECK \(role IN \('answer','small'\)\), measured_on DATE NOT NULL, run_label TEXT NOT NULL, quality_ok BOOLEAN NOT NULL, bar_ok BOOLEAN NOT NULL, stats JSONB NOT NULL, UNIQUE \(app, model, role, run_label\) \)/);
+  assert.doesNotMatch(readFileSync(new URL('../model-settings.js', import.meta.url), 'utf8'), /CREATE TABLE/);
+});
+
+test('the owner is emailed when a provider is marked down, with since when, why in plain words and what the app does meanwhile, and when it answers again, with how long it was down', async () => {
+  const { tellOwnerOfProviders } = await import('../operations.js');
+  const since = new Date(Date.now() - 7 * 60_000 - 10_000).toISOString();
+  const newYork = new Date(since).toLocaleString('en-US', { timeZone: 'America/New_York', dateStyle: 'medium', timeStyle: 'short' });
+  // This app's built-in chains are every one OpenAI's.
+  assert.ok([...DEFAULTS.answer, ...DEFAULTS.small].every(model => /^gpt-/.test(model)));
+  await withOperatorMail(async sent => {
+    await capturingLogs(async () => {
+      await tellOwnerOfProviders({ kind: 'down', provider: 'openai', reason: 'timeout', since });
+      // A provider that is in no chain: every chain has another provider to answer from.
+      await tellOwnerOfProviders({ kind: 'down', provider: 'alpha-test', reason: 'quota', since });
+      await tellOwnerOfProviders({ kind: 'up', provider: 'openai', reason: 'timeout', since });
+    });
+    assert.equal(sent.length, 3);
+    const [down, elsewhere, up] = sent.map(mail => ({ subject: mail.subject, html: String(mail.html) }));
+    assert.equal(down.subject, 'NYCMalpractice.ai: openai is marked down');
+    assert.ok(down.html.includes(`openai was marked down at ${newYork} New York time, because it did not answer in time.`), down.html);
+    // Every chain here is OpenAI's.
+    assert.ok(down.html.includes('No chain has another provider, so the app keeps trying openai'), down.html);
+    assert.ok(elsewhere.html.includes(`alpha-test was marked down at ${newYork} New York time, because the account's quota is spent.`), elsewhere.html);
+    assert.ok(elsewhere.html.includes('The app is answering from the next provider in each chain'), elsewhere.html);
+    assert.ok(down.html.includes('<p>It stays marked down for at least five minutes; you will be emailed once it answers after that.</p>'), down.html);
+    assert.doesNotMatch(down.html, /once when it answers again/);
+    assert.equal(up.subject, 'NYCMalpractice.ai: openai is answering again');
+    assert.ok(up.html.includes(`openai answered again, and is no longer marked down. It was marked down for 7 minutes, since ${newYork} New York time, because it did not answer in time.`), up.html);
+    for (const mail of [down, elsewhere, up]) assert.doesNotMatch(mail.html, /undefined|null|NaN|Invalid Date/);
+  });
+  // Chains saved with another provider behind OpenAI in each: the app answers from it meanwhile.
+  const mixed = { sqlClient: async () => [{ value: { answer: ['gpt-6.1-terra', 'claude-haiku-5-5'], small: ['gpt-6-luna', 'claude-haiku-5-5'] } }], app: 'nycmalpractice' };
+  await withOperatorMail(async sent => {
+    await capturingLogs(() => withModelSettings(mixed, () => tellOwnerOfProviders({ kind: 'down', provider: 'openai', reason: 'timeout', since })));
+    assert.equal(sent.length, 1);
+    assert.ok(String(sent[0].html).includes('The app is answering from the next provider in each chain. It asks openai only after the others'), String(sent[0].html));
+    assert.doesNotMatch(String(sent[0].html), /No chain has another provider/);
+  });
+});
+
+test('a request a provider refuses as malformed emails the owner once an hour for each provider, with the provider\'s message and nothing a visitor wrote', async () => {
+  const { tellOwnerOfBadRequest } = await import('../operations.js');
+  const note = { kind: 'bad_request', provider: 'alpha-test', model: 'alpha-1', job: 'reply', status: 400, code: 'unsupported_parameter', message: 'Unsupported parameter: <temperature>.' };
+  await withOperatorMail(async sent => {
+    await capturingLogs(async () => {
+      await tellOwnerOfBadRequest(note);
+      await tellOwnerOfBadRequest({ ...note, model: 'alpha-2' });
+      await tellOwnerOfBadRequest({ ...note, provider: 'beta-test', model: 'beta-1', code: null });
+    });
+    assert.equal(sent.length, 2, 'one email an hour for each provider');
+    const [first, second] = sent;
+    assert.match(first.subject, /alpha-test/);
+    assert.match(second.subject, /beta-test/);
+    for (const text of ['alpha-test', 'alpha-1', 'reply', '400', 'unsupported_parameter', 'Unsupported parameter: &lt;temperature&gt;.', 'refused a request the app sent it']) {
+      assert.ok(String(first.html).includes(text), text);
+    }
+    assert.ok(!String(second.html).includes('null'));
+  });
+});
+
+test('saved model chains that name a model the registry does not have email the owner once in 24 hours, naming the model and the built-in chains used instead', async () => {
+  const { tellOwnerOfModelChains } = await import('../operations.js');
+  const note = { kind: 'unknown_models', models: ['gpt-0-gone', '<b>'] };
+  const realNow = Date.now;
+  await withOperatorMail(async sent => {
+    await capturingLogs(async () => {
+      assert.equal(await tellOwnerOfModelChains(note), true);
+      // The settings tell at each read of the row, once a minute at most: no second email that day.
+      assert.equal(await tellOwnerOfModelChains(note), false);
+      const nearlyADay = realNow() + 24 * 60 * 60_000 - 60_000;
+      Date.now = () => nearlyADay;
+      try { assert.equal(await tellOwnerOfModelChains(note), false); } finally { Date.now = realNow; }
+      const aDayOn = realNow() + 24 * 60 * 60_000 + 1_000;
+      Date.now = () => aDayOn;
+      try { assert.equal(await tellOwnerOfModelChains(note), true); } finally { Date.now = realNow; }
+    });
+    assert.equal(sent.length, 2);
+    assert.equal(sent[0].subject, 'NYCMalpractice.ai: the saved model chains name a model the app does not know');
+    assert.equal(String(sent[0].html),
+      "<p>The model chains saved in the settings name gpt-0-gone, &lt;b&gt;, which the app's registry of models does not have. Until they are saved again, every job runs on the built-in chains (models.js): " +
+      `replies ${DEFAULTS.answer.join(', ')}; small jobs ${DEFAULTS.small.join(', ')}.</p>` +
+      '<p>Save the chains again from the admin page. You will not be emailed about this again for a day.</p>');
+  });
 });
 
 // ─── What the independent review of this round found ─────────────────────────
@@ -5499,4 +5729,139 @@ test('the measurement tells each model call by the job it was for', async () => 
   // The reply and the rewrite go to the answer chain; the rest to the small one.
   for (const call of world.calls.openai) assert.equal(call.model, (REPLY_JOBS.includes(jobOf(call.request)) ? ANSWER_MODELS : AUX_MODELS)[0], call.kind);
   assert.equal(jobOf({}), 'reply');
+});
+
+// ─── The Models section of the admin page: its three routes ───────────────────
+
+// A database client in memory for the settings: the row of chains, and the measurements, with the statements the
+// settings send (model-settings.js). Anything else is refused.
+function settingsClient() {
+  const settings = new Map();
+  const measured = [];
+  const client = async (strings, ...params) => {
+    const query = strings.join('?').replace(/\s+/g, ' ').trim();
+    if (/^SELECT value FROM app_settings WHERE key = \?$/.test(query)) return settings.has(params[0]) ? [{ value: JSON.parse(settings.get(params[0])) }] : [];
+    if (/^INSERT INTO app_settings /.test(query)) { settings.set(params[0], params[1]); return []; }
+    if (/^SELECT model, role, measured_on::text AS measured_on, run_label, quality_ok, bar_ok, stats->'barFailed' AS bar_failed FROM model_measurements WHERE app = \?/.test(query)) {
+      return measured.filter(row => row.app === params[0]).map(row => ({ ...row, bar_failed: row.stats.barFailed ?? null }));
+    }
+    if (/^INSERT INTO model_measurements /.test(query) && /IS DISTINCT FROM/.test(query)) {
+      const [app, model, role, measured_on, run_label, quality_ok, bar_ok, stats] = params;
+      const row = { app, model, role, measured_on, run_label, quality_ok: String(quality_ok) === 'true', bar_ok: String(bar_ok) === 'true', stats: JSON.parse(stats) };
+      const at = measured.findIndex(held => held.app === app && held.model === model && held.role === role && held.run_label === run_label);
+      if (at === -1) { measured.push(row); return [{ id: measured.length }]; }
+      if (JSON.stringify(measured[at]) === JSON.stringify(row)) return [];
+      measured[at] = row;
+      return [{ id: at + 1 }];
+    }
+    throw new Error(`The fake settings database does not know this statement: ${query}`);
+  };
+  return { client, settings, measured };
+}
+
+const MODELS_ROW = { model: 'gpt-6-luna', role: 'small', measuredOn: '2026-11-21', runLabel: 'small-gpt-6-luna', qualityOk: true, barOk: false, failed: ['type', 'leadScore'], stats: { jsonValidRate: 1 } };
+
+test('the Models routes are closed without the admin secret, give the page the chains, providers, measurements and registry, and save chains only when nothing is wrong', async () => {
+  const database = settingsClient();
+  const offered = ['gpt-6.2-sol', 'gpt-6.1-terra', 'gpt-6-luna', 'gpt-5.4-mini'];
+  const admin = { 'content-type': 'application/json', 'x-admin-secret': process.env.ADMIN_SECRET };
+  const server = await startServer(app);
+  try {
+    await capturingLogs(() => withModelSettings({ sqlClient: database.client, app: 'nycmalpractice', env: { OPENAI_API_KEY: 'a-key' }, modelsOffered: async providers => Object.fromEntries(providers.map(provider => [provider, offered])) }, () => withOutboundHttp(async () => jsonResponse(EMPTY_ROWS), async () => {
+      const call = (method, path, body, headers = admin) => fetch(server.baseUrl + path, { method, headers, ...(body && method !== 'GET' ? { body: JSON.stringify(body) } : {}) })
+        .then(async response => ({ status: response.status, body: await response.json() }));
+      // Closed without the secret, and with a wrong one.
+      for (const [method, path] of [['GET', '/api/admin/models'], ['POST', '/api/admin/models/chains'], ['POST', '/api/admin/models/measurements']]) {
+        assert.equal((await call(method, path, { answer: ['gpt-6-luna'], small: ['gpt-6-luna'] }, { 'content-type': 'application/json' })).status, 401, path);
+        assert.equal((await call(method, path, { answer: ['gpt-6-luna'], small: ['gpt-6-luna'] }, { 'content-type': 'application/json', 'x-admin-secret': 'wrong' })).status, 401, path);
+      }
+      assert.deepEqual(database.measured, []);
+
+      // What the page is given, before anything is saved: the built-in chains, each provider's state, no measurement.
+      const first = await call('GET', '/api/admin/models');
+      assert.equal(first.status, 200);
+      assert.deepEqual(first.body.chains, { answer: ANSWER_CHAIN, small: SMALL_CHAIN });
+      assert.equal(first.body.source, 'defaults');
+      assert.equal(first.body.override, null);
+      assert.deepEqual(first.body.providers, { openai: 'up' });
+      assert.deepEqual(first.body.measurements, []);
+      // The registered chat models, each with its provider and whether that provider has a key, never the key.
+      const luna = first.body.registry.find(entry => entry.model === 'gpt-6-luna');
+      assert.deepEqual(luna, { model: 'gpt-6-luna', provider: 'openai', hasKey: true, retiresOn: null });
+      assert.equal(first.body.registry.some(entry => /embedding/.test(entry.model)), false);
+      assert.equal(JSON.stringify(first.body).includes(process.env.OPENAI_API_KEY), false);
+
+      // A save of a model with no measurement is refused with the checker's words, and saves nothing.
+      const unmeasured = { answer: ['gpt-6.2-sol', 'gpt-6.1-terra'], small: ['gpt-6-luna'] };
+      const refused = await call('POST', '/api/admin/models/chains', unmeasured);
+      assert.equal(refused.status, 422);
+      assert.equal(refused.body.ok, false);
+      assert.ok(refused.body.errors.includes('The reply chain names gpt-6.2-sol, which has no measurement on record as a reply model.'), refused.body.errors.join(' | '));
+      assert.ok(Array.isArray(refused.body.warnings));
+      assert.equal(database.settings.size, 0);
+
+      // The same save with the override is saved, and the row records who and what it let in.
+      const used = await call('POST', '/api/admin/models/chains', { ...unmeasured, override: true });
+      assert.equal(used.status, 200);
+      assert.equal(used.body.ok, true);
+      assert.deepEqual(used.body.errors, []);
+      assert.ok(used.body.warnings.some(warning => /^Under the override, the reply chain names gpt-6\.2-sol/.test(warning)), used.body.warnings.join(' | '));
+      const row = JSON.parse(database.settings.get('model_chains'));
+      assert.deepEqual([row.answer, row.small], [unmeasured.answer, unmeasured.small]);
+      assert.equal(row.override.overriddenBy, 'owner');
+      assert.deepEqual(row.override.models.map(({ model, role }) => `${role} ${model}`), ['answer gpt-6.2-sol', 'answer gpt-6.1-terra', 'small gpt-6-luna']);
+      const after = await call('GET', '/api/admin/models');
+      assert.deepEqual(after.body.chains, unmeasured);
+      assert.equal(after.body.source, 'settings');
+      assert.equal(after.body.override.overriddenBy, 'owner');
+
+      // Only the ticked box counts: anything but true is no override.
+      assert.equal((await call('POST', '/api/admin/models/chains', { answer: ['gpt-6.1-terra'], small: ['gpt-5.4-mini'], override: 'yes' })).status, 422);
+      assert.equal((await call('POST', '/api/admin/models/chains', { answer: 'gpt-6.1-terra', small: [] })).status, 422);
+      assert.equal((await call('POST', '/api/admin/models/chains', { answer: ['gpt-6.1-terra'] })).status, 422);
+    })));
+  } finally {
+    await server.close();
+  }
+});
+
+test('an upload of measurements stores its rows for this app, a second identical upload stores none, a corrected row replaces its row, and a malformed or foreign body stores nothing', async () => {
+  const database = settingsClient();
+  const admin = { 'content-type': 'application/json', 'x-admin-secret': process.env.ADMIN_SECRET };
+  const server = await startServer(app);
+  try {
+    await capturingLogs(() => withModelSettings({ sqlClient: database.client, app: 'nycmalpractice', env: { OPENAI_API_KEY: 'a-key' } }, () => withOutboundHttp(async () => jsonResponse(EMPTY_ROWS), async () => {
+      const send = body => fetch(`${server.baseUrl}/api/admin/models/measurements`, { method: 'POST', headers: admin, body: JSON.stringify(body) })
+        .then(async response => ({ status: response.status, body: await response.json() }));
+      const rows = [MODELS_ROW, { ...MODELS_ROW, model: 'gpt-6.1-terra', role: 'answer', runLabel: 'reply-gpt-6.1-terra', barOk: true, failed: [] }];
+      assert.deepEqual(await send({ app: 'nycmalpractice', rows }), { status: 200, body: { saved: 2 } });
+      assert.equal(database.measured.length, 2);
+      assert.ok(database.measured.every(row => row.app === 'nycmalpractice'));
+      assert.deepEqual(database.measured[0].stats, { jsonValidRate: 1, barFailed: ['type', 'leadScore'] });
+      assert.deepEqual(await send({ app: 'nycmalpractice', rows }), { status: 200, body: { saved: 0 } });
+      // The page reads them back with the rules each missed.
+      const read = await fetch(`${server.baseUrl}/api/admin/models`, { headers: admin }).then(response => response.json());
+      assert.deepEqual(read.measurements.map(({ model, role, barOk, qualityOk, failed }) => [model, role, barOk, qualityOk, failed]), [
+        ['gpt-6-luna', 'small', false, true, ['type', 'leadScore']], ['gpt-6.1-terra', 'answer', true, true, []],
+      ]);
+      // A corrected row of the same run replaces it.
+      assert.deepEqual(await send({ app: 'nycmalpractice', rows: [{ ...MODELS_ROW, barOk: true, failed: [] }] }), { status: 200, body: { saved: 1 } });
+      assert.equal(database.measured.length, 2);
+      assert.equal(database.measured[0].bar_ok, true);
+
+      // Another app's measurements, a body with a malformed row, and one that is no body at all store nothing.
+      const before = JSON.stringify(database.measured);
+      const foreign = await send({ app: 'nycinjury', rows });
+      assert.equal(foreign.status, 400);
+      assert.match(foreign.body.error, /nycmalpractice/);
+      const malformed = await send({ app: 'nycmalpractice', rows: [{ ...MODELS_ROW, runLabel: 'new-run' }, { ...MODELS_ROW, runLabel: 'bad run', role: 'both' }] });
+      assert.equal(malformed.status, 400);
+      assert.match(malformed.body.error, /Row 2 \(gpt-6-luna, bad run\): role must be "answer" or "small"/);
+      assert.equal((await send({ app: 'nycmalpractice' })).status, 400);
+      assert.equal((await send({ app: 'nycmalpractice', rows: [] })).status, 400);
+      assert.equal(JSON.stringify(database.measured), before);
+    })));
+  } finally {
+    await server.close();
+  }
 });

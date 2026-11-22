@@ -1,52 +1,15 @@
 import sql from './db.js';
+import { priceOn } from './model-registry.js';
 
-// OpenAI's published prices in dollars per million tokens, input then output: the standard rate, read from
-// developers.openai.com/api/docs/pricing on 2026-11-20. Until that day the rows here were twice the published
-// prices, so every recorded cost, the daily summary's estimate and both caps were out by a factor of two. They
-// are the published prices now: a cap of 25 dollars means 25 dollars.
-const PRICES = {
-  'gpt-4o': [2.50, 10.00],
-  'gpt-4o-mini': [0.15, 0.60],
-  'gpt-4.1': [2.00, 8.00],
-  'gpt-4.1-mini': [0.40, 1.60],
-  'gpt-5.4': [2.50, 15.00],
-  'gpt-5.4-mini': [0.75, 4.50],
-  'gpt-5.4-nano': [0.20, 1.25],
-  'gpt-6.2-sol': [2.00, 10.00],
-  'gpt-6.1-terra': [1.00, 5.00],
-  'gpt-6-luna': [0.10, 0.50],
-  'text-embedding-3-small': [0.02, 0],
-  'text-embedding-3-large': [0.13, 0],
-};
+// What each model costs is in model-registry.js, the one place that knows the models.
+
 // A model with no price is counted at this rate, far above any real one, so that it uses the cap up quickly
 // instead of spending unseen. hasPrice() and the ai_price_missing warning are how the gap gets noticed.
 const DEFAULT_RATE = [20, 100];
 
-// A row prices its own name and that name's dated snapshots (gpt-4o-2024-08-06), and nothing else. A name that
-// merely begins with a priced one (gpt-4o-realtime-preview, gpt-5.4-pro) is a different model at a different
-// price, usually a higher one: counting it at the shorter name's price would under-count against the cap.
-const DATED_SNAPSHOT = /-\d{4}-\d{2}-\d{2}$/;
-
-function isRate(value) {
-  return Array.isArray(value) && value.length === 2 && value.every(part => Number.isFinite(part) && part >= 0);
-}
-
-function configuredPrices() {
-  if (!process.env.OPENAI_MODEL_RATES_JSON) return {};
-  try { return JSON.parse(process.env.OPENAI_MODEL_RATES_JSON) || {}; }
-  catch { return {}; }
-}
-
-function tablePrice(name) {
-  return Object.hasOwn(PRICES, name) ? PRICES[name] : null;
-}
-
-// The price on record for a model, or null when there is none: OPENAI_MODEL_RATES_JSON first, then the table.
-function priceOnRecord(model) {
-  const name = String(model || '');
-  const custom = configuredPrices()[name];
-  if (isRate(custom)) return custom;
-  return tablePrice(name) || tablePrice(name.replace(DATED_SNAPSHOT, ''));
+// The price on record for a model, or null when there is none.
+function priceOnRecord(model, day) {
+  return priceOn(model, day);
 }
 
 export function hasPrice(model) {
@@ -55,8 +18,8 @@ export function hasPrice(model) {
 
 const reportedUnpriced = new Set();
 
-function ratesFor(model) {
-  const price = priceOnRecord(model);
+function ratesFor(model, day) {
+  const price = priceOnRecord(model, day);
   if (price) return price;
   if (!reportedUnpriced.has(model)) {
     reportedUnpriced.add(model);
@@ -69,8 +32,10 @@ function money(value) {
   return Math.ceil(value * 100_000_000) / 100_000_000;
 }
 
-export function estimateAiCost(model, inputTokens, outputTokens, operation = '') {
-  const [inputRate, outputRate] = ratesFor(model);
+// `day` ('YYYY-MM-DD') is for tests and for pricing a day other than today: a price a provider has announced for a later
+// day is counted from that day (model-registry.js).
+export function estimateAiCost(model, inputTokens, outputTokens, operation = '', day = undefined) {
+  const [inputRate, outputRate] = ratesFor(model, day);
   return money((Math.max(0, inputTokens) * inputRate + Math.max(0, outputTokens) * outputRate) / 1_000_000);
 }
 
@@ -94,8 +59,10 @@ function budgetError(code, message) {
 }
 
 async function recordUsage(sqlClient, id, status, usage, model, operation) {
-  const inputTokens = Math.max(0, Number(usage?.prompt_tokens) || 0);
-  const outputTokens = Math.max(0, Number(usage?.completion_tokens) || 0);
+  // Accepts the one shape a provider layer will hand it (inputTokens, outputTokens), and OpenAI's own names
+  // (prompt_tokens, completion_tokens), which is what arrives today.
+  const inputTokens = Math.max(0, Number(usage?.inputTokens ?? usage?.prompt_tokens) || 0);
+  const outputTokens = Math.max(0, Number(usage?.outputTokens ?? usage?.completion_tokens) || 0);
   const actualCost = status === 'ok' ? estimateAiCost(model, inputTokens, outputTokens, operation) : 0;
   try {
     await sqlClient`

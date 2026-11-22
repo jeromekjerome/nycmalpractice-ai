@@ -9,11 +9,15 @@
 import { neon } from '@neondatabase/serverless';
 import { notifyOperator } from './auction.js';
 import { APP_URL } from './site.js';
+import { withoutKeys, providerOfModel } from './providers.js';
+import { chains, unmeasuredOverride } from './model-settings.js';
+import { DEFAULTS } from './models.js';
 
 const sql = neon(process.env.DATABASE_URL);
 const SITE = 'NYCMalpractice.ai';
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
 
 function escapeHtml(value) {
   return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -62,9 +66,114 @@ async function checkFailureBurst() {
     'You will not be emailed about this again for 30 minutes.</p>');
 }
 
+// An AI provider refused a request the app sent it (HTTP 400), which is almost always how the app shapes its
+// requests for that provider, and no failure on the provider's side. providers.js gives this the provider's own
+// message with any key taken out, and nothing of the request, so nothing a visitor wrote can be in the email. One
+// email an hour for each provider.
+const BAD_REQUEST_MESSAGE_CHARS = 300;
+export async function tellOwnerOfBadRequest({ provider, model, job, status, code, message }) {
+  const where = escapeHtml(provider);
+  const row = (label, value) => `<tr><td style="color:#666;padding:4px 12px 4px 0">${label}</td><td>${escapeHtml(value)}</td></tr>`;
+  return alertOperatorOnce(`ai-bad-request-${provider}`, HOUR, `${SITE}: ${provider} refused a request the app sent it`,
+    `<p>${where} refused a request the app sent it, as malformed (HTTP ${escapeHtml(status ?? 400)}). If another model in the chain answered, the visitor was served by it; if every model refused, ` +
+    'the visitor\'s message was not answered. The likely cause is how the app shapes its requests for this provider.</p>' +
+    `<table>${row('Provider', provider)}${row('Model', model)}${row('Job', job)}${row('Status', status ?? 400)}${code ? row('Error code', code) : ''}` +
+    `${row('Provider\'s message', withoutKeys(message).slice(0, BAD_REQUEST_MESSAGE_CHARS))}</table>` +
+    `<p>You will not be emailed about ${where} again for an hour.</p>`);
+}
+
+// A provider marked down, or back up (provider-state.js). The state sends each once: only the server instance whose
+// database update marked it down, or cleared it, tells the owner. The note carries the provider, the reason runJob
+// gave the failure that marked it down (never what the provider said) and since when, so nothing a visitor wrote and
+// no key can be in the email.
+const DOWN_BECAUSE = {
+  timeout: 'it did not answer in time',
+  connection: 'the app could not connect to it',
+  rate_limit: 'it turned requests away as too many (HTTP 408 or 429)',
+  server: 'it answered with server errors (HTTP 5xx)',
+  auth: "it refused the app's key (HTTP 401 or 403)",
+  quota: "the account's quota is spent",
+  bad_request: "it refused the app's requests as malformed (HTTP 400)",
+};
+const because = reason => escapeHtml(DOWN_BECAUSE[reason] ?? `it failed (${reason ?? 'no reason given'})`);
+
+const NEW_YORK_TIME = { timeZone: 'America/New_York', dateStyle: 'medium', timeStyle: 'short' };
+const newYorkTime = value => (Number.isNaN(Date.parse(value)) ? 'an unknown time' : `${new Date(value).toLocaleString('en-US', NEW_YORK_TIME)} New York time`);
+
+function lasting(ms) {
+  if (!Number.isFinite(ms)) return 'an unknown time';
+  const minutes = Math.floor(ms / MINUTE);
+  if (minutes < 1) return 'less than a minute';
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'}`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return `${hours} hour${hours === 1 ? '' : 's'}${rest ? ` and ${rest} minute${rest === 1 ? '' : 's'}` : ''}`;
+}
+
+// What the app does while the provider is marked down: a provider marked down is asked after every other provider
+// of a chain (providers.js), so a chain with no other provider keeps asking it. The chains are the ones in use
+// (model-settings.js): the reply's, and the small jobs'.
+async function meanwhile(provider) {
+  const name = escapeHtml(provider);
+  const { answer, small } = await chains();
+  const inUse = [['reply', answer], ['small-job', small]];
+  const alone = inUse.filter(([, chain]) => chain.every(model => providerOfModel(model) === provider)).map(([label]) => label);
+  if (!alone.length) return `The app is answering from the next provider in each chain. It asks ${name} only after the others, and lets one request through to ${name} in its usual place five minutes after it was marked down, and every five minutes after that.`;
+  if (alone.length === inUse.length) return `No chain has another provider, so the app keeps trying ${name}: replies may be slow, and visitors may be asked to send their message again, until it answers.`;
+  return `The ${alone[0]} chain has no other provider, so the app keeps trying ${name} for it; the other chain is answering from its next provider.`;
+}
+
+async function tellOwnerProviderIsDown({ provider, reason, since }) {
+  await notifyOperator(`${SITE}: ${provider} is marked down`,
+    `<p>${escapeHtml(provider)} was marked down at ${newYorkTime(since)}, because ${because(reason)}.</p>` +
+    `<p>${await meanwhile(provider)}</p>` +
+    '<p>It stays marked down for at least five minutes; you will be emailed once it answers after that.</p>').catch(err => console.error('Operator alert failed:', err.message));
+  return true;
+}
+
+async function tellOwnerProviderIsUp({ provider, reason, since }) {
+  await notifyOperator(`${SITE}: ${provider} is answering again`,
+    `<p>${escapeHtml(provider)} answered again, and is no longer marked down. It was marked down for ${lasting(Date.now() - Date.parse(since))}, ` +
+    `since ${newYorkTime(since)}, because ${because(reason)}.</p>`).catch(err => console.error('Operator alert failed:', err.message));
+  return true;
+}
+
+// What providers.js and provider-state.js tell the owner, which server.js sets up once for both: a request a
+// provider refused (kind 'bad_request'), a provider marked down ('down') and one back up ('up').
+const TELLINGS = { bad_request: tellOwnerOfBadRequest, down: tellOwnerProviderIsDown, up: tellOwnerProviderIsUp };
+export async function tellOwnerOfProviders(note) {
+  const telling = TELLINGS[note?.kind];
+  return telling ? telling(note) : false;
+}
+
+// The model chains saved in the settings name a model the registry no longer has, so every job runs on the built-in
+// chains (model-settings.js). The settings tell this at each read of the row, once a minute at most; the owner is
+// emailed once a day for each server instance.
+export async function tellOwnerOfModelChains({ models = [] } = {}) {
+  const named = models.map(escapeHtml).join(', ') || 'a model';
+  return alertOperatorOnce('model-chains-unknown', DAY, `${SITE}: the saved model chains name a model the app does not know`,
+    `<p>The model chains saved in the settings name ${named}, which the app's registry of models does not have. ` +
+    `Until they are saved again, every job runs on the built-in chains (models.js): replies ${DEFAULTS.answer.map(escapeHtml).join(', ')}; ` +
+    `small jobs ${DEFAULTS.small.map(escapeHtml).join(', ')}.</p>` +
+    '<p>Save the chains again from the admin page. You will not be emailed about this again for a day.</p>');
+}
+
+// The daily summary's line on the override (model-settings.js): the models it let in that have no measurement on
+// record for the place they hold, who saved the chains so and when. Repeated each day until each has one.
+const PLACES = { answer: 'a reply model', small: 'a small-job model' };
+function overrideLine({ overriddenBy, overriddenOn, models }) {
+  const named = models.map(({ model, role }) => `${escapeHtml(model)} as ${PLACES[role]}`);
+  const list = named.length > 1 ? `${named.slice(0, -1).join(', ')} and ${named.at(-1)}` : named[0];
+  return `<p>The model chains were saved under the override (by ${escapeHtml(overriddenBy)}, ${newYorkTime(overriddenOn)}) with ${list}, ` +
+    `which ${models.length > 1 ? 'have' : 'has'} no measurement on record. This is repeated in each daily summary until ${models.length > 1 ? 'each has' : 'it has'} one.</p>`;
+}
+
 // ─── /health/deep ─────────────────────────────────────────────────────────────
-// The newest columns the code needs: a deploy whose database changes were not made fails the check.
-const REQUIRED_COLUMNS = ['firms.card_declined_at', 'leads.decline_reason', 'user_interactions.outcome', 'job_runs.ran_at', 'ai_usage.created_at', 'auctions.reminder_sent_at'];
+// The newest columns the code needs: a deploy whose database changes were not made fails the check. The provider state
+// (provider-state.js) and the model settings (model-settings.js) work without their tables, on every provider up and
+// the built-in chains, so only this check shows that npm run setup-db was not run.
+const REQUIRED_COLUMNS = ['firms.card_declined_at', 'leads.decline_reason', 'user_interactions.outcome', 'job_runs.ran_at', 'ai_usage.created_at', 'auctions.reminder_sent_at',
+  'ai_provider_state.failed_replies', 'app_settings.value', 'model_measurements.bar_ok', 'provider_model_lists.models'];
 let deepHealthCache = { at: 0, value: null };
 
 // For an uptime monitor: is the database reachable, does it have the columns the code uses, and did the nightly job
@@ -149,6 +258,8 @@ export async function sendDailyDigest({ failed = [] } = {}) {
       (SELECT count(*) FROM conversations c WHERE c.contact_consent_at > NOW() - INTERVAL '7 days'
          AND NOT EXISTS (SELECT 1 FROM leads l WHERE l.session_id = c.session_id)
          AND NOT EXISTS (SELECT 1 FROM auctions a WHERE a.session_id = c.session_id AND a.status IN ('open', 'closing')))::int AS unplaced`;
+  // Never fails: a settings table that cannot be read names no override.
+  const override = await unmeasuredOverride();
   const row = (label, value) => `<tr><td style="color:#666;padding:4px 12px 4px 0">${label}</td><td><strong>${escapeHtml(value ?? 0)}</strong></td></tr>`;
   const html = `
     <div style="font-family:sans-serif;max-width:600px">
@@ -167,6 +278,7 @@ export async function sendDailyDigest({ failed = [] } = {}) {
         ${row('Requests no firm holds (last 7 days)', day?.unplaced)}
       </table>
       ${day?.unplaced ? `<p>Deliver waiting requests by hand from the <a href="${escapeHtml(APP_URL)}/admin.html">admin page</a>.</p>` : ''}
+      ${override ? overrideLine(override) : ''}
       <p>${failed.length ? `The nightly job had ${failed.length} failed step${failed.length === 1 ? '' : 's'}: ${failed.map(f => escapeHtml(f.step)).join(', ')}.` : 'The nightly job ran every step.'}</p>
     </div>`;
   await notifyOperator(`${SITE} daily summary: ${day?.messages || 0} messages, ${day?.requests || 0} contact requests, ${day?.leads || 0} leads`, html);

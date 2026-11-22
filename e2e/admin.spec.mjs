@@ -17,12 +17,13 @@ const HOSTILE = {
   active: true, phone_verified: true, subscription_active: true, created_at: '2026-11-13T10:00:00Z',
 };
 
-// The requests, auctions and leads sections, quiet unless a test fills them.
-async function mockOperations(page, { requests = [], auctions = [], leads = [] } = {}) {
+// The requests, auctions, leads and models sections, quiet unless a test fills them.
+async function mockOperations(page, { requests = [], auctions = [], leads = [], models = { chains: { answer: [], small: [] }, source: 'defaults', override: null, providers: {}, measurements: [], registry: [] } } = {}) {
   const reasons = { unreachable: 'Could not reach the client (wrong or disconnected number)', conflict: 'Conflict of interest' };
   await page.route('**/api/admin/requests', route => route.fulfill(json({ requests, declineReasons: reasons })));
   await page.route('**/api/admin/auctions', route => route.fulfill(json({ auctions })));
   await page.route('**/api/admin/leads', route => route.fulfill(json({ leads, declineReasons: reasons })));
+  await page.route('**/api/admin/models', route => route.fulfill(json(models)));
 }
 
 test('firm details an applicant typed are shown as text on the admin page, never run', async ({ page }) => {
@@ -119,5 +120,69 @@ test('the operator reads a contact request, delivers it by hand and cancels a st
   await page.locator('#auctionsBody').getByRole('button', { name: 'Cancel' }).click();
   await expect.poll(() => cancelled).toBe('POST');
   await expect(page.locator('img')).toHaveCount(0);
+  expect(await page.evaluate(() => window.__xss)).toBeUndefined();
+});
+
+test('the Models section shows the chains and refuses to save an unmeasured model without the override', async ({ page }) => {
+  const XSS = '<img src=x onerror="window.__xss=3">';
+  const models = {
+    chains: { answer: ['gpt-6.1-terra', 'gpt-6-luna'], small: ['gpt-6-luna'] },
+    source: 'settings',
+    override: null,
+    providers: { openai: 'up', anthropic: { downSince: '2026-11-21T15:00:00Z', reason: 'timeout' } },
+    measurements: [
+      { model: 'gpt-6.1-terra', role: 'answer', measuredOn: '2026-11-20', runLabel: 'reply-gpt-6.1-terra', qualityOk: true, barOk: true, failed: [] },
+      { model: 'gpt-6-luna', role: 'small', measuredOn: '2026-11-20', runLabel: 'small-gpt-6-luna', qualityOk: true, barOk: false, failed: ['type', 'leadScore'] },
+      { model: XSS, role: 'answer', measuredOn: '2026-11-20', runLabel: XSS, qualityOk: false, barOk: false, failed: ['speed', XSS] },
+    ],
+    registry: [
+      { model: 'gpt-6.1-terra', provider: 'openai', hasKey: true, retiresOn: null },
+      { model: 'gpt-6-luna', provider: 'openai', hasKey: true, retiresOn: null },
+      { model: 'gpt-6.2-sol', provider: 'openai', hasKey: true, retiresOn: null },
+      { model: 'claude-sonnet-5-5', provider: 'anthropic', hasKey: false, retiresOn: null },
+    ],
+  };
+  const saves = [];
+  await page.route('**/api/admin/firms', route => route.fulfill(json({ firms: [], counts: { total: 0, active: 0 }, leadCounts: { total: 0 } })));
+  await mockOperations(page, { models });
+  await page.route('**/api/admin/models/chains', async route => {
+    const body = route.request().postDataJSON();
+    saves.push(body);
+    if (body.override) await route.fulfill(json({ ok: true, errors: [], warnings: ['Under the override, the reply chain names gpt-6.2-sol, which has no measurement on record as a reply model; the daily summary will say so until it has one.'] }));
+    else await route.fulfill({ status: 422, contentType: 'application/json', body: JSON.stringify({ ok: false, errors: ['The reply chain names gpt-6.2-sol, which has no measurement on record as a reply model.'], warnings: [] }) });
+  });
+  await page.goto('/admin.html');
+  await page.locator('#secretInput').fill('secret');
+  await page.locator('button.admin-btn').click();
+
+  // The two chains in order, each provider's state, and what each measurement says in plain words.
+  const reply = page.locator('#chain-answer');
+  await expect(reply.locator('select')).toHaveCount(2);
+  await expect(reply.locator('select').first()).toHaveValue('gpt-6.1-terra');
+  await expect(reply.locator('select').nth(1)).toHaveValue('gpt-6-luna');
+  await expect(page.locator('#chain-small select')).toHaveValue('gpt-6-luna');
+  await expect(page.locator('#modelsProviders')).toContainText('openai: up');
+  await expect(page.locator('#modelsProviders')).toContainText('anthropic: down since');
+  const measured = page.locator('#modelsMeasurements');
+  await expect(measured.locator('tr', { hasText: 'reply-gpt-6.1-terra' })).toContainText('meets the bar');
+  await expect(measured.locator('tr', { hasText: 'small-gpt-6-luna' })).toContainText("misses: agrees with today's model on the case type");
+  await expect(measured.locator('tr', { hasText: 'small-gpt-6-luna' })).toContainText('moves the average lead score by more than 3 points');
+  await expect(measured).toContainText(XSS);
+  await expect(page.locator('#modelsSection img')).toHaveCount(0);
+
+  // Put an unmeasured model first: the site refuses, and its words are shown.
+  await reply.locator('select').first().selectOption('gpt-6.2-sol');
+  await page.locator('#modelsSave').click();
+  await expect(page.locator('#modelsResult')).toContainText('The reply chain names gpt-6.2-sol, which has no measurement on record as a reply model.');
+  expect(saves).toEqual([{ answer: ['gpt-6.2-sol', 'gpt-6-luna'], small: ['gpt-6-luna'], override: false }]);
+
+  // Reorder, then tick the override: it is sent, and its warning is shown.
+  await reply.getByRole('button', { name: 'Down' }).first().click();
+  await expect(reply.locator('select').first()).toHaveValue('gpt-6-luna');
+  await page.getByLabel('use anyway, not measured').check();
+  await page.locator('#modelsSave').click();
+  await expect(page.locator('#modelsResult')).toContainText('The chains were saved.');
+  await expect(page.locator('#modelsResult')).toContainText('Under the override, the reply chain names gpt-6.2-sol');
+  expect(saves.at(-1)).toEqual({ answer: ['gpt-6-luna', 'gpt-6.2-sol'], small: ['gpt-6-luna'], override: true });
   expect(await page.evaluate(() => window.__xss)).toBeUndefined();
 });

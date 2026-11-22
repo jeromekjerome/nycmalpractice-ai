@@ -1,12 +1,24 @@
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, mkdtempSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { startServer } from './helpers.mjs';
 import { test } from './runner.mjs';
 
 process.env.NODE_ENV = 'test';
+// No test process loads the local .env (live keys, the live mail login, the live database address): dotenv, which
+// db.js and server.js load, is pointed at an empty file. Forced, and before anything imports db.js or server.js.
+process.env.DOTENV_CONFIG_PATH = fileURLToPath(new URL('./no-settings.env', import.meta.url));
+process.env.DOTENV_CONFIG_QUIET = 'true';
 process.env.DATABASE_URL ||= 'postgres://user:pass@localhost:5432/testdb';
 process.env.OPENAI_API_KEY ||= 'test-openai-key';
+// Never a real key: with none set, Claude and Gemini have no adapter, as in production before the owner adds the keys.
+// Forced, because a local .env holds the real ones and dotenv leaves a variable that is already set (even empty) alone.
+process.env.ANTHROPIC_API_KEY = '';
+process.env.GEMINI_API_KEY = '';
 process.env.STRIPE_SECRET_KEY ||= 'sk_test_123';
 process.env.STRIPE_WEBHOOK_SECRET ||= 'whsec_test_123';
 process.env.TWILIO_ACCOUNT_SID ||= 'AC123';
@@ -4577,6 +4589,45 @@ test('a request is not delivered by hand while its auction runs, and a charge fo
 test('generic shared modules match the integrity manifest', async () => {
   const { sharedCodeMismatches } = await import('../check-shared-code.mjs');
   assert.deepEqual(sharedCodeMismatches(), []);
+});
+
+// No test process may load the local .env: it holds live keys, the live mail login and the live database address, and
+// db.js and server.js load it (dotenv/config) for every setting a test has not set. The tests point dotenv at an empty
+// settings file instead.
+const NO_SETTINGS = fileURLToPath(new URL('./no-settings.env', import.meta.url));
+
+test('dotenv, pointed at the committed empty settings file, loads nothing from a .env in the working folder, and loads it without the pointer', () => {
+  assert.ok(existsSync(NO_SETTINGS), 'test/no-settings.env is committed');
+  assert.doesNotMatch(readFileSync(NO_SETTINGS, 'utf8').replace(/^#.*$/gm, ''), /\S/, 'it holds comments only');
+  const folder = mkdtempSync(join(tmpdir(), 'no-env-'));
+  try {
+    writeFileSync(join(folder, '.env'), 'NO_ENV_MARKER=from-the-local-env\n');
+    const dotenv = pathToFileURL(fileURLToPath(new URL('../node_modules/dotenv/config.js', import.meta.url))).href;
+    const run = extra => {
+      const env = { ...process.env, DOTENV_CONFIG_QUIET: 'true', ...extra };
+      delete env.NO_ENV_MARKER;
+      if (!extra.DOTENV_CONFIG_PATH) delete env.DOTENV_CONFIG_PATH;
+      const child = spawnSync(process.execPath, ['--input-type=module', '-e', `await import(${JSON.stringify(dotenv)}); console.log(process.env.NO_ENV_MARKER ?? 'absent');`], { cwd: folder, env, encoding: 'utf8' });
+      assert.equal(child.status, 0, child.stderr);
+      return child.stdout.trim();
+    };
+    assert.equal(run({}), 'from-the-local-env');
+    assert.equal(run({ DOTENV_CONFIG_PATH: NO_SETTINGS }), 'absent');
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
+
+test("the unit suite's settings point dotenv at the empty settings file, quietly, so that no local .env is loaded", () => {
+  assert.equal(process.env.DOTENV_CONFIG_PATH, NO_SETTINGS);
+  assert.equal(process.env.DOTENV_CONFIG_QUIET, 'true');
+});
+
+test("the browser tests' server is given the empty settings file and no local .env is loaded", () => {
+  const playwright = readFileSync(new URL('../playwright.config.mjs', import.meta.url), 'utf8');
+  const env = playwright.slice(playwright.indexOf('env: {'));
+  assert.match(env, /DOTENV_CONFIG_PATH: fileURLToPath\(new URL\('\.\/test\/no-settings\.env', import\.meta\.url\)\)/);
+  assert.match(env, /DOTENV_CONFIG_QUIET: 'true'/);
 });
 
 test('browser tests disable background services and CI runs every project quality gate', () => {

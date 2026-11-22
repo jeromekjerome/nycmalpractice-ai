@@ -32,8 +32,8 @@
     "test/provider-google.test.mjs": "7e4811fadacaa3e4596c124f200821163baef32b29e3384a933d86152fc32c22",
     "test/probe-shapes.test.mjs": "e5c3955945c9089957957ccdb9190f25064757a926f4bb890ff47885d37535de",
     "measure/ask-scorer.mjs": "18704dd7b45668203bbc61e9cdc12de7a730e714e462e6f1b76e217f5ccde636",
-    "measure/case-cards.mjs": "70ffbfd30d850f8383b3f2bbb1a560cb1fa65ae0205c4a7c9259a18ac0743189",
-    "test/measure-tools.test.mjs": "8d445b700f68962dc06f043f57e414b45c321433405f7e1f4005dc9fa39c8f2d",
+    "measure/case-cards.mjs": "c44b63f0e822ae168cf0d9cb842c49302d7dc794cabd8a4cfca7b644392d1213",
+    "test/measure-tools.test.mjs": "0813aba7d584bbc83d87247fdd45533cd8796860b7f56d96969993b538477bf9",
     "model-watch.js": "16b58e2d3c81b15a0b57520dc2c1c29964093280f805ff0f5d62ae0effb0e0b7",
     "test/model-watch.test.mjs": "8e0928a88c0155f1aedeed456e52080aa250219a4cff1731e48b0f058bd78fa5"
   }

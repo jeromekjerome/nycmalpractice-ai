@@ -8,6 +8,10 @@
 // length. The app keeps at most 200 characters of each point and 300 of the deadline note and cuts the rest, so it also
 // counts the points that come back at the limit.
 //
+// The two apps name the deadline note differently: solNote in nycinjury.ai, solWarning in NYCMalpractice.ai. A
+// NYCMalpractice.ai card also carries an estimate of how complex the case is ({ level, reason }, or null when too little is
+// known), which is printed after the note.
+//
 //   node --env-file=.env measure/case-cards.mjs <small-job model> <run label> [--count 6] [--yes]
 //
 // It is the measurement's own replay (the visitor's messages, the replies the named run served, the recorded case law,
@@ -171,8 +175,13 @@ export async function runCaseCards({ argv, env = process.env, log = console.log,
       log(`case card ${i + 1} (${where})`);
       const points = [...(card.strengths ?? []).map(text => ['strength', text]), ...(card.weaknesses ?? []).map(text => ['weakness', text])];
       for (const [kind, text] of points) log(`  ${kind} (${text.length}): ${text}`);
-      const note = String(card.solNote ?? card.deadlineNote ?? '');
+      const note = String(card.solNote ?? card.solWarning ?? card.deadlineNote ?? '');
       log(`  deadline note (${note.length}): ${note}`);
+      if (Object.hasOwn(card, 'complexityEstimate')) {
+        const estimate = card.complexityEstimate;
+        const reason = String(estimate?.reason ?? '');
+        log(estimate ? `  complexity ${estimate.level} (${reason.length}): ${reason}` : '  complexity: none given');
+      }
       lengths.push(...points.map(([, text]) => text.length));
       const cut = pointsAtTheLimit(points.map(([, text]) => text), POINT_LIMIT);
       cutPoints += cut;

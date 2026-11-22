@@ -284,6 +284,8 @@ test('the card reader replays the turns of a recorded run with the small-job mod
   assert.match(text, /^  strength \(80\): s/m);
   assert.match(text, /^  weakness \(151\): w+…$/m);
   assert.match(text, /^  deadline note \(27\): Three years under CPLR 214\.$/m);
+  // This app's card has no complexity estimate, and gets no line for one.
+  assert.doesNotMatch(text, /complexity/);
   const previews = out.lines.filter(line => /^lead preview \d+ /.test(line));
   assert.equal(previews.length, 3);
   assert.match(text, /^lead preview 1 \(rear-end:2\), 11 characters: A claim, 1\.$/m);
@@ -294,6 +296,44 @@ test('the card reader replays the turns of a recorded run with the small-job mod
   assert.match(text, /^Points at the limit \(cut short\): 5 of 9 points, 3 of 3 cards show at least one cut\.$/m);
   assert.match(text, /^Lead previews: 3, middle length 11, longest 11\.$/m);
   assert.match(out.lines.at(-1), /^Cost \$\d\.\d{4} over \d+ call\(s\); failed 0; refused none\.$/);
+});
+
+test("the card reader prints the sister app's deadline warning with its length, and its complexity estimate after it, saying so when a card has none", async () => {
+  // NYCMalpractice.ai's case card (normalizeCaseAnalysis in its ask.js) calls the deadline note solWarning, and keeps 300
+  // characters of it, as this app keeps of solNote. It also carries a complexity estimate: { level, reason }, or null when
+  // too little is known.
+  const warning = 'A notice of claim within 90 days may apply, since the surgery was at a city hospital.';
+  const cutWarning = `${'A federal claim within 2 years may apply. '.repeat(8).slice(0, 299)}…`;
+  const reason = 'Expert testimony on the standard of care.';
+  const strength = 'A sponge was found on a scan.';
+  const weakness = 'The surgery was two years ago.';
+  // The cards come with the replies to the first visitor's third and fourth turns (replies 2 and 3), and the second's third.
+  const world = cardsWorld({
+    cardFor: (args, n) => ({
+      score: 6, verdict: 'moderate', strengths: [strength], weaknesses: [weakness],
+      complexityEstimate: n === 2 ? null : { level: 'High', reason },
+      solWarning: n === 3 ? cutWarning : warning,
+    }),
+    previewFor: () => null,
+  });
+  const out = capturingLog();
+  const code = await runCaseCards({ argv: ['claude-haiku-5-5', 'providers-module', '--count', '2', '--yes'], env: settings(), log: out.log, logError: out.log, deps: world.deps });
+  assert.equal(code, 0, out.text());
+  // Each card's lines: its points, its deadline note with its length, and then a line for the complexity estimate.
+  assert.deepEqual(out.lines.slice(1, 11), [
+    'case card 1 (rear-end:3)',
+    `  strength (${strength.length}): ${strength}`,
+    `  weakness (${weakness.length}): ${weakness}`,
+    `  deadline note (${warning.length}): ${warning}`,
+    '  complexity: none given',
+    'case card 2 (rear-end:4)',
+    `  strength (${strength.length}): ${strength}`,
+    `  weakness (${weakness.length}): ${weakness}`,
+    `  deadline note (300): ${cutWarning}`,
+    `  complexity High (${reason.length}): ${reason}`,
+  ]);
+  // A deadline warning the app cut at its 300 characters counts as a cut, as a note of this app's does.
+  assert.ok(out.lines.includes('Points at the limit (cut short): 0 of 4 points, 1 of 2 cards show at least one cut.'), out.text());
 });
 
 test('the card reader prints its estimate and stops without --yes, and refuses a run it cannot read or one of another app, before anything is sent', async () => {

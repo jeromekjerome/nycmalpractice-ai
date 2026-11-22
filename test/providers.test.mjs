@@ -1295,7 +1295,7 @@ test('the models each provider offers today are read from its adapter, and a pro
   assert.deepEqual(await modelsOffered([], { adapters }), {});
 });
 
-test("the provider state's ping is one health check of the provider's main model through the caps, with no clock, and fails only when the provider fails it", async () => {
+test("the provider state's ping is one health check of the provider's main model through the caps, with no clock: true when the provider answers it, false only when the provider fails it, and null when it says nothing of the provider", async () => {
   const outcomes = {};
   const pinged = [];
   const operations = [];
@@ -1321,15 +1321,100 @@ test("the provider state's ping is one health check of the provider's main model
     // A 400 every model answered is rethrown marked (allRefused), so it gets one of its own.
     outcomes['alpha-1'] = reason === 'bad_request' ? statusError(400, { type: 'invalid_request_error', code: 'unsupported_parameter' }) : error;
     const { result } = await quietly(() => ping('alpha'));
-    assert.equal(result, !PROVIDER_FAILURES.has(reason), reason);
+    assert.equal(result, PROVIDER_FAILURES.has(reason) ? false : null, reason);
   }
   // A reached cap, and a fault in the app, say nothing of the provider.
   outcomes['alpha-1'] = new TypeError("Cannot read properties of undefined (reading 'usage')");
-  assert.equal(await ping('alpha'), true);
+  assert.equal(await ping('alpha'), null);
   const capped = providerPing([['alpha-1']], { ...deps, budget: async () => { throw Object.assign(new Error('The site AI spending limit has been reached.'), { code: 'ai_budget_exceeded', status: 503 }); } });
-  assert.equal(await capped('alpha'), true);
+  assert.equal(await capped('alpha'), null);
   // A provider with no model in the chains is not pinged.
   const before = pinged.length;
-  assert.equal(await ping('gamma'), true);
+  assert.equal(await ping('gamma'), null);
   assert.equal(pinged.length, before);
+});
+
+test("the provider state's ping is cut off when its signal fires, and a check cut off says nothing of the provider: one never sent, and one the provider took and never answered", async () => {
+  // A provider that takes a check and never answers it, and does not heed its signal; the check's own time never runs
+  // out. Each check it is sent is kept in `sent`.
+  const sent = [];
+  const adapter = { name: 'alpha', ping: (model, { signal } = {}) => { sent.push({ model, signal }); return new Promise(() => {}); } };
+  const ping = providerPing([['alpha-1']], { adapters: { alpha: adapter }, budget: noBudget, providerFor: model => model.split('-')[0], timer: () => () => {} });
+  // A signal that has fired already: nothing is sent.
+  assert.deepEqual(await settled(ping('alpha', { signal: AbortSignal.abort() })), { result: null });
+  assert.deepEqual(sent, []);
+  // One that fires while the provider holds the check: the check ends at once, and its request is cut off.
+  const stop = new AbortController();
+  const checking = settled(ping('alpha', { signal: stop.signal }));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(sent.length, 1);
+  stop.abort();
+  assert.deepEqual(await checking, { result: null });
+  assert.equal(sent[0].signal.aborted, true);
+});
+
+// A provider state that can say a provider marked down was let through for one request (provider-state.js): `down`
+// names the providers it says are marked down, `letThrough` those it lets through for this job. Each check of a
+// provider let through is kept in `probed`, and resolves to `probeAnswers`.
+function letThroughState({ down = [], letThrough = [], probeAnswers = true } = {}) {
+  const probed = [];
+  const told = [];
+  return {
+    probed,
+    told,
+    standing: async provider => (letThrough.includes(provider) ? 'let-through' : down.includes(provider) ? 'down' : 'up'),
+    isDown: async provider => down.includes(provider),
+    ping: async () => true,
+    probe: async (provider, { signal } = {}) => { probed.push({ provider, signal }); return probeAnswers; },
+    replyFailed: async (provider, { reason }) => { told.push(['replyFailed', provider, reason]); },
+    replySucceeded: async provider => { told.push(['replySucceeded', provider]); },
+    snapshot: async () => ({}),
+  };
+}
+
+test('a provider marked down and let through for its one request gets the job when the job asks it first; when the job asks it only after another, its check goes beside the reply instead, and its answer counts as an answered job', async () => {
+  // Second in the chain, after one that answers: its check is sent, and no job.
+  const behind = letThroughState({ letThrough: ['beta'] });
+  const first = twoProviders(() => null, { state: behind });
+  const reply = newReply();
+  assert.equal((await runJob({ job: 'grade', chain: ['alpha-1', 'beta-1'], messages: QUESTION, json: true, maxTokens: 100, clock: reply }, first.deps)).model, 'alpha-1');
+  assert.deepEqual(first.asked, ['grade alpha-1']);
+  assert.deepEqual(behind.probed.map(({ provider }) => provider), ['beta']);
+  await reply.end();
+  // The check it answered counts as a job it answered: the state clears it.
+  assert.deepEqual([...behind.told].sort(), [['replySucceeded', 'alpha'], ['replySucceeded', 'beta']]);
+
+  // A check it fails, or one that says nothing, is no answer: nothing is said of it, and it stays as it is.
+  for (const probeAnswers of [false, null]) {
+    const unanswered = letThroughState({ letThrough: ['beta'], probeAnswers });
+    const quiet = newReply();
+    await runJob({ job: 'grade', chain: ['alpha-1', 'beta-1'], messages: QUESTION, json: true, maxTokens: 100, clock: quiet }, twoProviders(() => null, { state: unanswered }).deps);
+    await quiet.end();
+    assert.deepEqual(unanswered.told, [['replySucceeded', 'alpha']], String(probeAnswers));
+  }
+
+  // First in the chain: the job is its one request, and no check is sent.
+  const ahead = letThroughState({ letThrough: ['alpha'] });
+  const second = twoProviders(() => null, { state: ahead });
+  assert.equal((await runJob({ job: 'grade', chain: ['alpha-1', 'beta-1'], messages: QUESTION, json: true, maxTokens: 100, clock: newReply() }, second.deps)).model, 'alpha-1');
+  assert.deepEqual([second.asked, ahead.probed], [['grade alpha-1'], []]);
+
+  // Second in the chain, but the provider before it is marked down and not let through: the job asks it first, so the
+  // job is its request, and no check is sent.
+  const both = letThroughState({ down: ['alpha'], letThrough: ['beta'] });
+  const third = twoProviders(() => null, { state: both });
+  assert.equal((await runJob({ job: 'grade', chain: ['alpha-1', 'beta-1'], messages: QUESTION, json: true, maxTokens: 100, clock: newReply() }, third.deps)).model, 'beta-1');
+  assert.deepEqual([third.asked, both.probed], [['grade beta-1'], []]);
+
+  // A check it is sent is the reply's to cut off: when the provider answers a later job of the reply, the check's
+  // signal fires, and the job's answer is what is told.
+  const later = letThroughState({ letThrough: ['beta'] });
+  const fourth = twoProviders(() => null, { state: later });
+  const replying = newReply();
+  await runJob({ job: 'grade', chain: ['alpha-1', 'beta-1'], messages: QUESTION, json: true, maxTokens: 100, clock: replying }, fourth.deps);
+  assert.equal(later.probed[0].signal.aborted, false);
+  await runJob({ job: 'classify', chain: ['beta-2'], messages: QUESTION, json: true, maxTokens: 100, clock: replying }, fourth.deps);
+  assert.equal(later.probed[0].signal.aborted, true);
+  await replying.end();
+  assert.deepEqual([...later.told].sort(), [['replySucceeded', 'alpha'], ['replySucceeded', 'beta']]);
 });

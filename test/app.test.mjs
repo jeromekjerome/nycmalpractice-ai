@@ -4775,6 +4775,27 @@ test('/health/models shows a provider marked down, since when and why, and every
   }
 });
 
+test("the site's check of a provider hands its signal on to the health check, so that a reply that no longer needs the check cuts it off at once, and a check cut off says nothing of the provider", async () => {
+  const { pingProvider } = await import('../server.js');
+  // OpenAI takes the health check and never answers it: only the check's signal can end it before its own time runs out.
+  const seen = [];
+  const stop = new AbortController();
+  const { result } = await capturingLogs(() => withOutboundHttp((url, init) => {
+    if (!url.startsWith('https://api.openai.com/')) throw new Error(`Unexpected outbound request in test: ${url}`);
+    return neverAnswered(init, seen);
+  }, async () => {
+    const checking = pingProvider('openai', { signal: stop.signal });
+    for (let wait = 0; wait < 100 && !seen.length; wait += 1) await new Promise(resolve => setTimeout(resolve, 10));
+    const cutAt = Date.now();
+    stop.abort();
+    return { answer: await checking, ms: Date.now() - cutAt };
+  }));
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].aborted, true);
+  assert.equal(result.answer, null);
+  assert.ok(result.ms < 1_000, `the check went on for ${result.ms} ms after it was cut off`);
+});
+
 test('a reply waits for what its model calls told the provider state before it is sent: when it is answered, when it is too slow, and when no model can answer', async () => {
   // A provider state each of whose reports, made when the reply ends, takes `takesMs` to finish, and records when it did.
   const slowState = takesMs => {
@@ -5066,8 +5087,9 @@ test('the daily summary names the models the override let in that have no measur
 test("the site sets providers.js to tell the owner through one telling, of a provider's 400 and of a provider marked down or back up, and keeps the provider state in its own database", () => {
   const server = readFileSync(new URL('../server.js', import.meta.url), 'utf8');
   assert.match(server, /const stateOfProviders = providerState\(\{ sqlClient: sql, ping: pingProvider, tell: tellOwnerOfProviders \}\);/);
-  // A provider's ping is a health check of its main model in the chains in use when it is sent.
-  assert.match(server, /async function pingProvider\(provider\) \{\s+const \{ answer, small \} = await chains\(\);\s+return providerPing\(\[answer, small\]\)\(provider\);\s+\}/);
+  // A provider's ping is a health check of its main model in the chains in use when it is sent, and the signal the state
+  // hands it goes on to the health check.
+  assert.match(server, /export async function pingProvider\(provider, \{ signal = null \} = \{\}\) \{\s+const \{ answer, small \} = await chains\(\);\s+return providerPing\(\[answer, small\]\)\(provider, \{ signal \}\);\s+\}/);
   assert.match(server, /configureProviders\(\{ tell: tellOwnerOfProviders, state: stateOfProviders \}\);/);
   assert.match(server, /import \{[^}]*\btellOwnerOfProviders\b[^}]*\} from '\.\/operations\.js'/);
   assert.match(server, /import \{ providerState \} from '\.\/provider-state\.js'/);

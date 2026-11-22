@@ -22,7 +22,9 @@
 // asked when none of them answers: a provider is never dropped, so that a false alarm cannot stop a reply. When a
 // reply ends, the state is told of each provider it asked: a reply is a success for a provider that answered any of
 // its jobs, whatever failed beside, and a failure for one that answered none after failing through its own fault.
-// Running out of the reply's time is no fault of the provider's.
+// Running out of the reply's time is no fault of the provider's. A provider marked down that the state lets through
+// for one request, but that a job asks only after a provider that answers, is sent its check beside the reply instead
+// of the visitor's words; a check it answers counts as a job it answered.
 //
 // An adapter is { name, host, call, ping, listModels, allowance }:
 //   call({ model, entry, job, system, messages, json, schema, maxTokens, temperature, signal })
@@ -74,45 +76,69 @@ export const PROVIDER_FAILURES = new Set(['timeout', 'connection', 'rate_limit',
  * @param {Function} [options.limitFor]  (model, job) -> ms, the app's own measured limit. For a model or job it gives
  *   no usable limit for, and with no limitFor at all, the cap for the job's kind; and never more than the cap.
  * @returns {{ remaining(): number, demote(provider): void, demoted(provider): boolean, answered(provider, state): void,
- *   failed(provider, failure, state): void, end(): Promise<void>, limitFor(model, job): number }}
+ *   failed(provider, failure, state): void, probe(provider, state): void, end(): Promise<void>,
+ *   limitFor(model, job): number }}
  *   demote puts a provider last for the rest of the reply (inTurn); demoted says whether it has been. answered and
  *   failed are what runJob tells the clock for the provider state (provider-state.js): that a provider answered a job
- *   of the reply, or failed in a way that counts against it. end() ends the reply for the state; it never rejects.
+ *   of the reply, or failed in a way that counts against it. probe starts the check of a provider marked down that a
+ *   job let through but may never ask (runJob). end() ends the reply for the state; it never rejects.
  */
 export function replyClock({ deadlineAt, now = Date.now, limitFor = null }) {
   const sentBack = new Set();
   // What the reply learns of each provider, for its state: whether the provider answered a job, its first failure
-  // that counts against it, and the ping started at that failure.
+  // that counts against it, the ping started at that failure, and the check of a provider let through (probed). Each
+  // check has a signal of its own, which fires once what the check would say no longer matters.
   const learned = new Map();
   let ended = null;
   const about = (provider, state) => {
-    if (!learned.has(provider)) learned.set(provider, { state, answered: false, failure: null, pinged: null });
+    if (!learned.has(provider)) {
+      learned.set(provider, { state, answered: false, failure: null, pinged: null, probed: null, stopPing: new AbortController(), stopProbe: new AbortController() });
+    }
     return learned.get(provider);
   };
   // The reply is over. Each provider is told once: as answered when it answered any job of the reply, whatever failed
-  // beside, or as failed when it answered none. A ping still running is waited for as well, so that its call through
-  // the caps finishes before the response is sent.
-  const tellEach = () => Promise.all([...learned].map(async ([provider, { state, answered, failure, pinged }]) => {
+  // beside, or as failed when it answered none. A provider let through that no job asked is told as answered when it
+  // answered its check, and is not told at all otherwise: it stays as it is. A check still running is waited for as
+  // well, so that its call through the caps finishes before the response is sent; one whose answer no longer mattered
+  // was cut off when that became known, and ends at once.
+  const tellEach = () => Promise.all([...learned].map(async ([provider, { state, answered, failure, pinged, probed }]) => {
     if (answered) await asking(() => state.replySucceeded(provider));
     else if (failure) await asking(() => state.replyFailed(provider, { reason: failure.reason, markDownNow: failure.markDownNow, pinged }));
+    else if (probed && (await probed) === true) await asking(() => state.replySucceeded(provider));
     await pinged;
+    await probed;
   })).then(() => {});
   return {
     remaining: () => Math.max(0, deadlineAt - now()),
     demote: provider => { sentBack.add(provider); },
     demoted: provider => sentBack.has(provider),
+    // A provider that answered a job: what any check of it would say no longer matters, so each is cut off.
     answered: (provider, state) => {
-      if (!ended) about(provider, state).answered = true;
+      if (ended) return;
+      const known = about(provider, state);
+      known.answered = true;
+      known.stopPing.abort();
+      known.stopProbe.abort();
     },
     // The first such failure is kept. Its ping starts at once, so that it runs beside the rest of the reply, unless
     // what it says can no longer matter: the provider has answered already, or the failure (a refused key, a spent
-    // quota) marks it down without a ping.
+    // quota) marks it down without a ping. The check of a provider let through is cut off: the failed job is its answer.
     failed: (provider, failure, state) => {
       if (ended) return;
       const known = about(provider, state);
       if (known.failure) return;
       known.failure = failure;
-      if (!known.answered && !failure.markDownNow) known.pinged = asking(() => state.ping(provider));
+      known.stopProbe.abort();
+      if (!known.answered && !failure.markDownNow) known.pinged = asking(() => state.ping(provider, { signal: known.stopPing.signal }));
+    },
+    // The check of a provider marked down that a job let through for its one request but asks only after another
+    // provider (runJob): its ping, beside the reply, with nothing a visitor wrote. Once a reply, and only for a provider
+    // the reply has not asked yet, through a state that can send it.
+    probe: (provider, state) => {
+      if (ended || typeof state?.probe !== 'function') return;
+      const known = about(provider, state);
+      if (known.answered || known.failure || known.probed) return;
+      known.probed = asking(() => state.probe(provider, { signal: known.stopProbe.signal }));
     },
     // Once: a second call, or one made after the reply has ended, waits for the same telling.
     end: () => (ended ??= tellEach()),
@@ -277,16 +303,28 @@ function startTimer(ms, runOut) {
 
 // What `ask` answers, or TimeLimitReached once `ms` have passed, whichever comes first. `ask` is handed the signal
 // that fires at the limit, for its provider's request; the job does not wait on an adapter that does not heed it,
-// and an answer that comes after the limit is let go. With no time at all, nothing is asked.
-function withinLimit(ms, timer, ask) {
-  if (ms <= 0) return Promise.reject(new TimeLimitReached(0));
+// and an answer that comes after the limit is let go. `outside`, the caller's own signal, cuts the call off the same
+// way when it fires first. With no time at all, or a signal that has fired already, nothing is asked.
+function withinLimit(ms, timer, ask, outside = null) {
+  if (ms <= 0 || outside?.aborted) return Promise.reject(new TimeLimitReached(0));
   const controller = new AbortController();
   return new Promise((resolve, reject) => {
-    const cancel = timer(ms, () => {
+    let cancel = () => {};
+    const cutOff = () => {
+      cancel();
+      reject(new TimeLimitReached(ms));
+      controller.abort();
+    };
+    cancel = timer(ms, () => {
+      outside?.removeEventListener('abort', cutOff);
       reject(new TimeLimitReached(ms));
       controller.abort();
     });
-    new Promise(answer => answer(ask(controller.signal))).then(resolve, reject).finally(cancel);
+    outside?.addEventListener('abort', cutOff, { once: true });
+    new Promise(answer => answer(ask(controller.signal))).then(resolve, reject).finally(() => {
+      cancel();
+      outside?.removeEventListener('abort', cutOff);
+    });
   });
 }
 
@@ -298,6 +336,8 @@ function withinLimit(ms, timer, ask) {
 // clock     the reply's clock (replyClock), shared by every call of the reply. Without one, as for the health
 //           check, each call is given the cap for its job's kind, the chain is asked in its own order, and the
 //           provider state is neither asked nor told anything.
+// signal    fires when the caller no longer needs the job, as for a check the reply has cut off: the call in flight is
+//           cut off as at its limit, and no other model is asked.
 // deps      { adapters, budget, now, timer, providerFor, tell, state }, each with a default; tests pass fakes.
 //           providerFor names the provider a model is asked through (the registry's, by default). tell and state
 //           default to what configureProviders set.
@@ -305,8 +345,12 @@ function withinLimit(ms, timer, ask) {
 // A health check ('health') pings each model instead of asking it anything, and passes when one answers.
 //
 // With a clock and a provider state, the job asks the state once, before its first model, which providers of its
-// chain are marked down, and asks their models last. It tells the clock which providers answered and which failed in
-// a way that counts against them; the clock starts a provider's ping at its first such failure (state.ping), and
+// chain are marked down, and asks their models last. A provider marked down that the state lets through for its one
+// request (provider-state.js) keeps its usual place; when the job asks another provider first, it may never be asked,
+// so the clock sends it its check beside the reply instead (state.probe): its ping, with nothing a visitor wrote, so
+// that a visitor's conversation never goes to a fallback while a provider before it answers. It tells the clock which
+// providers answered and which failed in a way that counts against them; the clock starts a provider's ping at its
+// first such failure (state.ping), and
 // tells the state when the reply ends (clock.end()): state.replySucceeded(provider) for a provider that answered any
 // job of the reply, and state.replyFailed(provider, { reason, markDownNow, pinged }) for one that answered none. An
 // attempt the reply's time ran out on (outOfTime: true) is no failure of the provider's: it was made with under
@@ -326,7 +370,7 @@ export async function runJob(request, deps = {}) {
   }
 }
 
-async function attemptJob({ job, chain, system, messages, json = false, maxTokens, temperature, clock = null }, deps, told) {
+async function attemptJob({ job, chain, system, messages, json = false, maxTokens, temperature, clock = null, signal = null }, deps, told) {
   const { tell = configuredTell, state = configuredState, adapters = adaptersByDefault(), budget = runWithAiBudget, now = Date.now, timer = startTimer, providerFor = providerOfModel } = deps;
   const health = job === 'health';
   const schema = Object.hasOwn(SCHEMAS, job) ? SCHEMAS[job] : null;
@@ -337,13 +381,22 @@ async function attemptJob({ job, chain, system, messages, json = false, maxToken
   // Only a reply's jobs ask and tell the provider state. A call with no clock, such as the health check and the ping
   // the state itself sends, is never counted, and never takes the one request let through to a provider marked down.
   const watched = clock && state ? state : null;
-  const down = watched ? await downAmong(chain, watched, providerFor) : new Set();
+  const { down, letThrough } = watched ? await standingsAmong(chain, watched, providerFor) : { down: new Set(), letThrough: [] };
+  // A provider let through for its one request, that this job asks only after another provider: its check goes beside
+  // the reply, since the job may never reach it. One the job asks first is sent the job itself.
+  if (letThrough.length) {
+    const [lead] = inTurn(chain, clock, providerFor, down);
+    const first = lead === undefined ? null : providerFor(lead);
+    for (const provider of letThrough) if (provider !== first) clock.probe(provider, watched);
+  }
 
   // The models not yet asked, kept in the chain's order. Each next one is the first of them in turn (inTurn), so
   // that a provider that has failed in the reply, in an earlier job or earlier in this chain, comes after the
   // others, and the rest of the chain is ordered as a later job's would be.
   const untried = [...chain];
   while (untried.length) {
+    // The caller no longer needs the job: no other model is asked.
+    if (signal?.aborted) break;
     const [model] = inTurn(untried, clock, providerFor, down);
     untried.splice(untried.indexOf(model), 1);
     const entry = entryFor(model);
@@ -383,9 +436,9 @@ async function attemptJob({ job, chain, system, messages, json = false, maxToken
           const own = clock ? clock.limitFor(model, job) : capFor(job);
           const left = clock ? clock.remaining() : Infinity;
           givenWhatWasLeft = left < own;
-          const given = (await withinLimit(Math.min(own, left), timer, signal => (health
-            ? adapter.ping(model, { signal })
-            : adapter.call({ model, entry, job, system, messages, json, schema, maxTokens, temperature, signal })))) ?? {};
+          const given = (await withinLimit(Math.min(own, left), timer, limit => (health
+            ? adapter.ping(model, { signal: limit })
+            : adapter.call({ model, entry, job, system, messages, json, schema, maxTokens, temperature, signal: limit })), signal)) ?? {};
           return { ...given, usage: { inputTokens: given.inputTokens ?? 0, outputTokens: given.outputTokens ?? 0 } };
         },
       });
@@ -438,13 +491,22 @@ async function attemptJob({ job, chain, system, messages, json = false, maxToken
   throw new ProvidersFailed(job, attempts);
 }
 
-// The providers of a chain that the state says are marked down. Each is asked once, before the job's first model, so
-// that a provider let through for one request (provider-state.js) keeps its usual place for the whole of this job.
-// A state that cannot answer counts every provider as up.
-async function downAmong(chain, state, providerFor) {
+// How the state says each provider of a chain stands: the providers marked down, and those of them let through for
+// their one request (provider-state.js). Each is asked once, before the job's first model, so that a provider let
+// through keeps its usual place for the whole of this job. A state that cannot answer counts every provider as up.
+async function standingsAmong(chain, state, providerFor) {
   const providers = [...new Set(chain.map(providerFor))];
-  const verdicts = await Promise.all(providers.map(provider => new Promise(resolve => resolve(state.isDown(provider))).catch(() => false)));
-  return new Set(providers.filter((provider, index) => verdicts[index] === true));
+  const standings = await Promise.all(providers.map(provider => new Promise(resolve => resolve(standingOf(state, provider))).catch(() => 'up')));
+  return {
+    down: new Set(providers.filter((provider, index) => standings[index] === 'down')),
+    letThrough: providers.filter((provider, index) => standings[index] === 'let-through'),
+  };
+}
+
+// A state that cannot say a provider was let through (one with isDown alone) says only whether it is marked down.
+async function standingOf(state, provider) {
+  if (typeof state.standing === 'function') return state.standing(provider);
+  return (await state.isDown(provider)) === true ? 'down' : 'up';
 }
 
 // Each provider that has an adapter, and its state for the health page: 'up', or { downSince, reason } while it is
@@ -475,22 +537,25 @@ export async function modelsOffered(providers, { adapters = adaptersByDefault() 
   return Object.fromEntries(providers.map((provider, at) => [provider, lists[at]]));
 }
 
-// The provider state's ping (provider-state.js), the one small request a failed reply sends its provider: a health
-// check of the provider's main model, the first of its models in `chains`. It goes through the caps like any other
-// call, and has no clock, so that it is never itself counted. It resolves to true when the model answered, and to
-// false when the provider failed it as a reply's call counts against a provider (PROVIDER_FAILURES). A reached cap, a
-// model that is gone and a fault in the app say nothing of the provider, and resolve to true.
+// The provider state's ping (provider-state.js), the one small request a failed reply sends its provider, and the
+// check of a provider marked down that a reply let through: a health check of the provider's main model, the first of
+// its models in `chains`. It goes through the caps like any other call, and has no clock, so that it is never itself
+// counted. It resolves to true when the model answered, and to false when the provider failed it as a reply's call
+// counts against a provider (PROVIDER_FAILURES). A reached cap, a model that is gone, a fault in the app, a provider
+// with no model in the chains, and a check cut off by its signal (the reply no longer needed it) say nothing of the
+// provider, and resolve to null.
 export function providerPing(chains, deps = {}) {
   const providerFor = deps.providerFor ?? providerOfModel;
-  return async provider => {
+  return async (provider, { signal = null } = {}) => {
     const model = chains.flat().find(name => providerFor(name) === provider);
-    if (!model) return true;
+    if (!model) return null;
     try {
-      await runJob({ job: 'health', chain: [model] }, deps);
+      await runJob({ job: 'health', chain: [model], signal }, deps);
       return true;
     } catch (error) {
+      if (signal?.aborted) return null;
       if (error?.allRefused === true) return false;
-      return !(error instanceof ProvidersFailed && error.attempts.some(({ failure: failed }) => PROVIDER_FAILURES.has(failed.reason)));
+      return error instanceof ProvidersFailed && error.attempts.some(({ failure: failed }) => PROVIDER_FAILURES.has(failed.reason)) ? false : null;
     }
   };
 }

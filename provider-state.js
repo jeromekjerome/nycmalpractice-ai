@@ -14,7 +14,9 @@
 // - A provider marked down is asked after the providers that are up (providers.js). Five minutes after it was marked
 //   down, and every five minutes after that while it stays down, one request is let through to it in its usual
 //   place, by the one instance that claims it. A reply it answers clears it, once it has served its five minutes;
-//   before that, the mark stays as it is.
+//   before that, the mark stays as it is. When the job that claims the request asks another provider first, the
+//   request may never reach it: its ping (probe) is sent instead, beside the reply, and a ping it answers clears it as
+//   a reply would; one it fails leaves it down, until the next request five minutes on.
 // - The owner is told once when a provider is marked down and once when it comes back. Each change is claimed by an
 //   UPDATE ... RETURNING that only one instance can win, so two instances never both send the email.
 // - The table is read at most once in fifteen seconds by each instance, and what an instance writes it knows at once.
@@ -54,10 +56,12 @@ function knownFrom(row) {
  * @param {object} options
  * @param {Function} options.sqlClient  the database's tagged-template client
  * @param {Function} [options.now]      the time, for the fifteen seconds' memory; the database keeps its own
- * @param {Function} [options.ping]     ping(provider) -> Promise<boolean>: whether the provider answers a small test
- *   request. false marks it down; a ping that cannot be made says nothing.
+ * @param {Function} [options.ping]     ping(provider, { signal }) -> Promise<boolean | null>: whether the provider
+ *   answers a small test request: true when it answered, false when it failed it, null when the ping says nothing of
+ *   it. false marks it down; a ping that cannot be made says nothing. `signal` fires when the reply no longer needs it.
  * @param {Function} [options.tell]     tell({ kind: 'down' | 'up', provider, reason, since }): tells the owner
- * @returns {{ isDown(provider): Promise<boolean>, ping(provider): Promise<boolean | null>,
+ * @returns {{ standing(provider): Promise<'up' | 'down' | 'let-through'>, isDown(provider): Promise<boolean>,
+ *   ping(provider, { signal }): Promise<boolean | null>, probe(provider, { signal }): Promise<boolean | null>,
  *   replyFailed(provider, { reason, markDownNow, pinged }): Promise<void>, replySucceeded(provider): Promise<void>,
  *   snapshot(): Promise<object> }}
  *   snapshot gives { [provider]: { downSince, reason } } for each provider marked down. None of them throws.
@@ -133,11 +137,11 @@ export function providerState({ sqlClient, now = Date.now, ping = null, tell = n
     }
   }
 
-  // Whether the provider answers its ping. A ping that cannot be made says nothing of the provider.
-  async function answers(provider) {
+  // Whether the provider answers its ping. A ping that cannot be made, or says nothing, says nothing of the provider.
+  async function answers(provider, { signal = null } = {}) {
     if (typeof ping !== 'function') return true;
     try {
-      return (await ping(provider)) !== false;
+      return (await ping(provider, { signal })) !== false;
     } catch {
       console.error(`[providers] The check of ${provider} could not be made; it is not marked down for it.`);
       return true;
@@ -167,42 +171,68 @@ export function providerState({ sqlClient, now = Date.now, ping = null, tell = n
     await told({ kind: 'down', provider, reason, since: new Date(entry.downSince).toISOString() });
   }
 
-  return {
-    // Whether the provider is marked down. When its next request may be let through, the instance whose UPDATE claims
-    // it counts the provider as up for this one question, and moves the next five minutes ahead; every other caller
-    // still counts it as down.
-    async isDown(provider) {
-      const entry = (await known()).get(provider);
-      if (!entry || entry.downSince === null) return false;
-      if (entry.retryAt !== null && entry.retryAt > now()) return true;
-      if (claiming.has(provider)) return true;
-      claiming.add(provider);
-      try {
-        const [claimed] = await sqlClient`
-          UPDATE ai_provider_state SET retry_at = now() + interval '5 minutes', updated_at = now()
-          WHERE provider = ${provider} AND down_since IS NOT NULL AND retry_at <= now()
-          RETURNING retry_at`;
-        if (claimed) {
-          remember(provider, { ...entry, retryAt: millis(claimed.retry_at) });
-          return false;
-        }
-        // Another instance let this request through, or the provider came back: down here until the next read.
-        remember(provider, { ...entry, retryAt: Infinity });
-        return true;
-      } catch (error) {
-        unreadable(error);
-        return false;
-      } finally {
-        claiming.delete(provider);
+  // How the provider stands: 'up', 'down' (marked down), or 'let-through' (marked down, and this one question claimed
+  // the request let through to it). When its next request may be let through, the instance whose UPDATE claims it
+  // gets 'let-through' for this one question, and moves the next five minutes ahead; every other caller gets 'down'.
+  async function standing(provider) {
+    const entry = (await known()).get(provider);
+    if (!entry || entry.downSince === null) return 'up';
+    if (entry.retryAt !== null && entry.retryAt > now()) return 'down';
+    if (claiming.has(provider)) return 'down';
+    claiming.add(provider);
+    try {
+      const [claimed] = await sqlClient`
+        UPDATE ai_provider_state SET retry_at = now() + interval '5 minutes', updated_at = now()
+        WHERE provider = ${provider} AND down_since IS NOT NULL AND retry_at <= now()
+        RETURNING retry_at`;
+      if (claimed) {
+        remember(provider, { ...entry, retryAt: millis(claimed.retry_at) });
+        return 'let-through';
       }
+      // Another instance let this request through, or the provider came back: down here until the next read.
+      remember(provider, { ...entry, retryAt: Infinity });
+      return 'down';
+    } catch (error) {
+      unreadable(error);
+      return 'up';
+    } finally {
+      claiming.delete(provider);
+    }
+  }
+
+  return {
+    standing,
+
+    // Whether the provider counts as marked down for this question: a provider let through for its one request does
+    // not (standing).
+    async isDown(provider) {
+      return (await standing(provider)) === 'down';
     },
 
     // The small test request a failed reply sends its provider, which the reply's clock starts at the provider's first
     // failure, so that it runs beside the rest of the reply (providers.js). It resolves to whether the provider
     // answered it, or to null for a provider this instance knows to be marked down, which is not pinged again.
-    async ping(provider) {
+    // `signal` fires when the reply no longer needs it (the provider answered a job after all).
+    async ping(provider, { signal = null } = {}) {
       if ((await known()).get(provider)?.downSince != null) return null;
-      return answers(provider);
+      return answers(provider, { signal });
+    },
+
+    // The check of a provider marked down that a reply let through for its one request but asks only after another
+    // provider (providers.js): its ping, which carries nothing a visitor wrote. It resolves to true only when the
+    // provider answered it, to false when the provider failed it, and to null when it says nothing (no ping is set, it
+    // could not be made, it said nothing of the provider, or the reply cut it off because the provider answered a job
+    // or failed one after all). It changes nothing itself: the reply tells the state what it found when it ends.
+    async probe(provider, { signal = null } = {}) {
+      if (typeof ping !== 'function') return null;
+      try {
+        const said = await ping(provider, { signal });
+        if (signal?.aborted) return null;
+        return said === true || said === false ? said : null;
+      } catch {
+        console.error(`[providers] The check of ${provider}, marked down, could not be made; it stays as it is.`);
+        return null;
+      }
     },
 
     // A reply that ended with the provider answering none of its jobs, after it failed in a way that counts against

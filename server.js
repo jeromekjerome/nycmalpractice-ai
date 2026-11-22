@@ -35,10 +35,12 @@ const sql = neon(process.env.DATABASE_URL);
 // (operations.js), once a day, when the saved chains name a model the registry no longer has.
 configureModelSettings({ sqlClient: sql, app: APP_ID, tell: tellOwnerOfModelChains });
 
-// A provider's ping is a health check of its main model in the chains in use when it is sent (providerPing).
-async function pingProvider(provider) {
+// A provider's ping is a health check of its main model in the chains in use when it is sent (providerPing). The
+// provider state hands it a signal, which the reply fires when the check's answer no longer matters; it goes on to the
+// health check, which is then cut off at once. Exported for the tests.
+export async function pingProvider(provider, { signal = null } = {}) {
   const { answer, small } = await chains();
-  return providerPing([answer, small])(provider);
+  return providerPing([answer, small])(provider, { signal });
 }
 
 // Whether each AI provider is answering, kept in this database for every server instance (provider-state.js). A

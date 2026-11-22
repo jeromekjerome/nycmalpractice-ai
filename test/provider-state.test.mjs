@@ -9,7 +9,7 @@ import './test-settings.mjs';
 import assert from 'node:assert/strict';
 import { test } from './runner.mjs';
 import { providerState } from '../provider-state.js';
-import { runJob, replyClock } from '../providers.js';
+import { runJob, replyClock, providerPing } from '../providers.js';
 
 const MINUTE = 60_000;
 const START = Date.parse('2026-11-21T15:00:00.000Z');
@@ -374,6 +374,112 @@ test("through runJob, a provider marked down is not asked while another answers;
   assert.equal(await reply(), 'beta-1');
   assert.deepEqual(asked, ['grade beta-1']);
   assert.deepEqual(told.map(note => note.kind), ['down', 'up', 'down']);
+});
+
+test("through runJob, a provider marked down that its chain asks only after one that answers gets its one request let through as a ping, beside the reply, and no job: a ping it answers clears it with one email, a failed one keeps it down five minutes more, and before then it is sent nothing", async () => {
+  let answering = true;
+  const { clock, table, pinged, told, instance } = world({ answers: () => answering });
+  const state = instance();
+  // Two stand-in providers as a reply's chain names them: openai first, which answers every job, and anthropic after
+  // it, marked down. Each job a provider is asked is kept in `asked`; each ping the state sends, in `pinged`.
+  const asked = [];
+  const adapter = name => ({
+    name,
+    call: async ({ job, model }) => { asked.push(`${job} ${model}`); return { text: 'ok', inputTokens: 1, outputTokens: 1 }; },
+  });
+  const deps = { adapters: { openai: adapter('openai'), anthropic: adapter('anthropic') }, budget: ({ execute }) => execute(), providerFor: model => model.split('-')[0], state };
+  const reply = async () => {
+    asked.length = 0;
+    const replying = replyClock({ deadlineAt: Date.now() + 45_000 });
+    return (await quietly(async () => {
+      const answered = await runJob({ job: 'grade', chain: ['openai-1', 'anthropic-1'], messages: [{ role: 'user', content: 'x' }], json: true, maxTokens: 100, clock: replying }, deps);
+      await replying.end();
+      return answered.model;
+    })).result;
+  };
+
+  await quietly(() => state.replyFailed('anthropic', { reason: 'timeout', markDownNow: true }));
+  // Within its five minutes it is sent nothing: no job, and no ping.
+  clock.pass(MINUTE);
+  assert.equal(await reply(), 'openai-1');
+  assert.deepEqual([asked, pinged], [['grade openai-1'], []]);
+
+  // The five minutes are up, and this reply takes the one request let through. openai answers the job, so what goes
+  // to anthropic is its ping, beside the reply, with nothing the visitor wrote; no job goes to it.
+  clock.pass(4 * MINUTE);
+  assert.equal(await reply(), 'openai-1');
+  assert.deepEqual([asked, pinged], [['grade openai-1'], ['anthropic']]);
+  // It answered the ping: it is up again, as when it answers a job, and the owner is told once.
+  assert.deepEqual(told.map(note => [note.kind, note.provider]), [['down', 'anthropic'], ['up', 'anthropic']]);
+  assert.deepEqual([table.rows.get('anthropic').down_since, await state.isDown('anthropic')], [null, false]);
+
+  // Marked down again; five minutes on its ping fails: it stays down, and the next request is let through five minutes
+  // after this one. Nobody is told anything more.
+  await quietly(() => state.replyFailed('anthropic', { reason: 'timeout', markDownNow: true }));
+  clock.pass(5 * MINUTE);
+  answering = false;
+  assert.equal(await reply(), 'openai-1');
+  assert.deepEqual([asked, pinged], [['grade openai-1'], ['anthropic', 'anthropic']]);
+  assert.equal(table.rows.get('anthropic').retry_at, clock.now() + 5 * MINUTE);
+  assert.equal(await state.isDown('anthropic'), true);
+  assert.deepEqual(told.map(note => note.kind), ['down', 'up', 'down']);
+});
+
+test("through runJob and the app's own ping, a provider that answers a job of the reply has its check cut off, and the reply's end does not wait for it: the check that a failure started, and the ping of a provider let through", async () => {
+  const { clock, table, told } = world();
+  // The state's ping is the app's (providerPing): a health check of the provider's main model. Here the provider takes
+  // the check and never answers it, and does not heed its signal either, and the check's time never runs out: only
+  // the cut-off can end it. Each check is kept in `checks`, with its signal.
+  const checks = [];
+  const failing = new Set();
+  const adapter = name => ({
+    name,
+    call: async ({ model }) => {
+      if (failing.has(model)) throw Object.assign(new Error('503 Service Unavailable'), { status: 503 });
+      return { text: 'ok', inputTokens: 1, outputTokens: 1 };
+    },
+    ping: (model, { signal } = {}) => { checks.push({ model, signal }); return new Promise(() => {}); },
+  });
+  const adapters = { alpha: adapter('alpha'), beta: adapter('beta') };
+  const providerFor = model => model.split('-')[0];
+  const ping = providerPing([['alpha-1', 'beta-1']], { adapters, budget: ({ execute }) => execute(), providerFor, timer: () => () => {} });
+  const state = providerState({ sqlClient: table.sql, now: clock.now, ping, tell: async note => { told.push(note); } });
+  const deps = { adapters, budget: ({ execute }) => execute(), providerFor, state };
+  const job = (replying, name, chain) => runJob({ job: name, chain, messages: [{ role: 'user', content: 'x' }], json: true, maxTokens: 100, clock: replying }, deps);
+  // How long the reply's end takes, or 'waited' if it does not end within a second.
+  const ending = replying => Promise.race([replying.end().then(() => 'ended'), new Promise(resolve => setTimeout(resolve, 1_000, 'waited'))]);
+
+  // alpha fails the reply's first job, and its check starts; then it answers the next job. Its check is cut off.
+  const first = replyClock({ deadlineAt: Date.now() + 45_000 });
+  const { result: outcome } = await quietly(async () => {
+    failing.add('alpha-1');
+    assert.equal((await job(first, 'classify', ['alpha-1', 'beta-1'])).model, 'beta-1');
+    failing.delete('alpha-1');
+    assert.equal(checks.length, 1);
+    assert.equal((await job(first, 'grade', ['alpha-2'])).model, 'alpha-2');
+    return ending(first);
+  });
+  assert.equal(outcome, 'ended');
+  assert.deepEqual(checks.map(({ model, signal }) => [model, signal.aborted]), [['alpha-1', true]]);
+  // A check cut off says nothing of the provider: alpha answered a job, so it is up, and nothing is on record.
+  assert.deepEqual([table.rows.size, told], [0, []]);
+
+  // beta is marked down; five minutes on, a reply lets its one request through. alpha answers, so beta's ping starts
+  // beside the reply. Then beta answers a job of the same reply: its ping is cut off, and the job's answer clears it.
+  await quietly(() => state.replyFailed('beta', { reason: 'timeout', markDownNow: true }));
+  clock.pass(5 * MINUTE);
+  checks.length = 0;
+  const second = replyClock({ deadlineAt: Date.now() + 45_000 });
+  const { result: later } = await quietly(async () => {
+    assert.equal((await job(second, 'classify', ['alpha-1', 'beta-1'])).model, 'alpha-1');
+    assert.deepEqual(checks.map(({ model }) => model), ['beta-1']);
+    assert.equal((await job(second, 'grade', ['beta-2'])).model, 'beta-2');
+    return ending(second);
+  });
+  assert.equal(later, 'ended');
+  assert.deepEqual(checks.map(({ model, signal }) => [model, signal.aborted]), [['beta-1', true]]);
+  assert.deepEqual(told.map(note => [note.kind, note.provider]), [['down', 'beta'], ['up', 'beta']]);
+  assert.equal(table.rows.get('beta').down_since, null);
 });
 
 // OpenAI as runJob asks it, through a fake adapter: a model named in `failing` answers with that HTTP status, and any

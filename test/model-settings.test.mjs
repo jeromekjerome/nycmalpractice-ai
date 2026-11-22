@@ -8,6 +8,7 @@
 //
 // This file is the same in both apps. checkChains is shown stand-in models of three stand-in providers, with a
 // registry of their own; the rest uses the registry both apps share and this app's built-in chains (models.js).
+import './test-settings.mjs';
 import assert from 'node:assert/strict';
 import { isDeepStrictEqual } from 'node:util';
 import { test } from './runner.mjs';

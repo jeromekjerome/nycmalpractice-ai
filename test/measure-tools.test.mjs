@@ -8,6 +8,7 @@
 //
 // Nothing here reaches a network or a database: the app, the settings and the fetch are stand-ins. This file is the same in
 // both apps.
+import './test-settings.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from './runner.mjs';

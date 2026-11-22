@@ -3,6 +3,7 @@
 
 // The JSON each of this app's small jobs answers in (job-schemas.js), as its caller reads it and its prompt asks
 // for it.
+import './test-settings.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from './runner.mjs';

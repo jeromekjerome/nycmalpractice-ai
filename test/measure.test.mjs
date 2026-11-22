@@ -7,6 +7,7 @@
 // This file is the same in both apps, and so are the four it tests. It brings its own people and its own app
 // adapter, so that nothing here depends on which app is running it. What is particular to an app (its adapter,
 // its visitors, its known-bad drafts) is tested in measure-app.test.mjs.
+import './test-settings.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';

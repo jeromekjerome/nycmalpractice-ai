@@ -1,3 +1,4 @@
+import './test-settings.mjs';
 import assert from 'node:assert/strict';
 import { test } from './runner.mjs';
 import { runJob } from '../providers.js';

@@ -5,6 +5,7 @@
 // the synthetic visitors and the drafts that are wrong on purpose (measure/visitors.mjs). The tools themselves are
 // tested in measure.test.mjs, which is the same file in both apps. How each model call is told by its job is
 // tested in app.test.mjs, beside the prompts it is told by, and here in the request shape of each provider.
+import './test-settings.mjs';
 import assert from 'node:assert/strict';
 import { test } from './runner.mjs';
 import { MEASURE_DATABASE_URL } from '../measure/guard-fetch.mjs';

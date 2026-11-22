@@ -1,3 +1,4 @@
+import './test-settings.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, mkdtempSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -8,17 +9,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { startServer } from './helpers.mjs';
 import { test } from './runner.mjs';
 
-process.env.NODE_ENV = 'test';
-// No test process loads the local .env (live keys, the live mail login, the live database address): dotenv, which
-// db.js and server.js load, is pointed at an empty file. Forced, and before anything imports db.js or server.js.
-process.env.DOTENV_CONFIG_PATH = fileURLToPath(new URL('./no-settings.env', import.meta.url));
-process.env.DOTENV_CONFIG_QUIET = 'true';
-process.env.DATABASE_URL ||= 'postgres://user:pass@localhost:5432/testdb';
-process.env.OPENAI_API_KEY ||= 'test-openai-key';
-// Never a real key: with none set, Claude and Gemini have no adapter, as in production before the owner adds the keys.
-// Forced, because a local .env holds the real ones and dotenv leaves a variable that is already set (even empty) alone.
-process.env.ANTHROPIC_API_KEY = '';
-process.env.GEMINI_API_KEY = '';
+// The test settings (./test-settings.mjs, imported first) point dotenv at an empty file and set the database address
+// and the model keys, so that nothing here loads the local .env. The rest of this suite's made-up settings follow.
 process.env.STRIPE_SECRET_KEY ||= 'sk_test_123';
 process.env.STRIPE_WEBHOOK_SECRET ||= 'whsec_test_123';
 process.env.TWILIO_ACCOUNT_SID ||= 'AC123';
@@ -3967,13 +3959,14 @@ test("every model call of a reply is given the reply's clock: with under half a 
 
 // A reply made by the app's own wiring with Claude's adapter registered, in a process of its own
 // (test/second-provider.child.mjs): this process keeps ANTHROPIC_API_KEY empty, and providers.js makes its adapters once.
-// The child gets this process's made-up settings, a made-up Anthropic key and no mail login, runs in an empty folder,
-// answers every outbound request itself, and prints one line, RESULT and its findings as JSON.
+// The child gets this process's made-up settings and no mail login, takes the test settings first and then gives
+// Claude a made-up key of its own, runs in an empty folder, answers every outbound request itself, and prints one line,
+// RESULT and its findings as JSON.
 const SECOND_PROVIDER_CHILD = fileURLToPath(new URL('./second-provider.child.mjs', import.meta.url));
 function inSecondProviderChild(scenario, settings = {}) {
   const folder = mkdtempSync(join(tmpdir(), 'second-provider-'));
   try {
-    const env = { ...process.env, ANTHROPIC_API_KEY: 'test-anthropic-key', GEMINI_API_KEY: '', ...settings };
+    const env = { ...process.env, ...settings };
     delete env.SMTP_USER;
     const child = spawnSync(process.execPath, [SECOND_PROVIDER_CHILD, scenario], { cwd: folder, env, encoding: 'utf8', timeout: 60_000 });
     const line = String(child.stdout ?? '').split(/\r?\n/).find(text => text.startsWith('RESULT '));

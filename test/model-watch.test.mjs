@@ -4,6 +4,7 @@
 // The monthly look at each provider's models, and the reminder before a model retires (model-watch.js). A table kept in
 // memory stands in for provider_model_lists: it runs the statements the module sends and refuses any it does not know.
 // The adapters, the table and the email are fakes. Nothing here reaches a network or a database.
+import './test-settings.mjs';
 import assert from 'node:assert/strict';
 import { test } from './runner.mjs';
 import { modelWatch } from '../model-watch.js';

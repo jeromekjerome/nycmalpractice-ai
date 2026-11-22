@@ -4,6 +4,7 @@
 // Google's adapter (provider-google.js): the request each job becomes on Google's OpenAI-compatible endpoint, the answer
 // read back into the shape every adapter gives, and what failureOf makes of the openai SDK's errors from it. A fake
 // client, and a fake fetch under the SDK's own client, stand in for Google: nothing here reaches a network or a database.
+import './test-settings.mjs';
 import assert from 'node:assert/strict';
 import { test } from './runner.mjs';
 import { runJob, failureOf, adaptersFor } from '../providers.js';

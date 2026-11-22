@@ -5,6 +5,7 @@
 // stands in for ai_provider_state: it runs the statements the module sends, reading the test's time as Postgres reads
 // now(), and refuses any statement it does not know. Two instances are two states over one table. Nothing here
 // reaches a network or a database.
+import './test-settings.mjs';
 import assert from 'node:assert/strict';
 import { test } from './runner.mjs';
 import { providerState } from '../provider-state.js';

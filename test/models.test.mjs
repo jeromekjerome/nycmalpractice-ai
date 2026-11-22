@@ -2,6 +2,7 @@
 // Source available for evaluation only; see LICENSE.
 
 // The model chains: where the names live, and what may change them.
+import './test-settings.mjs';
 import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { test } from './runner.mjs';

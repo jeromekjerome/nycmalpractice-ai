@@ -4,6 +4,7 @@
 // The one module that runs every job the app gives a model (providers.js), and OpenAI's adapter, which shapes each
 // request for the model it goes to (provider-openai.js). Fake adapters, fake clients and a fake fetch stand in for
 // OpenAI: nothing here reaches a network or a database.
+import './test-settings.mjs';
 import assert from 'node:assert/strict';
 import {
   APIConnectionError, APIConnectionTimeoutError, APIError, APIUserAbortError, AuthenticationError, BadRequestError,

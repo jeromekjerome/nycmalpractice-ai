@@ -6,6 +6,7 @@
 // for the three providers: nothing here reaches a network or a database.
 //
 // This file is the same in both apps.
+import './test-settings.mjs';
 import assert from 'node:assert/strict';
 import { test } from './runner.mjs';
 import { PROBE_HOSTS, SHAPES, parseProbeArgs, probeCost, probeModel, runProbe, watchUsage } from '../measure/probe-shapes.mjs';

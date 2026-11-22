@@ -3,6 +3,7 @@
 
 // What a call is counted as costing: the published prices, a price for every model the app can reach, and what
 // happens to a model that has none.
+import './test-settings.mjs';
 import assert from 'node:assert/strict';
 import { test } from './runner.mjs';
 import { estimateAiCost, hasPrice } from '../ai-budget.js';

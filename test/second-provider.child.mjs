@@ -6,18 +6,18 @@
 //
 // The suite's own process keeps ANTHROPIC_API_KEY empty, so that no test asks Claude by accident, and providers.js makes
 // its adapters once. A reply that Claude answers through the app's own wiring therefore needs a process of its own. The
-// parent hands this one the suite's made-up settings, a made-up ANTHROPIC_API_KEY and no mail login. Before anything of
-// the app is loaded, every outbound request is answered here: OpenAI and Anthropic as the scenario says, CourtListener
-// with no decisions, the database with no rows. Anything else throws, so nothing reaches a network. It prints one line,
-// RESULT and the scenario's findings as JSON.
+// parent hands this one the suite's made-up settings and no mail login; the test settings, imported first, point dotenv
+// at an empty file and blank the model keys, and this file then gives Claude a made-up key of its own. Before anything
+// of the app is loaded, every outbound request is answered here: OpenAI and Anthropic as the scenario says,
+// CourtListener with no decisions, the database with no rows. Anything else throws, so nothing reaches a network. It
+// prints one line, RESULT and the scenario's findings as JSON.
+import './test-settings.mjs';
 import net from 'node:net';
-import { fileURLToPath } from 'node:url';
 
-// Refused unless the parent's settings are in force: dotenv pointed at the empty settings file, the test environment,
-// and a made-up Anthropic key. A real key, or a local .env, never reaches this process.
-const NO_SETTINGS = fileURLToPath(new URL('./no-settings.env', import.meta.url));
-if (process.env.DOTENV_CONFIG_PATH !== NO_SETTINGS || process.env.NODE_ENV !== 'test' || process.env.ANTHROPIC_API_KEY !== 'test-anthropic-key' || process.env.SMTP_USER) {
-  console.error('second-provider.child.mjs runs only as a child of test/app.test.mjs, with its made-up settings.');
+// A made-up key, so that Claude's adapter is made. Refused when the parent left a mail login: nothing here sends mail.
+process.env.ANTHROPIC_API_KEY = 'test-anthropic-key';
+if (process.env.SMTP_USER) {
+  console.error('second-provider.child.mjs runs only as a child of test/app.test.mjs, with no mail login.');
   process.exit(2);
 }
 

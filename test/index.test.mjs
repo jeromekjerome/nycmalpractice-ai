@@ -1,3 +1,4 @@
+import './test-settings.mjs';
 import './app.test.mjs';
 import './ai-budget.test.mjs';
 import './backup.test.mjs';
@@ -14,6 +15,7 @@ import './measure.test.mjs';
 import './measure-tools.test.mjs';
 import './probe-shapes.test.mjs';
 import './measure-app.test.mjs';
+import './test-settings.test.mjs';
 
 import { run } from './runner.mjs';
 

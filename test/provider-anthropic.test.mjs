@@ -4,6 +4,7 @@
 // Anthropic's adapter (provider-anthropic.js): the request each job becomes for a Claude model, the answer read back
 // into the shape every adapter gives, and what failureOf makes of the SDK's own errors. A fake client, and a fake
 // fetch under the SDK's own client, stand in for Anthropic: nothing here reaches a network or a database.
+import './test-settings.mjs';
 import assert from 'node:assert/strict';
 import {
   APIConnectionError, APIConnectionTimeoutError, APIError, APIUserAbortError, AuthenticationError, BadRequestError,

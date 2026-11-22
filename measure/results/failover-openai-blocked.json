@@ -1,0 +1,756 @@
+{
+ "app": "nycmalpractice",
+ "label": "failover-openai-blocked",
+ "mode": "reply",
+ "answer": "gpt-6.1-terra",
+ "aux": "gpt-6-luna",
+ "chains": {
+  "answer": [
+   "gpt-6.1-terra",
+   "claude-haiku-5-5",
+   "gemini-3.5-flash-lite"
+  ],
+  "small": [
+   "gpt-6-luna",
+   "claude-haiku-5-5",
+   "gemini-3.5-flash-lite"
+  ]
+ },
+ "blockedHosts": [
+  "api.openai.com"
+ ],
+ "turnLimit": 10,
+ "startedAt": "2026-11-22T17:56:14.716Z",
+ "turns": [
+  {
+   "visitor": "er-stroke",
+   "turn": 1,
+   "ms": 6945,
+   "type": "misdiagnosis",
+   "classifiedType": null,
+   "gateStatus": "PASSED",
+   "firstPassCompliant": true,
+   "finalAttempt": 1,
+   "evaluator": "llm",
+   "firstDraftUnanchored": 0,
+   "firstDraftFlagged": [],
+   "firstDraft": "I'm so sorry. Watching your husband suddenly lose his speech and the use of one side of his face, and then being sent home, must have been terrifying, and I can hear how much it has weighed on you since.\n\nBecause those symptoms can signal a serious neurological emergency, please make sure he is being followed up by a doctor now, if he isn't already. If he has any new or ongoing trouble with speech, movement, vision, or memory, he should be seen urgently.\n\nTo understand what happened, could you tell me how he is doing today, and whether he has had lasting effects from that night?\n\nThis is general information, not legal advice.",
+   "served": "I'm so sorry. Watching your husband suddenly lose his speech and the use of one side of his face, and then being sent home, must have been terrifying, and I can hear how much it has weighed on you since.\n\nBecause those symptoms can signal a serious neurological emergency, please make sure he is being followed up by a doctor now, if he isn't already. If he has any new or ongoing trouble with speech, movement, vision, or memory, he should be seen urgently.\n\nTo understand what happened, could you tell me how he is doing today, and whether he has had lasting effects from that night?\n\nThis is general information, not legal advice.",
+   "leadTier": null,
+   "leadScore": null,
+   "leadVerdict": false,
+   "caseCard": false
+  },
+  {
+   "visitor": "er-stroke",
+   "turn": 2,
+   "ms": 7908,
+   "type": "misdiagnosis",
+   "classifiedType": null,
+   "gateStatus": "PASSED",
+   "firstPassCompliant": true,
+   "finalAttempt": 1,
+   "evaluator": "llm",
+   "firstDraftUnanchored": 0,
+   "firstDraftFlagged": [],
+   "firstDraft": "I'm so sorry. Your husband went from being sent home with a headache to losing the use of his left side, and now he relies on a wheelchair. That is a devastating change for him and for your whole family, and it's understandable that you're looking for answers about what happened that night.\n\nTo understand the timeline better, has he had any follow-up care since then for these symptoms, such as visits with the Queens hospital, its doctors, or a neurologist connected to it?\n\nThis is general information, not legal advice.",
+   "served": "I'm so sorry. Your husband went from being sent home with a headache to losing the use of his left side, and now he relies on a wheelchair. That is a devastating change for him and for your whole family, and it's understandable that you're looking for answers about what happened that night.\n\nTo understand the timeline better, has he had any follow-up care since then for these symptoms, such as visits with the Queens hospital, its doctors, or a neurologist connected to it?\n\nThis is general information, not legal advice.",
+   "leadTier": "hot",
+   "leadScore": 84.5,
+   "leadVerdict": true,
+   "caseCard": false
+  },
+  {
+   "visitor": "er-stroke",
+   "turn": 3,
+   "ms": 21542,
+   "type": "misdiagnosis",
+   "classifiedType": null,
+   "gateStatus": "PASSED",
+   "firstPassCompliant": false,
+   "finalAttempt": 2,
+   "evaluator": "llm",
+   "firstDraftUnanchored": 0,
+   "firstDraftFlagged": [
+    "REQ-MM-03"
+   ],
+   "firstDraft": "I'm sorry. Your husband went from being sent home with what was called a migraine to losing the use of his side and relying on a wheelchair. Having both hospitals' records and a neurologist who has already named the problem is important. Here is a preliminary assessment based on what you've told me. It is not a final evaluation.\n\n**1. Timing and deadlines**\n\n- **Filing deadline:** Under CPLR §214-a, a medical malpractice suit generally must be filed within 2 years and 6 months of the act or omission. Here that is most likely the ER visit, about four months ago, so roughly two years of time remain. Confirm the exact visit date from the records, because the deadline runs from that date.\n- **Possible later start:** If the Queens hospital or its doctors kept treating him for the same condition, the clock may start later, at the end of that continuous treatment. Don't rely on this. Treat the ER visit as the start date.\n- **Shorter deadlines:** Because the hospital is private, the 90-day notice of claim required for city- or county-run hospitals (GML §50-e) should not apply. Lavern's Law and the foreign-object rule don't fit these facts. If any doctor involved was a federal employee, a much shorter federal administrative claim could apply, but that is unlikely at a private hospital.\n- **Your husband's own claim:** He is an adult, so no infancy extension applies. Because he is alive, his injury claim is his to bring. You may have a separate claim for losses to the marriage, such as loss of services and companionship, which an attorney can evaluate.\n\n**2. Standard of care and the key question**\n\n- **What was expected:** A reasonably careful emergency physician who sees sudden severe headache with slurred speech and facial droop is generally expected to treat it as a possible stroke until proven otherwise. That usually means an urgent brain scan (CT, and sometimes further imaging), a neurological assessment, and a stroke-team or neurology consult, all done quickly.\n- **Alleged breach:** The records appear to show he was diagnosed with a migraine and discharged after about two hours without that workup. The neurologist's view that a CT should have been done right away is a significant starting point, but an attorney will need an independent expert opinion.\n- **Causation:** This is the central issue. A malpractice claim requires showing that the missed care caused the harm. The questions an expert would answer include:\n  - When did his symptoms start? Time-sensitive stroke treatments such as clot-busting drugs have a narrow window, and the second hospital said it had passed by the next morning.\n  - Would a CT at the first visit have shown a stroke, and would it have led to treatment that could have prevented or reduced his disability?\n  - Was the stroke type one that a scan would have caught and treatment could have affected?\n  - How much of his current disability is due to the delay, and how much would have happened regardless?\n\n**Related New York decisions:** The following cases are listed in the materials I have. I can only say that they concern medical malpractice. I can't tell you what they decided from the excerpts available:\n- *Hackshaw v. Mercy Medical Center*, 139 A.D.3d 798; 33 N.Y.S.3d 297 (App. Div. 2016)\n- *Michel v. Long Island Jewish Medical Center*, 125 A.D.3d 945; 5 N.Y.S.3d 162 (App. Div. 2015)\n- *D.Y. Ex Rel. DeShawn Y. v. Catskill Regional Medical Center*, 2017 NY Slip Op 8577; 156 A.D.3d 1003; 66 N.Y.S.3d 368 (App. Div. 2017)\n\n**Other points that matter**\n\n- **Certificate of merit:** Before a malpractice suit is filed, the attorney must certify that a qualified expert reviewed the case (CPLR §3012-a). Expert review takes time, so starting early helps.\n- **Shared fault:** New York uses comparative fault in malpractice cases (CPLR §1411). If a court found your husband partly responsible, for example for not returning sooner, his damages would be reduced in proportion, but he would not be barred from recovering. If a defendant is 50% or less at fault, CPLR Article 16 limits that defendant's liability for non-economic damages.\n- **Cost:** Most malpractice firms work on contingency, so there is no fee unless there is a recovery. Case costs, such as expert reviews and records, are separate and may have to be repaid depending on the agreement.\n\n**My recommendation:** Based on what you've described, this appears to be a potentially viable claim that deserves prompt review by a New York medical malpractice attorney. The time to build the case is limited, and experts will need the full records, the imaging, and the timeline of symptoms. Please don't type personal contact details into this ch",
+   "served": "I'm sorry. Your husband went from being sent home with what was called a migraine to losing the use of his side and relying on a wheelchair. Having both hospitals' records and a neurologist who has already named the problem is important. Here is a preliminary assessment based on what you've told me. It is not a final evaluation.\n\n**1. Timing and deadlines**\n\n- **Filing deadline:** Under CPLR §214-a, a medical malpractice suit generally must be filed within 2 years and 6 months of the act or omission. Here that is most likely the ER visit, about four months ago, so roughly two years of time remain. Confirm the exact visit date from the records, because the deadline runs from that date.\n- **Possible later start:** If the Queens hospital or its doctors kept treating him for the same condition, the clock may start later, at the end of that continuous treatment. Don't rely on this. Treat the ER visit as the start date.\n- **Shorter deadlines:** Because the hospital is private, the 90-day notice of claim required for city- or county-run hospitals (GML §50-e) should not apply. Lavern's Law and the foreign-object rule don't fit these facts. If any doctor involved was a federal employee, a much shorter federal administrative claim could apply, but that is unlikely at a private hospital.\n- **Your husband's own claim:** He is an adult, so no infancy extension applies. Because he is alive, his injury claim is his to bring. You may have a separate claim for losses to the marriage, such as loss of services and companionship, which an attorney can evaluate.\n\n**2. Standard of care and the key question**\n\n- **What was expected:** A reasonably careful emergency physician who sees sudden severe headache with slurred speech and facial droop is generally expected to treat it as a possible stroke until proven otherwise. That usually means an urgent brain scan (CT, and sometimes further imaging), a neurological assessment, and a stroke-team or neurology consult, all done quickly.\n- **Alleged breach:** The records appear to show he was diagnosed with a migraine and discharged after about two hours without that workup. The neurologist's view that a CT should have been done right away is a significant starting point, but an attorney will need an independent expert opinion.\n- **Causation:** This is the central issue. A malpractice claim requires showing that the missed care caused the harm. The questions an expert would answer include:\n  - When did his symptoms start? Time-sensitive stroke treatments such as clot-busting drugs have a narrow window, and the second hospital said it had passed by the next morning.\n  - Would a CT at the first visit have shown a stroke, and would it have led to treatment that could have prevented or reduced his disability?\n  - Was the stroke type one that a scan would have caught and treatment could have affected?\n  - How much of his current disability is due to the delay, and how much would have happened regardless?\n\n**Related New York decisions:** The following cases are listed in the materials I have. I can only say that they concern medical malpractice. I can't tell you what they decided from the excerpts available:\n- *Hackshaw v. Mercy Medical Center*, 139 A.D.3d 798; 33 N.Y.S.3d 297 (App. Div. 2016)\n- *Michel v. Long Island Jewish Medical Center*, 125 A.D.3d 945; 5 N.Y.S.3d 162 (App. Div. 2015)\n- *D.Y. Ex Rel. DeShawn Y. v. Catskill Regional Medical Center*, 2017 NY Slip Op 8577; 156 A.D.3d 1003; 66 N.Y.S.3d 368 (App. Div. 2017)\n\n**Other points that matter**\n\n- **Certificate of merit:** Before a malpractice suit is filed, the attorney must certify that a qualified expert reviewed the case (CPLR §3012-a). Expert review takes time, so starting early helps.\n- **Shared fault:** New York uses comparative fault in malpractice cases (CPLR §1411). If a court found your husband partly responsible, for example for not returning sooner, his damages would be reduced in proportion, but he would not be barred from recovering. If a defendant is 50% or less at fault, CPLR Article 16 limits that defendant's liability for non-economic damages.\n- **Cost:** Most malpractice firms work on contingency, so there is no fee unless there is a recovery. Case costs, such as expert reviews and records, are separate and may have to be repaid depending on the agreement.\n\n**My recommendation:** Based on what you've described, this appears to be a potentially viable claim that deserves prompt review by a New York medical malpractice attorney. The time to build the case is limited, and experts will need the full records, the imaging, and the timeline of symptoms. Please don't type personal contact details into this ch\n\nThis is general information, not legal advice.",
+   "leadTier": "hot",
+   "leadScore": 86,
+   "leadVerdict": true,
+   "caseCard": true
+  },
+  {
+   "visitor": "er-stroke",
+   "turn": 4,
+   "ms": 6667,
+   "type": "misdiagnosis",
+   "classifiedType": null,
+   "gateStatus": "PASSED",
+   "firstPassCompliant": true,
+   "finalAttempt": 1,
+   "evaluator": "llm",
+   "firstDraftUnanchored": 0,
+   "firstDraftFlagged": [],
+   "firstDraft": "Thank you for telling me. I know this has been a long and painful road for you and your husband, and taking this step is a meaningful one.\n\nMalpractice cases like this one depend on expert medical testimony to establish what the standard of care required and whether the care he received fell short of it. That is why it helps to work with a NYC malpractice attorney who already has a network of medical experts, such as neurologists and emergency physicians, who can review the records and the timing of his symptoms.\n\nYou can request a free consultation using the contact form below this reply. Please don't type your phone number or email into this chat. The form lets you share your details with the attorney's office only if you choose to.\n\nWhen you speak with a lawyer, it may help to bring:\n- Both hospitals' records, including the Queens ER visit notes, any imaging, and discharge papers\n- The exact date and time of the ER visit and when his symptoms began\n- The second hospital's records and the neurologist's notes\n- A written timeline of what happened that night and the next morning\n\nPlease keep the deadline in mind. Based on the ER visit about four months ago, the general limit is about two years and six months from that visit, but an attorney should confirm the exact date.\n\nThis is general information, not legal advice.",
+   "served": "Thank you for telling me. I know this has been a long and painful road for you and your husband, and taking this step is a meaningful one.\n\nMalpractice cases like this one depend on expert medical testimony to establish what the standard of care required and whether the care he received fell short of it. That is why it helps to work with a NYC malpractice attorney who already has a network of medical experts, such as neurologists and emergency physicians, who can review the records and the timing of his symptoms.\n\nYou can request a free consultation using the contact form below this reply. Please don't type your phone number or email into this chat. The form lets you share your details with the attorney's office only if you choose to.\n\nWhen you speak with a lawyer, it may help to bring:\n- Both hospitals' records, including the Queens ER visit notes, any imaging, and discharge papers\n- The exact date and time of the ER visit and when his symptoms began\n- The second hospital's records and the neurologist's notes\n- A written timeline of what happened that night and the next morning\n\nPlease keep the deadline in mind. Based on the ER visit about four months ago, the general limit is about two years and six months from that visit, but an attorney should confirm the exact date.\n\nThis is general information, not legal advice.",
+   "leadTier": "hot",
+   "leadScore": 80.5,
+   "leadVerdict": true,
+   "caseCard": true
+  },
+  {
+   "visitor": "sepsis-discharge",
+   "turn": 1,
+   "ms": 8354,
+   "type": "misdiagnosis",
+   "classifiedType": null,
+   "gateStatus": "PASSED",
+   "firstPassCompliant": true,
+   "finalAttempt": 1,
+   "evaluator": "llm",
+   "firstDraftUnanchored": 0,
+   "firstDraftFlagged": [],
+   "firstDraft": "I'm very sorry about your mother. Losing her seven weeks ago, after she went in for gallbladder surgery and was sent home with a fever and a high white blood cell count, is devastating, and I hope you have support around you.\n\nKings County Hospital is run by NYC Health + Hospitals, a public hospital system. Claims against public hospitals can have a very short notice deadline, generally 90 days under GML §50-e, and that clock often runs from when an estate representative is appointed. So I want to flag that timing now, even though I can't yet tell you what applies to your situation.\n\nTo understand where things stand, could you tell me whether anyone has been appointed to handle your mother's estate, such as an administrator through Surrogate's Court, or whether that hasn't happened yet?\n\nThis is general information, not legal advice.",
+   "served": "I'm very sorry about your mother. Losing her seven weeks ago, after she went in for gallbladder surgery and was sent home with a fever and a high white blood cell count, is devastating, and I hope you have support around you.\n\nKings County Hospital is run by NYC Health + Hospitals, a public hospital system. Claims against public hospitals can have a very short notice deadline, generally 90 days under GML §50-e, and that clock often runs from when an estate representative is appointed. So I want to flag that timing now, even though I can't yet tell you what applies to your situation.\n\nTo understand where things stand, could you tell me whether anyone has been appointed to handle your mother's estate, such as an administrator through Surrogate's Court, or whether that hasn't happened yet?\n\nThis is general information, not legal advice.",
+   "leadTier": null,
+   "leadScore": null,
+   "leadVerdict": false,
+   "caseCard": false
+  },
+  {
+   "visitor": "sepsis-discharge",
+   "turn": 2,
+   "ms": 16118,
+   "type": "misdiagnosis",
+   "classifiedType": null,
+   "gateStatus": "PASSED",
+   "firstPassCompliant": false,
+   "finalAttempt": 2,
+   "evaluator": "llm",
+   "firstDraftUnanchored": 0,
+   "firstDraftFlagged": [
+    "REQ-MME-01",
+    "PROH-MME-02"
+   ],
+   "firstDraft": "I'm so sorry. Learning that your mother was sent home with signs of infection, then returned in septic shock and died the next day, and that a doctor later said the infection should have been caught earlier, is an enormous amount to carry. Your grief and your questions about what happened are completely understandable.\n\nThis is the third turn, so I'll give you a preliminary assessment of the main points, and then the question I asked earlier still matters.\n\n**1. The deadline.** A New York wrongful death action must be started within 2 years of the date of death (EPTL §5-4.1). Your mother died about seven weeks ago, so the general 2-year wrongful death window is still open. However, because Kings County Hospital is run by NYC Health + Hospitals, a public hospital, a notice of claim under GML §50-e is generally due within 90 days. That period is typically counted from the appointment of the estate representative, which is why the appointment question matters so much. Do not wait on that step.\n\n**2. Estate representative.** The lawsuit is brought by the estate's personal representative, not by family members directly. If no administrator has been appointed, one generally needs to be obtained through Surrogate's Court, usually by the person entitled to priority under New York law. If someone has already been appointed, the 90-day notice clock may already be running.\n\n**3. Possible damages.** New York wrongful death damages are limited to the family's pecuniary losses under EPTL §5-4.3, such as lost financial support, services, and, for a child, the loss of a parent's guidance, plus medical and funeral expenses. Damages for grief or loss of companionship are not recoverable in New York. The Grieving Families Act has been vetoed and is not law. Separately, the survival claim under EPTL §11-3.2 can recover your mother's own conscious pain and suffering before she died. Its deadline is tied to the malpractice limitation period in CPLR §214-a, which an attorney needs to check alongside the wrongful death deadline.\n\n**4. Causation.** The central question is whether the discharge decision caused or significantly contributed to her death, meaning whether earlier treatment would more likely than not have changed the outcome. The second doctor's comment is a useful lead, but it is not proof. Medical records from both visits and an independent expert review will be needed.\n\nGiven the 90-day notice requirement, I'd encourage you to speak with a New York medical malpractice attorney soon. Many firms offer free consultations and work on contingency, meaning no fee unless there is a recovery. Case costs such as records and expert reviews are usually separate, and depending on the retainer agreement, they may have to be repaid from any recovery, so ask about that directly.\n\nTo help me give you the most useful next step: has anyone been appointed as administrator of your mother's estate yet?\n\nThis is general information, not legal advice.",
+   "served": "I'm so sorry. Your mother was sent home with signs of infection, returned in septic shock two days later, and died the next day. Hearing that a doctor believed the infection should have been caught before discharge must make this even harder to bear, and I'm grateful you're looking for answers.\n\nKings County Hospital is run by NYC Health + Hospitals, a public hospital system, and claims against public hospitals can carry a short notice deadline. Because I want to understand where things stand, could you tell me whether anyone has been appointed as administrator of your mother's estate through Surrogate's Court, or whether that hasn't happened yet?\n\nThis is general information, not legal advice.",
+   "leadTier": "cold",
+   "leadScore": 66,
+   "leadVerdict": true,
+   "caseCard": false
+  },
+  {
+   "visitor": "sepsis-discharge",
+   "turn": 3,
+   "ms": 23132,
+   "type": "misdiagnosis",
+   "classifiedType": null,
+   "gateStatus": "PASSED",
+   "firstPassCompliant": false,
+   "finalAttempt": 2,
+   "evaluator": "llm",
+   "firstDraftUnanchored": 0,
+   "firstDraftFlagged": [
+    "REQ-MME-01",
+    "REQ-MME-02"
+   ],
+   "firstDraft": "I'm sorry you and your family were left without explanations at a time like this. Being told nothing after losing your mother is its own kind of pain.\n\nThank you for telling me you're her son and the executor named in her will. That matters, because in New York an executor named in a will generally has to be formally appointed by the Surrogate's Court, through a process called probate, before he can act for the estate and bring a wrongful death claim on its behalf. Whether that has happened yet is something to check. If the court has issued letters testamentary, you can act; if not, the probate filing is a priority, and it's worth doing soon because the 90-day notice of claim for a public hospital like Kings County generally runs from the date the estate representative is appointed.\n\nTwo things I'd ask you to keep in mind:\n\n- **Hold on to everything you have**: discharge papers, the paperwork from the second visit, any bills, and the names of the doctors you spoke with. Don't worry about perfect organization yet.\n- **Note what was said**: write down what the doctor at the second visit told you about the infection being missed, with the date and as close to the exact words as you can remember.\n\nSince you're executor, have you filed the will with the Surrogate's Court in the county where your mother lived, or has that not been done yet?\n\nThis is general information, not legal advice.",
+   "served": "I'm so sorry about your mother. You're carrying the loss of her and the lack of answers from the hospital at the same time, and it's understandable that you want clarity now.\n\nSince you are her executor, here is a preliminary overview of where things stand. It is not a judgment on whether a claim will succeed.\n\n**1. The deadline.** Under EPTL §5-4.1, a wrongful death action must be started within 2 years of the date of death. Your mother died about seven weeks ago, so that deadline is still ahead, but it runs from the date of death, not from the discharge or the second visit. The survival claim for her own pain and suffering is tied to the medical malpractice deadline under CPLR §214-a, which is generally 2 years and 6 months from the date of the malpractice, and an attorney needs to check both deadlines. Kings County is run by NYC Health + Hospitals, so GML §50-e requires a notice of claim within 90 days, and that clock is generally counted from the date the estate representative is appointed. That is the shortest deadline in your situation, which is why the probate step matters.\n\n**2. Appointment.** As executor named in the will, you will generally need to have the will admitted to probate and receive letters testamentary from the Surrogate's Court in the county where your mother lived before you can act for the estate. If that has not happened, it is a priority. If there is no valid will or no one is willing or able to serve, a different administrator may need to be appointed.\n\n**3. Damages.** New York limits wrongful death recovery under EPTL §5-4.3 to the family's pecuniary losses, such as lost financial support, household services, and, for a child, the loss of a parent's guidance, plus medical and funeral expenses. Damages for grief or loss of companionship are not recoverable. Separately, under EPTL §11-3.2, the estate can pursue the survival claim for your mother's own conscious pain and suffering between the injury and her death.\n\nRelated New York decisions in medical malpractice include Hackshaw v. Mercy Medical Center, 139 A.D.3d 798; 33 N.Y.S.3d 297, Michel v. Long Island Jewish Medical Center, 125 A.D.3d 945; 5 N.Y.S.3d 162, and D.Y. Ex Rel. DeShawn Y. v. Catskill Regional Medical Center, 2017 NY Slip Op 8577; 156 A.D.3d 1003; 66 N.Y.S.3d 368. I can't yet tell you how these apply to your mother's case.\n\n**Practical steps for now:**\n- Keep the discharge papers, paperwork from the second visit, bills, and the names of the doctors you spoke with.\n- Write down what the second-visit doctor said about the infection, with the date and as close to their words as you can recall.\n- Since the 90-day notice clock may be running, I'd strongly encourage speaking with a New York medical malpractice attorney soon. Many handle these cases on contingency, meaning no attorney fee unless there is a recovery, but case costs such as records and expert reviews are usually separate and may need to be repaid from any recovery, depending on the retainer agreement.\n\nHave you filed your mother's will with the Surrogate's Court in the county where she lived, or has that not been done yet?\n\nThis is general information, not legal advice.",
+   "leadTier": "warm",
+   "leadScore": 70,
+   "leadVerdict": true,
+   "caseCard": true
+  },
+  {
+   "visitor": "sepsis-discharge",
+   "turn": 4,
+   "ms": 8166,
+   "type": "misdiagnosis",
+   "classifiedType": null,
+   "gateStatus": "PASSED",
+   "firstPassCompliant": true,
+   "finalAttempt": 1,
+   "evaluator": "llm",
+   "firstDraftUnanchored": 0,
+   "firstDraftFlagged": [],
+   "firstDraft": "Thank you for reaching out. Given the 90-day notice clock tied to Kings County Hospital, speaking with a New York medical malpractice attorney soon is the right step. A lawyer who handles both the legal side and the medical expert side of these cases can check your deadlines, confirm your authority as executor, and tell you what the case may involve.\n\nYou can request a referral through the contact form below this reply. Please don't type your phone number or other contact details into this chat. The form lets you share them with your consent.\n\nWhen you reach out, it will help to have ready:\n- Your mother's discharge papers and the paperwork from the second visit\n- The date of her death and the date of the Surrogate's Court filing of her will, if it has happened\n- The name of the doctor who said the infection should have been caught before discharge, if you have it\n\nThis is general information, not legal advice.",
+   "served": "Thank you for reaching out. Given the 90-day notice clock tied to Kings County Hospital, speaking with a New York medical malpractice attorney soon is the right step. A lawyer who handles both the legal side and the medical expert side of these cases can check your deadlines, confirm your authority as executor, and tell you what the case may involve.\n\nYou can request a referral through the contact form below this reply. Please don't type your phone number or other contact details into this chat. The form lets you share them with your consent.\n\nWhen you reach out, it will help to have ready:\n- Your mother's discharge papers and the paperwork from the second visit\n- The date of her death and the date of the Surrogate's Court filing of her will, if it has happened\n- The name of the doctor who said the infection should have been caught before discharge, if you have it\n\nThis is general information, not legal advice.",
+   "leadTier": "warm",
+   "leadScore": 72,
+   "leadVerdict": true,
+   "caseCard": true
+  },
+  {
+   "visitor": "retained-guidewire",
+   "turn": 1,
+   "ms": 7153,
+   "type": "surgical_error",
+   "classifiedType": null,
+   "gateStatus": "PASSED",
+   "firstPassCompliant": true,
+   "finalAttempt": 1,
+   "evaluator": "llm",
+   "firstDraftUnanchored": 0,
+   "firstDraftFlagged": [],
+   "firstDraft": "I'm sorry. Learning that a piece of guidewire has been in your chest for a year, after you trusted the team to care for you, is frightening and upsetting. Please also make sure you're getting medical follow-up on the wire itself, if you haven't already.\n\nTo understand your situation, could you tell me the name of the hospital where the line was placed? Some hospitals in the Bronx are run by the city or federal government, and those can have much shorter deadlines for bringing a claim than private hospitals do, so the name matters a great deal.\n\nThis is general information, not legal advice.",
+   "served": "I'm sorry. Learning that a piece of guidewire has been in your chest for a year, after you trusted the team to care for you, is frightening and upsetting. Please also make sure you're getting medical follow-up on the wire itself, if you haven't already.\n\nTo understand your situation, could you tell me the name of the hospital where the line was placed? Some hospitals in the Bronx are run by the city or federal government, and those can have much shorter deadlines for bringing a claim than private hospitals do, so the name matters a great deal.\n\nThis is general information, not legal advice.",
+   "leadTier": null,
+   "leadScore": null,
+   "leadVerdict": false,
+   "caseCard": false
+  },
+  {
+   "visitor": "retained-guidewire",
+   "turn": 2,
+   "ms": 8293,
+   "type": "surgical_error",
+   "classifiedType": null,
+   "gateStatus": "PASSED",
+   "firstPassCompliant": true,
+   "finalAttempt": 1,
+   "evaluator": "llm",
+   "firstDraftUnanchored": 0,
+   "firstDraftFlagged": [],
+   "firstDraft": "I'm sorry. Months of unexplained chest pain, followed by a procedure to remove a wire that should never have been left in, is a lot to absorb. It's understandable to feel angry, confused, or scared about what it means for your health.\n\nI'd still like to know the name of the hospital where the line was placed. Public hospitals in the Bronx, including those run by NYC Health + Hospitals, can require a notice of claim within 90 days, so the name is the most urgent detail. If you're not sure of the exact name, the hospital or facility name on any discharge papers, bills, or the procedure report would tell us.\n\nThis is general information, not legal advice.",
+   "served": "I'm sorry. Months of unexplained chest pain, followed by a procedure to remove a wire that should never have been left in, is a lot to absorb. It's understandable to feel angry, confused, or scared about what it means for your health.\n\nI'd still like to know the name of the hospital where the line was placed. Public hospitals in the Bronx, including those run by NYC Health + Hospitals, can require a notice of claim within 90 days, so the name is the most urgent detail. If you're not sure of the exact name, the hospital or facility name on any discharge papers, bills, or the procedure report would tell us.\n\nThis is general information, not legal advice.",
+   "leadTier": "cold",
+   "leadScore": 69,
+   "leadVerdict": true,
+   "caseCard": false
+  }
+ ],
+ "knownBad": [],
+ "calls": [
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "inputTokens": 4150,
+   "outputTokens": 593,
+   "ms": 4060,
+   "job": "reply",
+   "finish": "stop",
+   "reasoningTokens": 399
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "inputTokens": 4762,
+   "outputTokens": 639,
+   "ms": 2842,
+   "job": "grade",
+   "json": true,
+   "finish": "stop"
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "inputTokens": 4394,
+   "outputTokens": 625,
+   "ms": 3635,
+   "job": "reply",
+   "finish": "stop",
+   "reasoningTokens": 472
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "inputTokens": 2311,
+   "outputTokens": 714,
+   "ms": 4324,
+   "job": "leadScore",
+   "json": true,
+   "finish": "stop",
+   "reasoningTokens": 533
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "inputTokens": 4981,
+   "outputTokens": 652,
+   "ms": 3575,
+   "job": "grade",
+   "json": true,
+   "finish": "stop"
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "inputTokens": 2659,
+   "outputTokens": 455,
+   "ms": 3241,
+   "job": "caseCard",
+   "json": true,
+   "finish": "stop"
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "inputTokens": 2523,
+   "outputTokens": 768,
+   "ms": 7363,
+   "job": "leadScore",
+   "json": true,
+   "finish": "stop",
+   "reasoningTokens": 588
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "inputTokens": 4694,
+   "outputTokens": 3000,
+   "ms": 14937,
+   "job": "reply",
+   "finish": "length",
+   "reasoningTokens": 1426
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "inputTokens": 6622,
+   "outputTokens": 1593,
+   "ms": 6590,
+   "job": "grade",
+   "json": true,
+   "finish": "stop",
+   "reasoningTokens": 671
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "inputTokens": 6260,
+   "outputTokens": 384,
+   "ms": 2301,
+   "job": "reply",
+   "finish": "stop"
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "inputTokens": 2711,
+   "outputTokens": 485,
+   "ms": 3228,
+   "job": "caseCard",
+   "json": true,
+   "finish": "stop"
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "inputTokens": 4137,
+   "outputTokens": 628,
+   "ms": 3771,
+   "job": "leadScore",
+   "json": true,
+   "finish": "stop",
+   "reasoningTokens": 467
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "inputTokens": 5615,
+   "outputTokens": 644,
+   "ms": 2888,
+   "job": "grade",
+   "json": true,
+   "finish": "stop"
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "inputTokens": 3938,
+   "outputTokens": 992,
+   "ms": 5324,
+   "job": "reply",
+   "finish": "stop",
+   "reasoningTokens": 731
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "inputTokens": 4842,
+   "outputTokens": 609,
+   "ms": 3024,
+   "job": "grade",
+   "json": true,
+   "finish": "stop"
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "inputTokens": 4216,
+   "outputTokens": 906,
+   "ms": 4558,
+   "job": "reply",
+   "finish": "stop"
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "inputTokens": 2358,
+   "outputTokens": 991,
+   "ms": 5612,
+   "job": "leadScore",
+   "json": true,
+   "finish": "stop",
+   "reasoningTokens": 808
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "inputTokens": 5761,
+   "outputTokens": 1435,
+   "ms": 6556,
+   "job": "grade",
+   "json": true,
+   "finish": "stop",
+   "reasoningTokens": 551
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "inputTokens": 8301,
+   "outputTokens": 214,
+   "ms": 1439,
+   "job": "rewrite",
+   "finish": "stop"
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "inputTokens": 5069,
+   "outputTokens": 586,
+   "ms": 2499,
+   "job": "grade",
+   "json": true,
+   "finish": "stop"
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "inputTokens": 4505,
+   "outputTokens": 411,
+   "ms": 2805,
+   "job": "reply",
+   "finish": "stop"
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "inputTokens": 2644,
+   "outputTokens": 469,
+   "ms": 3021,
+   "job": "caseCard",
+   "json": true,
+   "finish": "stop"
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "inputTokens": 2606,
+   "outputTokens": 1080,
+   "ms": 5517,
+   "job": "leadScore",
+   "json": true,
+   "finish": "stop",
+   "reasoningTokens": 901
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "inputTokens": 5518,
+   "outputTokens": 1504,
+   "ms": 6217,
+   "job": "grade",
+   "json": true,
+   "finish": "stop",
+   "reasoningTokens": 639
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "inputTokens": 8099,
+   "outputTokens": 1080,
+   "ms": 4957,
+   "job": "rewrite",
+   "finish": "stop"
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "inputTokens": 6187,
+   "outputTokens": 1476,
+   "ms": 6429,
+   "job": "grade",
+   "json": true,
+   "finish": "stop",
+   "reasoningTokens": 640
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "inputTokens": 5611,
+   "outputTokens": 268,
+   "ms": 1707,
+   "job": "reply",
+   "finish": "stop"
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "inputTokens": 3708,
+   "outputTokens": 708,
+   "ms": 4140,
+   "job": "leadScore",
+   "json": true,
+   "finish": "stop",
+   "reasoningTokens": 514
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "inputTokens": 2670,
+   "outputTokens": 846,
+   "ms": 4801,
+   "job": "caseCard",
+   "json": true,
+   "finish": "stop",
+   "reasoningTokens": 465
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "inputTokens": 5577,
+   "outputTokens": 697,
+   "ms": 3356,
+   "job": "grade",
+   "json": true,
+   "finish": "stop"
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "inputTokens": 4232,
+   "outputTokens": 691,
+   "ms": 3545,
+   "job": "reply",
+   "finish": "stop",
+   "reasoningTokens": 510
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "inputTokens": 4782,
+   "outputTokens": 640,
+   "ms": 3600,
+   "job": "grade",
+   "json": true,
+   "finish": "stop"
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "inputTokens": 4453,
+   "outputTokens": 731,
+   "ms": 3961,
+   "job": "reply",
+   "finish": "stop",
+   "reasoningTokens": 524
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "inputTokens": 2273,
+   "outputTokens": 835,
+   "ms": 4845,
+   "job": "leadScore",
+   "json": true,
+   "finish": "stop",
+   "reasoningTokens": 645
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "inputTokens": 5045,
+   "outputTokens": 635,
+   "ms": 3442,
+   "job": "grade",
+   "json": true,
+   "finish": "stop"
+  }
+ ],
+ "failed": [
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6.1-terra",
+   "job": "reply",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6.1-terra",
+   "job": "reply",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6-luna",
+   "job": "leadScore",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6.1-terra",
+   "job": "reply",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6-luna",
+   "job": "leadScore",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6-luna",
+   "job": "caseCard",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6.1-terra",
+   "job": "reply",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6-luna",
+   "job": "leadScore",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6-luna",
+   "job": "caseCard",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6.1-terra",
+   "job": "reply",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6.1-terra",
+   "job": "reply",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6-luna",
+   "job": "leadScore",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6.1-terra",
+   "job": "reply",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6-luna",
+   "job": "leadScore",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6-luna",
+   "job": "caseCard",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6.1-terra",
+   "job": "reply",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6-luna",
+   "job": "leadScore",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6-luna",
+   "job": "caseCard",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6.1-terra",
+   "job": "reply",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6.1-terra",
+   "job": "reply",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6-luna",
+   "job": "leadScore",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  }
+ ],
+ "refused": [
+  "api.openai.com",
+  "api.openai.com",
+  "api.openai.com",
+  "api.openai.com",
+  "api.openai.com",
+  "api.openai.com",
+  "api.openai.com",
+  "api.openai.com",
+  "api.openai.com",
+  "api.openai.com",
+  "api.openai.com",
+  "api.openai.com",
+  "api.openai.com",
+  "api.openai.com",
+  "api.openai.com",
+  "api.openai.com",
+  "api.openai.com",
+  "api.openai.com",
+  "api.openai.com",
+  "api.openai.com",
+  "api.openai.com"
+ ],
+ "finishedAt": "2026-11-22T17:58:09.063Z"
+}

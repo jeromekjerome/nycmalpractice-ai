@@ -1,0 +1,894 @@
+{
+ "app": "nycmalpractice",
+ "label": "failover-openai-anthropic-blocked",
+ "mode": "reply",
+ "answer": "gpt-6.1-terra",
+ "aux": "gpt-6-luna",
+ "chains": {
+  "answer": [
+   "gpt-6.1-terra",
+   "claude-haiku-5-5",
+   "gemini-3.5-flash-lite"
+  ],
+  "small": [
+   "gpt-6-luna",
+   "claude-haiku-5-5",
+   "gemini-3.5-flash-lite"
+  ]
+ },
+ "blockedHosts": [
+  "api.openai.com",
+  "api.anthropic.com"
+ ],
+ "turnLimit": 10,
+ "startedAt": "2026-11-22T17:58:11.443Z",
+ "turns": [
+  {
+   "visitor": "er-stroke",
+   "turn": 1,
+   "ms": 3760,
+   "type": "misdiagnosis",
+   "classifiedType": null,
+   "gateStatus": "PASSED",
+   "firstPassCompliant": true,
+   "finalAttempt": 1,
+   "evaluator": "llm",
+   "firstDraftUnanchored": 0,
+   "firstDraftFlagged": [],
+   "firstDraft": "I am so deeply sorry to hear about what your husband and your family have been through. Dealing with sudden, frightening neurological symptoms—only to be sent home without the critical care he needed—must have been an intensely stressful and exhausting experience. \n\nTo help me better understand the situation, could you share what lasting health impact or injury your husband experienced as a result of being sent home that day?\n\nThis is general information, not legal advice.",
+   "served": "I am so deeply sorry to hear about what your husband and your family have been through. Dealing with sudden, frightening neurological symptoms—only to be sent home without the critical care he needed—must have been an intensely stressful and exhausting experience. \n\nTo help me better understand the situation, could you share what lasting health impact or injury your husband experienced as a result of being sent home that day?\n\nThis is general information, not legal advice.",
+   "leadTier": null,
+   "leadScore": null,
+   "leadVerdict": false,
+   "caseCard": false
+  },
+  {
+   "visitor": "er-stroke",
+   "turn": 2,
+   "ms": 6647,
+   "type": "misdiagnosis",
+   "classifiedType": null,
+   "gateStatus": "PASSED",
+   "firstPassCompliant": true,
+   "finalAttempt": 1,
+   "evaluator": "llm",
+   "firstDraftUnanchored": 0,
+   "firstDraftFlagged": [],
+   "firstDraft": "This is a devastating situation for your husband and your entire family, and I am so sorry you are facing the reality of permanent disability from something that should have been caught and treated immediately. \n\nBased on the facts you have shared, here is a preliminary assessment of how New York law applies to your husband's situation:\n\n### 1. Filing Deadline (Statute of Limitations)\nUnder **New York CPLR §214-a**, the standard deadline to file a medical malpractice lawsuit is **2 years and 6 months** from the date of the alleged act or omission (the erroneous ER discharge). Because this incident occurred only 4 months ago, your husband’s claim is well within the statutory filing window. (Since this was a private hospital in Queens, short public-hospital notice deadlines like GML §50-e do not apply here.)\n\n### 2. Standard of Care Analysis\n* **The Standard:** A reasonably competent emergency room physician and medical staff presented with acute neurological symptoms—such as a sudden severe headache, slurred speech, and facial drooping—are required to follow rapid stroke-evaluation protocols. This typically includes performing urgent brain imaging (like a CT scan or MRI) and evaluating the patient for acute interventions within the strict time windows required for administering clot-busting drugs (tPA) or performing mechanical thrombectomies.\n* **The Breach:** Discharging a patient presenting with classic stroke signs with a diagnosis of a \"migraine\" without proper diagnostic workup can be viewed as a departure from accepted medical standards of care.\n* **Causation and Injury:** Because of the delay in diagnosis and discharge, your husband missed the critical therapeutic window for administering acute stroke treatments. The consequence—permanent left-side paralysis and wheelchair confinement at age 58—represents a severe, life-altering injury directly tied to that missed window.\n\n### Next Steps and Legal Requirements\nBefore a medical malpractice lawsuit can be filed in New York, an attorney must have the medical records reviewed by a qualified medical expert to sign a **Certificate of Merit (CPLR §3012-a)**, confirming there is a reasonable basis for the case. \n\nIf you choose to pursue this, most medical malpractice attorneys work on a contingency fee basis, meaning there is no attorney's fee unless there is a financial recovery. However, keep in mind that case costs and expenses—such as obtaining medical records, paying expert physicians for reviews, and court filing fees—are separate; depending on the specific retainer agreement, the client may be responsible for repaying these costs, so a lawsuit never costs truly nothing. \n\nGiven the severity of his injuries and the strict legal requirements, it would be wise to consult with an experienced New York medical malpractice attorney promptly to preserve records and begin the expert review process.\n\nThis is general information, not legal advice.",
+   "served": "This is a devastating situation for your husband and your entire family, and I am so sorry you are facing the reality of permanent disability from something that should have been caught and treated immediately. \n\nBased on the facts you have shared, here is a preliminary assessment of how New York law applies to your husband's situation:\n\n### 1. Filing Deadline (Statute of Limitations)\nUnder **New York CPLR §214-a**, the standard deadline to file a medical malpractice lawsuit is **2 years and 6 months** from the date of the alleged act or omission (the erroneous ER discharge). Because this incident occurred only 4 months ago, your husband’s claim is well within the statutory filing window. (Since this was a private hospital in Queens, short public-hospital notice deadlines like GML §50-e do not apply here.)\n\n### 2. Standard of Care Analysis\n* **The Standard:** A reasonably competent emergency room physician and medical staff presented with acute neurological symptoms—such as a sudden severe headache, slurred speech, and facial drooping—are required to follow rapid stroke-evaluation protocols. This typically includes performing urgent brain imaging (like a CT scan or MRI) and evaluating the patient for acute interventions within the strict time windows required for administering clot-busting drugs (tPA) or performing mechanical thrombectomies.\n* **The Breach:** Discharging a patient presenting with classic stroke signs with a diagnosis of a \"migraine\" without proper diagnostic workup can be viewed as a departure from accepted medical standards of care.\n* **Causation and Injury:** Because of the delay in diagnosis and discharge, your husband missed the critical therapeutic window for administering acute stroke treatments. The consequence—permanent left-side paralysis and wheelchair confinement at age 58—represents a severe, life-altering injury directly tied to that missed window.\n\n### Next Steps and Legal Requirements\nBefore a medical malpractice lawsuit can be filed in New York, an attorney must have the medical records reviewed by a qualified medical expert to sign a **Certificate of Merit (CPLR §3012-a)**, confirming there is a reasonable basis for the case. \n\nIf you choose to pursue this, most medical malpractice attorneys work on a contingency fee basis, meaning there is no attorney's fee unless there is a financial recovery. However, keep in mind that case costs and expenses—such as obtaining medical records, paying expert physicians for reviews, and court filing fees—are separate; depending on the specific retainer agreement, the client may be responsible for repaying these costs, so a lawsuit never costs truly nothing. \n\nGiven the severity of his injuries and the strict legal requirements, it would be wise to consult with an experienced New York medical malpractice attorney promptly to preserve records and begin the expert review process.\n\nThis is general information, not legal advice.",
+   "leadTier": "hot",
+   "leadScore": 84,
+   "leadVerdict": true,
+   "caseCard": false
+  },
+  {
+   "visitor": "er-stroke",
+   "turn": 3,
+   "ms": 4170,
+   "type": "misdiagnosis",
+   "classifiedType": null,
+   "gateStatus": "PASSED",
+   "firstPassCompliant": true,
+   "finalAttempt": 1,
+   "evaluator": "llm",
+   "firstDraftUnanchored": 0,
+   "firstDraftFlagged": [],
+   "firstDraft": "Having those medical records from both hospitals—along with the second neurologist's clear observation that the initial symptoms were classic signs of a stroke requiring an immediate CT scan—puts you in a strong position to begin the legal review process. \n\nWhen a treating physician or specialist identifies a clear departure from standard care like this, it provides valuable context. An experienced medical malpractice attorney will take those records and submit them to an independent medical expert. That expert must review the documentation to formally confirm that the first hospital's actions fell below the accepted standard of care before filing the Certificate of Merit required under **CPLR §3012-a**.\n\nBecause your husband's injuries are severe and life-altering, and because investigating a medical malpractice claim takes time to gather expert opinions, reaching out to a qualified New York medical malpractice attorney promptly is the best next step. They can secure the records, evaluate the timeline, and help your family understand the potential for recovering compensation to support his ongoing care and wheelchair accessibility needs.\n\nThis is general information, not legal advice.",
+   "served": "Having those medical records from both hospitals—along with the second neurologist's clear observation that the initial symptoms were classic signs of a stroke requiring an immediate CT scan—puts you in a strong position to begin the legal review process. \n\nWhen a treating physician or specialist identifies a clear departure from standard care like this, it provides valuable context. An experienced medical malpractice attorney will take those records and submit them to an independent medical expert. That expert must review the documentation to formally confirm that the first hospital's actions fell below the accepted standard of care before filing the Certificate of Merit required under **CPLR §3012-a**.\n\nBecause your husband's injuries are severe and life-altering, and because investigating a medical malpractice claim takes time to gather expert opinions, reaching out to a qualified New York medical malpractice attorney promptly is the best next step. They can secure the records, evaluate the timeline, and help your family understand the potential for recovering compensation to support his ongoing care and wheelchair accessibility needs.\n\nThis is general information, not legal advice.",
+   "leadTier": "premium",
+   "leadScore": 93,
+   "leadVerdict": true,
+   "caseCard": true
+  },
+  {
+   "visitor": "er-stroke",
+   "turn": 4,
+   "ms": 4040,
+   "type": "misdiagnosis",
+   "classifiedType": null,
+   "gateStatus": "PASSED",
+   "firstPassCompliant": true,
+   "finalAttempt": 1,
+   "evaluator": "llm",
+   "firstDraftUnanchored": 0,
+   "firstDraftFlagged": [],
+   "firstDraft": "Medical malpractice cases in New York strictly require expert medical testimony to establish what the standard of care was and how the hospital breached it. This is why specialist attorneys who already have trusted networks of independent medical experts are essential for reviewing records and building a strong case.\n\nWould you like to be connected with a qualified NYC medical malpractice attorney for a free consultation? If you would, you can use the contact form located below this reply. Please do not type your phone number or other contact details into the chat.\n\nThis is general information, not legal advice.",
+   "served": "Medical malpractice cases in New York strictly require expert medical testimony to establish what the standard of care was and how the hospital breached it. This is why specialist attorneys who already have trusted networks of independent medical experts are essential for reviewing records and building a strong case.\n\nWould you like to be connected with a qualified NYC medical malpractice attorney for a free consultation? If you would, you can use the contact form located below this reply. Please do not type your phone number or other contact details into the chat.\n\nThis is general information, not legal advice.",
+   "leadTier": "premium",
+   "leadScore": 93,
+   "leadVerdict": true,
+   "caseCard": true
+  },
+  {
+   "visitor": "sepsis-discharge",
+   "turn": 1,
+   "ms": 3596,
+   "type": "misdiagnosis",
+   "classifiedType": null,
+   "gateStatus": "PASSED",
+   "firstPassCompliant": true,
+   "finalAttempt": 1,
+   "evaluator": "llm",
+   "firstDraftUnanchored": 0,
+   "firstDraftFlagged": [],
+   "firstDraft": "I am deeply sorry for the sudden and painful loss of your mother. Navigating this kind of tragedy, especially so soon after her passing, is an overwhelming burden, and my heart goes out to you and your family. \n\nTo help me understand where things stand, has an estate representative or administrator been formally appointed for your mother through the Surrogate's Court yet?\n\nThis is general information, not legal advice.",
+   "served": "I am deeply sorry for the sudden and painful loss of your mother. Navigating this kind of tragedy, especially so soon after her passing, is an overwhelming burden, and my heart goes out to you and your family. \n\nTo help me understand where things stand, has an estate representative or administrator been formally appointed for your mother through the Surrogate's Court yet?\n\nThis is general information, not legal advice.",
+   "leadTier": null,
+   "leadScore": null,
+   "leadVerdict": false,
+   "caseCard": false
+  },
+  {
+   "visitor": "sepsis-discharge",
+   "turn": 2,
+   "ms": 8681,
+   "type": "misdiagnosis",
+   "classifiedType": null,
+   "gateStatus": "PASSED",
+   "firstPassCompliant": false,
+   "finalAttempt": 2,
+   "evaluator": "llm",
+   "firstDraftUnanchored": 0,
+   "firstDraftFlagged": [
+    "REQ-MME-01",
+    "PROH-MME-02"
+   ],
+   "firstDraft": "That statement from the second doctor, combined with the rapid progression to septic shock just days after discharge, highlights why a thorough review by a medical expert is so critical in these cases. \n\nBecause your mother was treated at Kings County Hospital, which is part of NYC Health + Hospitals (a municipal public hospital corporation), there are extremely strict deadlines that you must address immediately:\n\n1. **The Notice of Claim and Public Hospital Deadlines:** Unlike private hospitals, public hospitals in New York require a formal **Notice of Claim** under General Municipal Law (GML) §50-e to be filed within **90 days** of the date an estate representative is officially appointed. Missing this 90-day window can bar the claim entirely. \n2. **Estate Administration:** To pursue these claims, an administrator or personal representative must be formally appointed for your mother through the Surrogate's Court. Because the 90-day countdown for the Notice of Claim begins the moment that representative is appointed, starting this process promptly is vital.\n3. **Wrongful Death Deadline & Damages:** Under New York's Estates, Powers and Trusts Law (EPTL) §5-4.1, a wrongful death lawsuit must be filed within **2 years** of the date of death. While 7 weeks puts you well within that 2-year window, the public hospital notice requirement makes immediate action necessary. Regarding damages, EPTL §5-4.3 limits recovery to pecuniary (financial) losses suffered by the family (such as loss of support, services, and medical or funeral expenses)—New York law does not permit recovery for grief or emotional loss. Additionally, under EPTL §11-3.2, a survival claim can be brought to recover for your mother's own conscious pain and suffering during her final days in septic shock.\n\nMost medical malpractice attorneys work on a contingency fee basis, meaning there is no fee unless there is a recovery, though case costs and expenses are separate. \n\nThis is general information, not legal advice.",
+   "served": "I am so sorry to hear about how rapidly her condition worsened and her passing. That must be an agonizing experience for you and your family. \n\nTo help understand the procedural steps ahead, has an estate representative or administrator already been appointed for your mother through the Surrogate's Court?\n\nThis is general information, not legal advice.",
+   "leadTier": "hot",
+   "leadScore": 83.5,
+   "leadVerdict": true,
+   "caseCard": false
+  },
+  {
+   "visitor": "sepsis-discharge",
+   "turn": 3,
+   "ms": 7489,
+   "type": "misdiagnosis",
+   "classifiedType": null,
+   "gateStatus": "PASSED",
+   "firstPassCompliant": true,
+   "finalAttempt": 1,
+   "evaluator": "llm",
+   "firstDraftUnanchored": 0,
+   "firstDraftFlagged": [],
+   "firstDraft": "Thank you for sharing that, and I am very sorry for everything your family is going through. Serving as the executor for your mother while grieving her sudden loss is an immense responsibility. \n\nBecause your mother was treated at **Kings County Hospital**, which is part of NYC Health + Hospitals (a municipal hospital system), there is an urgent procedural requirement that must be addressed immediately alongside the standard wrongful death deadlines. Below is a preliminary assessment of your situation under New York law:\n\n### 1. Deadlines and the Notice of Claim\n* **The 90-Day Municipal Notice of Claim (GML §50-e):** Because Kings County Hospital is a municipal facility, New York General Municipal Law § 50-e requires a formal **Notice of Claim to be served within 90 days** of the date the estate representative (executor or administrator) is appointed or authorized to act. Since your mother passed away only about seven weeks ago, this 90-day window is ticking rapidly. Missing this strict municipal deadline can bar a lawsuit entirely, making prompt action vital.\n* **The Wrongful Death Statute of Limitations (EPTL §5-4.1):** Under New York Estates, Powers and Trusts Law (EPTL) § 5-4.1, a wrongful death action must generally be commenced within **2 years from the date of death**. While you are well within this two-year window, the much shorter 90-day municipal notice requirement takes precedence for immediate steps.\n* **The Survival Claim Deadline (CPLR §214-a):** The separate claim for your mother's own conscious pain and suffering is governed by the medical malpractice statute of limitations (CPLR §214-a), which is generally 2 years and 6 months from the act of malpractice or the end of continuous treatment, subject to tolling rules. An attorney must evaluate both timelines.\n\n### 2. Estate Representation\nYou mentioned that you are the son and the executor of her will. Under New York law, a wrongful death and survival action must be brought by the duly appointed personal representative of the estate (the executor or administrator). Having your executorship in place gives you the proper legal standing to pursue these claims once Letters Testamentary are finalized by the Surrogate's Court, which aligns with New York appellate decisions reviewing estate-based medical malpractice litigation (such as *Dispensa v. Medical Diagnostic Imaging, PLLC* and *Cully v. Ricottone*).\n\n### 3. Categories of Damages Available\nIf a claim is pursued, New York law divides potential recovery into two main categories:\n* **Wrongful Death Damages (EPTL §5-4.3):** These are strictly limited to **pecuniary (financial) losses** suffered by the surviving distributees. This includes lost financial support, the value of services the decedent provided, reasonable medical expenses, and funeral and burial expenses. Under current New York law, survivors cannot recover damages for grief or emotional suffering; despite legislative efforts like the Grieving Families Act, those proposals have been repeatedly vetoed and are not law.\n* **Survival Claim Damages (EPTL §11-3.2):** This claim seeks recovery for the physical pain and mental anguish your mother consciously suffered from the time of the alleged malpractice up until her passing, including the pain associated with her return to the hospital in septic shock.\n\n### Next Steps and Attorney Representation\nGiven the strict 90-day notice requirement for municipal hospitals like Kings County Hospital, it is critical to consult a qualified New York medical malpractice attorney right away to investigate the medical records and ensure the Notice of Claim is filed on time. Most reputable medical malpractice attorneys work on a **contingency fee basis**, meaning there is no attorney's fee unless there is a recovery. However, case costs and expenses—such as obtaining medical records and paying medical experts to review the file—are separate, and you should discuss how your prospective law firm handles those expenses in their retainer agreement.\n\nThis is general information, not legal advice.",
+   "served": "Thank you for sharing that, and I am very sorry for everything your family is going through. Serving as the executor for your mother while grieving her sudden loss is an immense responsibility. \n\nBecause your mother was treated at **Kings County Hospital**, which is part of NYC Health + Hospitals (a municipal hospital system), there is an urgent procedural requirement that must be addressed immediately alongside the standard wrongful death deadlines. Below is a preliminary assessment of your situation under New York law:\n\n### 1. Deadlines and the Notice of Claim\n* **The 90-Day Municipal Notice of Claim (GML §50-e):** Because Kings County Hospital is a municipal facility, New York General Municipal Law § 50-e requires a formal **Notice of Claim to be served within 90 days** of the date the estate representative (executor or administrator) is appointed or authorized to act. Since your mother passed away only about seven weeks ago, this 90-day window is ticking rapidly. Missing this strict municipal deadline can bar a lawsuit entirely, making prompt action vital.\n* **The Wrongful Death Statute of Limitations (EPTL §5-4.1):** Under New York Estates, Powers and Trusts Law (EPTL) § 5-4.1, a wrongful death action must generally be commenced within **2 years from the date of death**. While you are well within this two-year window, the much shorter 90-day municipal notice requirement takes precedence for immediate steps.\n* **The Survival Claim Deadline (CPLR §214-a):** The separate claim for your mother's own conscious pain and suffering is governed by the medical malpractice statute of limitations (CPLR §214-a), which is generally 2 years and 6 months from the act of malpractice or the end of continuous treatment, subject to tolling rules. An attorney must evaluate both timelines.\n\n### 2. Estate Representation\nYou mentioned that you are the son and the executor of her will. Under New York law, a wrongful death and survival action must be brought by the duly appointed personal representative of the estate (the executor or administrator). Having your executorship in place gives you the proper legal standing to pursue these claims once Letters Testamentary are finalized by the Surrogate's Court, which aligns with New York appellate decisions reviewing estate-based medical malpractice litigation (such as *Dispensa v. Medical Diagnostic Imaging, PLLC* and *Cully v. Ricottone*).\n\n### 3. Categories of Damages Available\nIf a claim is pursued, New York law divides potential recovery into two main categories:\n* **Wrongful Death Damages (EPTL §5-4.3):** These are strictly limited to **pecuniary (financial) losses** suffered by the surviving distributees. This includes lost financial support, the value of services the decedent provided, reasonable medical expenses, and funeral and burial expenses. Under current New York law, survivors cannot recover damages for grief or emotional suffering; despite legislative efforts like the Grieving Families Act, those proposals have been repeatedly vetoed and are not law.\n* **Survival Claim Damages (EPTL §11-3.2):** This claim seeks recovery for the physical pain and mental anguish your mother consciously suffered from the time of the alleged malpractice up until her passing, including the pain associated with her return to the hospital in septic shock.\n\n### Next Steps and Attorney Representation\nGiven the strict 90-day notice requirement for municipal hospitals like Kings County Hospital, it is critical to consult a qualified New York medical malpractice attorney right away to investigate the medical records and ensure the Notice of Claim is filed on time. Most reputable medical malpractice attorneys work on a **contingency fee basis**, meaning there is no attorney's fee unless there is a recovery. However, case costs and expenses—such as obtaining medical records and paying medical experts to review the file—are separate, and you should discuss how your prospective law firm handles those expenses in their retainer agreement.\n\nThis is general information, not legal advice.",
+   "leadTier": "hot",
+   "leadScore": 83.5,
+   "leadVerdict": true,
+   "caseCard": true
+  },
+  {
+   "visitor": "sepsis-discharge",
+   "turn": 4,
+   "ms": 3468,
+   "type": "misdiagnosis",
+   "classifiedType": null,
+   "gateStatus": "PASSED",
+   "firstPassCompliant": true,
+   "finalAttempt": 1,
+   "evaluator": "llm",
+   "firstDraftUnanchored": 0,
+   "firstDraftFlagged": [],
+   "firstDraft": "Wrongful death medical malpractice claims involve both the legal system and the medical expert world simultaneously. Navigating hospital records, establishing a deviation from the standard of care, and proving causation require deep medical and legal knowledge—a specialist medical malpractice attorney handles both sides of this process. \n\nGiven that Kings County Hospital is involved, your estate needs representation promptly to ensure the strict 90-day municipal notice requirement and the 2-year wrongful death deadline (EPTL §5-4.1) are strictly protected. \n\nIf you would like a referral to a qualified New York medical malpractice attorney, you can use the contact form located directly below this reply. Please do not type your phone number or other private contact details into the chat.\n\nThis is general information, not legal advice.",
+   "served": "Wrongful death medical malpractice claims involve both the legal system and the medical expert world simultaneously. Navigating hospital records, establishing a deviation from the standard of care, and proving causation require deep medical and legal knowledge—a specialist medical malpractice attorney handles both sides of this process. \n\nGiven that Kings County Hospital is involved, your estate needs representation promptly to ensure the strict 90-day municipal notice requirement and the 2-year wrongful death deadline (EPTL §5-4.1) are strictly protected. \n\nIf you would like a referral to a qualified New York medical malpractice attorney, you can use the contact form located directly below this reply. Please do not type your phone number or other private contact details into the chat.\n\nThis is general information, not legal advice.",
+   "leadTier": "hot",
+   "leadScore": 83,
+   "leadVerdict": true,
+   "caseCard": true
+  },
+  {
+   "visitor": "retained-guidewire",
+   "turn": 1,
+   "ms": 3113,
+   "type": "surgical_error",
+   "classifiedType": null,
+   "gateStatus": "PASSED",
+   "firstPassCompliant": true,
+   "finalAttempt": 1,
+   "evaluator": "llm",
+   "firstDraftUnanchored": 0,
+   "firstDraftFlagged": [],
+   "firstDraft": "I am so sorry you are going through this. Discovering that a piece of medical equipment was left inside your body after a hospital procedure is deeply frightening, stressful, and a profound breach of trust. \n\nTo help me understand your situation better, could you let me know whether the hospital where you had the central line placed was a private institution or a public one (such as an NYC Health + Hospitals facility)?\n\nThis is general information, not legal advice.",
+   "served": "I am so sorry you are going through this. Discovering that a piece of medical equipment was left inside your body after a hospital procedure is deeply frightening, stressful, and a profound breach of trust. \n\nTo help me understand your situation better, could you let me know whether the hospital where you had the central line placed was a private institution or a public one (such as an NYC Health + Hospitals facility)?\n\nThis is general information, not legal advice.",
+   "leadTier": null,
+   "leadScore": null,
+   "leadVerdict": false,
+   "caseCard": false
+  },
+  {
+   "visitor": "retained-guidewire",
+   "turn": 2,
+   "ms": 5831,
+   "type": "surgical_error",
+   "classifiedType": null,
+   "gateStatus": "PASSED",
+   "firstPassCompliant": true,
+   "finalAttempt": 1,
+   "evaluator": "llm",
+   "firstDraftUnanchored": 0,
+   "firstDraftFlagged": [],
+   "firstDraft": "I am so sorry you had to go through a second procedure to remove that wire, and dealing with months of unexplained chest pain while a piece of metal was left inside your chest must have been terrifying and exhausting. \n\nTo help me understand the rules that will apply to your situation, could you let me know whether the hospital where you had the central line placed was a private institution or a public one (such as an NYC Health + Hospitals facility)?\n\nThis is general information, not legal advice.",
+   "served": "I am so sorry you had to go through a second procedure to remove that wire, and dealing with months of unexplained chest pain while a piece of metal was left inside your chest must have been terrifying and exhausting. \n\nTo help me understand the rules that will apply to your situation, could you let me know whether the hospital where you had the central line placed was a private institution or a public one (such as an NYC Health + Hospitals facility)?\n\nThis is general information, not legal advice.",
+   "leadTier": "hot",
+   "leadScore": 87.5,
+   "leadVerdict": true,
+   "caseCard": false
+  }
+ ],
+ "knownBad": [],
+ "calls": [
+  {
+   "host": "generativelanguage.googleapis.com",
+   "model": "gemini-3.5-flash-lite",
+   "inputTokens": 2865,
+   "outputTokens": 515,
+   "ms": 2190,
+   "job": "reply",
+   "finish": "stop",
+   "reasoningTokens": 425
+  },
+  {
+   "host": "generativelanguage.googleapis.com",
+   "model": "gemini-3.5-flash-lite",
+   "inputTokens": 2912,
+   "outputTokens": 445,
+   "ms": 1468,
+   "job": "grade",
+   "json": true,
+   "finish": "stop"
+  },
+  {
+   "host": "generativelanguage.googleapis.com",
+   "model": "gemini-3.5-flash-lite",
+   "inputTokens": 1306,
+   "outputTokens": 127,
+   "ms": 1075,
+   "job": "leadScore",
+   "json": true,
+   "finish": "stop"
+  },
+  {
+   "host": "generativelanguage.googleapis.com",
+   "model": "gemini-3.5-flash-lite",
+   "inputTokens": 2995,
+   "outputTokens": 1636,
+   "ms": 5127,
+   "job": "reply",
+   "finish": "stop",
+   "reasoningTokens": 1047
+  },
+  {
+   "host": "generativelanguage.googleapis.com",
+   "model": "gemini-3.5-flash-lite",
+   "inputTokens": 3551,
+   "outputTokens": 483,
+   "ms": 1489,
+   "job": "grade",
+   "json": true,
+   "finish": "stop"
+  },
+  {
+   "host": "generativelanguage.googleapis.com",
+   "model": "gemini-3.5-flash-lite",
+   "inputTokens": 1936,
+   "outputTokens": 129,
+   "ms": 980,
+   "job": "leadScore",
+   "json": true,
+   "finish": "stop"
+  },
+  {
+   "host": "generativelanguage.googleapis.com",
+   "model": "gemini-3.5-flash-lite",
+   "inputTokens": 1475,
+   "outputTokens": 188,
+   "ms": 1405,
+   "job": "caseCard",
+   "json": true,
+   "finish": "stop"
+  },
+  {
+   "host": "generativelanguage.googleapis.com",
+   "model": "gemini-3.5-flash-lite",
+   "inputTokens": 3686,
+   "outputTokens": 705,
+   "ms": 2731,
+   "job": "reply",
+   "finish": "stop",
+   "reasoningTokens": 490
+  },
+  {
+   "host": "generativelanguage.googleapis.com",
+   "model": "gemini-3.5-flash-lite",
+   "inputTokens": 3371,
+   "outputTokens": 427,
+   "ms": 1431,
+   "job": "grade",
+   "json": true,
+   "finish": "stop"
+  },
+  {
+   "host": "generativelanguage.googleapis.com",
+   "model": "gemini-3.5-flash-lite",
+   "inputTokens": 2170,
+   "outputTokens": 125,
+   "ms": 888,
+   "job": "leadScore",
+   "json": true,
+   "finish": "stop"
+  },
+  {
+   "host": "generativelanguage.googleapis.com",
+   "model": "gemini-3.5-flash-lite",
+   "inputTokens": 1494,
+   "outputTokens": 219,
+   "ms": 1175,
+   "job": "caseCard",
+   "json": true,
+   "finish": "stop"
+  },
+  {
+   "host": "generativelanguage.googleapis.com",
+   "model": "gemini-3.5-flash-lite",
+   "inputTokens": 3885,
+   "outputTokens": 889,
+   "ms": 2507,
+   "job": "reply",
+   "finish": "stop",
+   "reasoningTokens": 779
+  },
+  {
+   "host": "generativelanguage.googleapis.com",
+   "model": "gemini-3.5-flash-lite",
+   "inputTokens": 3357,
+   "outputTokens": 475,
+   "ms": 1526,
+   "job": "grade",
+   "json": true,
+   "finish": "stop"
+  },
+  {
+   "host": "generativelanguage.googleapis.com",
+   "model": "gemini-3.5-flash-lite",
+   "inputTokens": 2699,
+   "outputTokens": 655,
+   "ms": 2116,
+   "job": "reply",
+   "finish": "stop",
+   "reasoningTokens": 571
+  },
+  {
+   "host": "generativelanguage.googleapis.com",
+   "model": "gemini-3.5-flash-lite",
+   "inputTokens": 2923,
+   "outputTokens": 451,
+   "ms": 1474,
+   "job": "grade",
+   "json": true,
+   "finish": "stop"
+  },
+  {
+   "host": "generativelanguage.googleapis.com",
+   "model": "gemini-3.5-flash-lite",
+   "inputTokens": 1277,
+   "outputTokens": 129,
+   "ms": 907,
+   "job": "leadScore",
+   "json": true,
+   "finish": "stop"
+  },
+  {
+   "host": "generativelanguage.googleapis.com",
+   "model": "gemini-3.5-flash-lite",
+   "inputTokens": 2796,
+   "outputTokens": 1391,
+   "ms": 3917,
+   "job": "reply",
+   "finish": "stop",
+   "reasoningTokens": 970
+  },
+  {
+   "host": "generativelanguage.googleapis.com",
+   "model": "gemini-3.5-flash-lite",
+   "inputTokens": 3385,
+   "outputTokens": 433,
+   "ms": 1515,
+   "job": "grade",
+   "json": true,
+   "finish": "stop"
+  },
+  {
+   "host": "generativelanguage.googleapis.com",
+   "model": "gemini-3.5-flash-lite",
+   "inputTokens": 5364,
+   "outputTokens": 580,
+   "ms": 1805,
+   "job": "rewrite",
+   "finish": "stop",
+   "reasoningTokens": 513
+  },
+  {
+   "host": "generativelanguage.googleapis.com",
+   "model": "gemini-3.5-flash-lite",
+   "inputTokens": 3031,
+   "outputTokens": 444,
+   "ms": 1425,
+   "job": "grade",
+   "json": true,
+   "finish": "stop"
+  },
+  {
+   "host": "generativelanguage.googleapis.com",
+   "model": "gemini-3.5-flash-lite",
+   "inputTokens": 1370,
+   "outputTokens": 128,
+   "ms": 964,
+   "job": "leadScore",
+   "json": true,
+   "finish": "stop"
+  },
+  {
+   "host": "generativelanguage.googleapis.com",
+   "model": "gemini-3.5-flash-lite",
+   "inputTokens": 1389,
+   "outputTokens": 209,
+   "ms": 1143,
+   "job": "caseCard",
+   "json": true,
+   "finish": "stop"
+  },
+  {
+   "host": "generativelanguage.googleapis.com",
+   "model": "gemini-3.5-flash-lite",
+   "inputTokens": 2912,
+   "outputTokens": 2072,
+   "ms": 6142,
+   "job": "reply",
+   "finish": "stop",
+   "reasoningTokens": 1233
+  },
+  {
+   "host": "generativelanguage.googleapis.com",
+   "model": "gemini-3.5-flash-lite",
+   "inputTokens": 3898,
+   "outputTokens": 358,
+   "ms": 1339,
+   "job": "grade",
+   "json": true,
+   "finish": "stop"
+  },
+  {
+   "host": "generativelanguage.googleapis.com",
+   "model": "gemini-3.5-flash-lite",
+   "inputTokens": 2226,
+   "outputTokens": 123,
+   "ms": 919,
+   "job": "leadScore",
+   "json": true,
+   "finish": "stop"
+  },
+  {
+   "host": "generativelanguage.googleapis.com",
+   "model": "gemini-3.5-flash-lite",
+   "inputTokens": 1452,
+   "outputTokens": 206,
+   "ms": 1165,
+   "job": "caseCard",
+   "json": true,
+   "finish": "stop"
+  },
+  {
+   "host": "generativelanguage.googleapis.com",
+   "model": "gemini-3.5-flash-lite",
+   "inputTokens": 3775,
+   "outputTokens": 739,
+   "ms": 2232,
+   "job": "reply",
+   "finish": "stop",
+   "reasoningTokens": 580
+  },
+  {
+   "host": "generativelanguage.googleapis.com",
+   "model": "gemini-3.5-flash-lite",
+   "inputTokens": 3348,
+   "outputTokens": 299,
+   "ms": 1230,
+   "job": "grade",
+   "json": true,
+   "finish": "stop"
+  },
+  {
+   "host": "generativelanguage.googleapis.com",
+   "model": "gemini-3.5-flash-lite",
+   "inputTokens": 2937,
+   "outputTokens": 570,
+   "ms": 1973,
+   "job": "reply",
+   "finish": "stop",
+   "reasoningTokens": 477
+  },
+  {
+   "host": "generativelanguage.googleapis.com",
+   "model": "gemini-3.5-flash-lite",
+   "inputTokens": 2946,
+   "outputTokens": 307,
+   "ms": 1134,
+   "job": "grade",
+   "json": true,
+   "finish": "stop"
+  },
+  {
+   "host": "generativelanguage.googleapis.com",
+   "model": "gemini-3.5-flash-lite",
+   "inputTokens": 1291,
+   "outputTokens": 131,
+   "ms": 898,
+   "job": "leadScore",
+   "json": true,
+   "finish": "stop"
+  },
+  {
+   "host": "generativelanguage.googleapis.com",
+   "model": "gemini-3.5-flash-lite",
+   "inputTokens": 3059,
+   "outputTokens": 1503,
+   "ms": 4605,
+   "job": "reply",
+   "finish": "stop",
+   "reasoningTokens": 1403
+  },
+  {
+   "host": "generativelanguage.googleapis.com",
+   "model": "gemini-3.5-flash-lite",
+   "inputTokens": 3085,
+   "outputTokens": 295,
+   "ms": 1219,
+   "job": "grade",
+   "json": true,
+   "finish": "stop"
+  }
+ ],
+ "failed": [
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6.1-terra",
+   "job": "reply",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "job": "reply",
+   "error": "measure: refused a request to api.anthropic.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6.1-terra",
+   "job": "reply",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6-luna",
+   "job": "leadScore",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "job": "reply",
+   "error": "measure: refused a request to api.anthropic.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "job": "leadScore",
+   "error": "measure: refused a request to api.anthropic.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6.1-terra",
+   "job": "reply",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6-luna",
+   "job": "leadScore",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6-luna",
+   "job": "caseCard",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "job": "reply",
+   "error": "measure: refused a request to api.anthropic.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "job": "leadScore",
+   "error": "measure: refused a request to api.anthropic.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "job": "caseCard",
+   "error": "measure: refused a request to api.anthropic.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6.1-terra",
+   "job": "reply",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6-luna",
+   "job": "leadScore",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6-luna",
+   "job": "caseCard",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "job": "reply",
+   "error": "measure: refused a request to api.anthropic.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "job": "leadScore",
+   "error": "measure: refused a request to api.anthropic.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "job": "caseCard",
+   "error": "measure: refused a request to api.anthropic.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6.1-terra",
+   "job": "reply",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "job": "reply",
+   "error": "measure: refused a request to api.anthropic.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6.1-terra",
+   "job": "reply",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6-luna",
+   "job": "leadScore",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "job": "reply",
+   "error": "measure: refused a request to api.anthropic.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "job": "leadScore",
+   "error": "measure: refused a request to api.anthropic.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6.1-terra",
+   "job": "reply",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6-luna",
+   "job": "leadScore",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6-luna",
+   "job": "caseCard",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "job": "reply",
+   "error": "measure: refused a request to api.anthropic.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "job": "leadScore",
+   "error": "measure: refused a request to api.anthropic.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "job": "caseCard",
+   "error": "measure: refused a request to api.anthropic.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6.1-terra",
+   "job": "reply",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6-luna",
+   "job": "leadScore",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6-luna",
+   "job": "caseCard",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "job": "reply",
+   "error": "measure: refused a request to api.anthropic.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "job": "leadScore",
+   "error": "measure: refused a request to api.anthropic.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "job": "caseCard",
+   "error": "measure: refused a request to api.anthropic.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6.1-terra",
+   "job": "reply",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "job": "reply",
+   "error": "measure: refused a request to api.anthropic.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6.1-terra",
+   "job": "reply",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.openai.com",
+   "model": "gpt-6-luna",
+   "job": "leadScore",
+   "error": "measure: refused a request to api.openai.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "job": "reply",
+   "error": "measure: refused a request to api.anthropic.com, which this run blocks",
+   "ms": 0
+  },
+  {
+   "host": "api.anthropic.com",
+   "model": "claude-haiku-5-5",
+   "job": "leadScore",
+   "error": "measure: refused a request to api.anthropic.com, which this run blocks",
+   "ms": 0
+  }
+ ],
+ "refused": [
+  "api.openai.com",
+  "api.anthropic.com",
+  "api.openai.com",
+  "api.openai.com",
+  "api.anthropic.com",
+  "api.anthropic.com",
+  "api.openai.com",
+  "api.openai.com",
+  "api.openai.com",
+  "api.anthropic.com",
+  "api.anthropic.com",
+  "api.anthropic.com",
+  "api.openai.com",
+  "api.openai.com",
+  "api.openai.com",
+  "api.anthropic.com",
+  "api.anthropic.com",
+  "api.anthropic.com",
+  "api.openai.com",
+  "api.anthropic.com",
+  "api.openai.com",
+  "api.openai.com",
+  "api.anthropic.com",
+  "api.anthropic.com",
+  "api.openai.com",
+  "api.openai.com",
+  "api.openai.com",
+  "api.anthropic.com",
+  "api.anthropic.com",
+  "api.anthropic.com",
+  "api.openai.com",
+  "api.openai.com",
+  "api.openai.com",
+  "api.anthropic.com",
+  "api.anthropic.com",
+  "api.anthropic.com",
+  "api.openai.com",
+  "api.anthropic.com",
+  "api.openai.com",
+  "api.openai.com",
+  "api.anthropic.com",
+  "api.anthropic.com"
+ ],
+ "finishedAt": "2026-11-22T17:59:02.310Z"
+}

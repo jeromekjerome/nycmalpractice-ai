@@ -12,7 +12,7 @@ import './test-settings.mjs';
 import assert from 'node:assert/strict';
 import { isDeepStrictEqual } from 'node:util';
 import { test } from './runner.mjs';
-import { checkChains, checkMeasurementRows, modelSettings, KEY_NAMES } from '../model-settings.js';
+import { checkChains, checkMeasurementRows, modelSettings, providerOrderProblems, KEY_NAMES } from '../model-settings.js';
 import { MEASURE_DATABASE_URL } from '../measure-address.js';
 import { DEFAULTS } from '../models.js';
 import { entryFor } from '../model-registry.js';
@@ -224,6 +224,46 @@ test('under the override, a model with no measurement on record, or one that mis
   assert.equal(checkChains({ ...THREE, answer: ['alpha-1', 'alpha-2', 'beta-1'] }, facts({ override: true })).ok, false);
 });
 
+// The order of the providers the privacy page states, as each app hands it over (its server.js): here the stand-ins'.
+const STATED = ['alpha', 'beta', 'gamma'];
+const PAGE_SAYS = "but the privacy page says a visitor's conversation goes to alpha normally, to beta only when alpha cannot answer, and to gamma only when neither alpha nor beta can. A chain asks its providers in that order, though it may leave one out; change the privacy page first. The override does not lift this.";
+
+test("a chain must ask its providers in the order the privacy page states, and the override cannot lift that: the first model is the first provider's, and a provider may be left out or come back, but never come before one the page puts ahead of it", () => {
+  const small = ['alpha-2', 'beta-1', 'gamma-1'];
+  // In the order, one left out, and one that comes back after another: each may be saved.
+  for (const answer of [['alpha-1', 'beta-1', 'gamma-1'], ['alpha-1', 'gamma-1'], ['alpha-1', 'beta-1', 'alpha-2']]) {
+    assert.deepEqual(checkChains({ answer, small }, facts({ providerOrder: STATED })).errors, [], answer.join(', '));
+  }
+  // The first model another provider's; a provider before one the page puts ahead of it. Refused, with what the page
+  // says, in both chains.
+  assert.deepEqual(checkChains({ answer: ['beta-1', 'alpha-1', 'gamma-1'], small: ['alpha-2', 'gamma-1', 'beta-1'] }, facts({ providerOrder: STATED })).errors, [
+    `The reply chain starts with beta-1, beta's, ${PAGE_SAYS}`,
+    `The small-job chain asks gamma before beta, ${PAGE_SAYS}`,
+  ]);
+  // The override lifts it for neither.
+  const overridden = checkChains({ answer: ['gamma-1', 'alpha-1'], small }, facts({ providerOrder: STATED, override: true }));
+  assert.equal(overridden.ok, false);
+  assert.deepEqual(overridden.errors, [`The reply chain starts with gamma-1, gamma's, ${PAGE_SAYS}`]);
+  // A provider the page does not name at all is refused too.
+  const unnamed = { ...REGISTRY, 'delta-1': { provider: 'delta', price: [1, 1] } };
+  const withDelta = facts({ providerOrder: STATED, entryFor: name => unnamed[name] ?? null, keysPresent: ['alpha', 'beta', 'gamma', 'delta'], liveModels: { ...facts().liveModels, delta: ['delta-1'] }, measurements: [...facts().measurements, measurement('delta-1', 'answer')] });
+  assert.deepEqual(checkChains({ answer: ['alpha-1', 'delta-1'], small }, withDelta).errors, [`The reply chain names delta-1, delta's, a provider the privacy page does not name, ${PAGE_SAYS}`]);
+  // With no order given, as in a measurement, nothing is said of the order.
+  assert.deepEqual(checkChains({ answer: ['beta-1', 'alpha-1', 'gamma-1'], small }, facts()).errors, []);
+});
+
+test("the order check reads the real registry as the app's chains name it: OpenAI's model first, then Anthropic's and Google's, each may be left out, and no other order is let through", () => {
+  const order = ['openai', 'anthropic', 'google'];
+  const says = providerOrderProblems({ answer: ['claude-haiku-5-5', 'gpt-6.1-terra'], small: ['gpt-6-luna'] }, order);
+  assert.deepEqual(says, ["The reply chain starts with claude-haiku-5-5, anthropic's, but the privacy page says a visitor's conversation goes to openai normally, to anthropic only when openai cannot answer, and to google only when neither openai nor anthropic can. A chain asks its providers in that order, though it may leave one out; change the privacy page first. The override does not lift this."]);
+  assert.deepEqual(providerOrderProblems({ answer: ['gpt-6.1-terra', 'claude-haiku-5-5', 'gpt-6-luna'], small: ['gpt-6-luna', 'gemini-3.5-flash-lite'] }, order), []);
+  assert.equal(providerOrderProblems({ answer: ['gpt-6.1-terra', 'gemini-3.5-flash-lite', 'claude-haiku-5-5'], small: ['gpt-6-luna'] }, order).length, 1);
+  assert.match(providerOrderProblems({ answer: ['gpt-6.1-terra', 'gemini-3.5-flash-lite', 'claude-haiku-5-5'], small: ['gpt-6-luna'] }, order)[0], /^The reply chain asks google before anthropic, /);
+  assert.deepEqual(providerOrderProblems({ answer: ['gemini-3.5-flash-lite'], small: ['gpt-6-luna'] }, order).length, 1);
+  // No order, no check.
+  assert.deepEqual(providerOrderProblems({ answer: ['gemini-3.5-flash-lite'], small: ['claude-haiku-5-5'] }, null), []);
+});
+
 test('a chain that is not a list of one or more model names, or that names one model twice, cannot be saved', () => {
   const neither = ['The reply chain must be a list of one or more model names.', 'The small-job chain must be a list of one or more model names.'];
   assert.deepEqual(checkChains({ answer: [], small: 'gamma-1' }, facts()), { ok: false, errors: neither, warnings: [] });
@@ -306,7 +346,7 @@ const OFFERED = { openai: ['gpt-6.2-sol', 'gpt-6.1-terra', 'gpt-6-luna', 'gpt-5.
 
 // Instances of the settings over one database, with the test's time, the environment they are given, and stand-ins
 // for what each provider lists today (each call kept in `listed`) and for the owner's telling (each note in `told`).
-function settingsWorld({ env = { OPENAI_API_KEY: 'set' }, offered = OFFERED } = {}) {
+function settingsWorld({ env = { OPENAI_API_KEY: 'set' }, offered = OFFERED, providerOrder = null } = {}) {
   const db = settingsDatabase();
   let time = START;
   const clock = { now: () => time, pass: ms => { time += ms; } };
@@ -317,6 +357,7 @@ function settingsWorld({ env = { OPENAI_API_KEY: 'set' }, offered = OFFERED } = 
     app: 'stand-in',
     now: clock.now,
     env,
+    providerOrder,
     tell: note => { told.push(note); },
     modelsOffered: async providers => {
       listed.push(providers);
@@ -351,6 +392,30 @@ test("saveChains checks the chains against this app's measurements on record, th
   assert.equal(reads.length, 2);
   assert.ok(reads.every(call => call.params[0] === 'stand-in'));
   assert.deepEqual(lines, []);
+});
+
+test('saveChains refuses chains that ask the providers in another order than the one the app says its privacy page states, under the override as without it, and saves nothing', async () => {
+  const keys = { OPENAI_API_KEY: 'set', ANTHROPIC_API_KEY: 'set', GEMINI_API_KEY: 'set' };
+  const offered = { ...OFFERED, anthropic: ['claude-haiku-5-5'], google: ['gemini-3.5-flash-lite'] };
+  const { db, instance } = settingsWorld({ env: keys, offered, providerOrder: ['openai', 'anthropic', 'google'] });
+  const geminiFirst = { answer: ['gemini-3.5-flash-lite', 'gpt-6.1-terra'], small: ['gpt-6-luna', 'claude-haiku-5-5'] };
+  measureAll(db, geminiFirst);
+  for (const override of [false, true]) {
+    const { result } = await quietly(() => instance().saveChains(geminiFirst, { by: 'owner', override }));
+    assert.equal(result.ok, false, `override ${override}`);
+    assert.deepEqual(result.errors.filter(error => /privacy page/.test(error)), [
+      "The reply chain starts with gemini-3.5-flash-lite, google's, but the privacy page says a visitor's conversation goes to openai normally, to anthropic only when openai cannot answer, and to google only when neither openai nor anthropic can. A chain asks its providers in that order, though it may leave one out; change the privacy page first. The override does not lift this.",
+    ]);
+  }
+  assert.equal(db.settings.size, 0);
+  // The same models in the page's order are saved.
+  const inOrder = { answer: ['gpt-6.1-terra', 'gemini-3.5-flash-lite'], small: ['gpt-6-luna', 'claude-haiku-5-5'] };
+  measureAll(db, inOrder);
+  assert.equal((await quietly(() => instance().saveChains(inOrder, { by: 'owner' }))).result.ok, true);
+  // An instance given no order, as a measurement's, says nothing of it.
+  const unordered = settingsWorld({ env: keys, offered });
+  measureAll(unordered.db, geminiFirst);
+  assert.equal((await quietly(() => unordered.instance().saveChains(geminiFirst, { by: 'owner' }))).result.ok, true);
 });
 
 test('saveChains refuses the models of a provider with no key set, and asks no list of it', async () => {

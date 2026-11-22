@@ -9,9 +9,10 @@ import { test } from './runner.mjs';
 import { hasPrice } from '../ai-budget.js';
 import { capFor } from '../providers.js';
 import { SMALL_JOBS, REPLY_JOBS } from '../measure/app.mjs';
-import { chains, modelSettings } from '../model-settings.js';
+import { chains, modelSettings, providerOrderProblems } from '../model-settings.js';
 import { providerOf } from '../model-registry.js';
 import { DEFAULTS, LIMITS_MS, limitFor, DEFAULT_ASK_REPLY_DEADLINE_MS, replyReserveMs } from '../models.js';
+import { PRIVACY_PROVIDER_ORDER } from '../site.js';
 
 test('the built-in chains come from one place, and with no chains saved they are the ones every job runs with', async () => {
   assert.deepEqual(DEFAULTS, {
@@ -181,4 +182,21 @@ test("the privacy page's check does not take Google Fonts for Google, or a menti
   assert.deepEqual(namedProviders('<h2>Other</h2><ul><li><strong>OpenAI</strong> your conversation <a href="https://openai.com/privacy">x</a></li></ul>'), []);
   // This page's entries before the second provider: a label with its colon, and the policy's address as plain text.
   assert.deepEqual(namedProviders(entry('OpenAI:', 'Your conversation messages are sent to OpenAI. Its privacy policy applies: openai.com/privacy')), []);
+});
+
+test('the order of the providers that this app gives its settings is the one its privacy page states, in the page\'s own words, and its built-in chains keep it', () => {
+  const page = readFileSync(new URL('../public/privacy.html', import.meta.url), 'utf8');
+  const entries = serviceEntries(page);
+  const names = PRIVACY_PROVIDER_ORDER.map(provider => PROVIDER_NAMES[provider]);
+  assert.deepEqual(PRIVACY_PROVIDER_ORDER, ['openai', 'anthropic', 'google']);
+  // Each provider's entry, in that order on the page.
+  const at = names.map(name => entries.findIndex(entry => entry.label === name));
+  assert.ok(at.every(index => index !== -1), `${names} on the page: ${at}`);
+  assert.ok(at.every((index, place) => place === 0 || index > at[place - 1]), `the entries come in another order: ${at}`);
+  // The first normally the only one, each next only when those before it cannot answer.
+  assert.match(entries[at[0]].text, /Normally it is the only AI provider your conversation goes to\./);
+  assert.ok(entries[at[1]].text.includes(`used only when ${names[0]} cannot answer`), entries[at[1]].text);
+  assert.ok(entries[at[2]].text.includes(`used only when neither ${names[0]} nor ${names[1]} can answer`), entries[at[2]].text);
+  // The built-in chains pass the check a save of chains is put to.
+  assert.deepEqual(providerOrderProblems(DEFAULTS, PRIVACY_PROVIDER_ORDER), []);
 });

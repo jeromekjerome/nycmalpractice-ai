@@ -8,6 +8,12 @@ export const APP_URL = (process.env.APP_URL || 'https://nycmalpractice-ai.vercel
 // never lets one app's checkout change another app's firm (firm numbers repeat across apps).
 export const APP_ID = 'nycmalpractice';
 
+// The order of the AI providers that the privacy page states (public/privacy.html, Third-Party Services): OpenAI is
+// normally the only one a visitor's conversation goes to, Anthropic is used only when OpenAI cannot answer, and Google
+// only when neither can. server.js gives it to the model settings, which refuse a chain against it whatever the
+// override (model-settings.js); test/models.test.mjs ties it to the page's words. The page changes first.
+export const PRIVACY_PROVIDER_ORDER = Object.freeze(['openai', 'anthropic', 'google']);
+
 // The wording a visitor agrees to before their contact details and conversation go to law firms.
 // public/index.html shows exactly this text (a test checks that they match), and the text stored with
 // each consent is this constant, never anything the browser sends.

@@ -19,7 +19,7 @@ import { providerState } from './provider-state.js';
 import { configureModelSettings, chains, measurements, saveChains, recordMeasurements, checkMeasurementRows, KEY_NAMES } from './model-settings.js';
 import { MODELS } from './model-registry.js';
 import { DEFAULTS, limitFor, DEFAULT_ASK_REPLY_DEADLINE_MS, replyReserveMs } from './models.js';
-import { APP_URL, APP_ID, CONTACT_CONSENT_TEXT, CONTACT_FORM_FROM_STEP } from './site.js';
+import { APP_URL, APP_ID, CONTACT_CONSENT_TEXT, CONTACT_FORM_FROM_STEP, PRIVACY_PROVIDER_ORDER } from './site.js';
 import { mentionsPublicHospital, deadlineNotices } from './deadlines.js';
 import { buildSummaryEmail } from './summary.js';
 import { toPublicEvaluation, isHitlVerificationComplete, HITL_ATTESTATION_KEYS, loadRubric, loadCurrentLawNotes } from './gatekeeper.js';
@@ -33,7 +33,8 @@ const sql = neon(process.env.DATABASE_URL);
 // The chains each job runs with are a setting kept in this database (model-settings.js), with the built-in chains of
 // models.js behind it; the measurements that a save is checked against are this app's own. The owner is told
 // (operations.js), once a day, when the saved chains name a model the registry no longer has.
-configureModelSettings({ sqlClient: sql, app: APP_ID, tell: tellOwnerOfModelChains });
+// No saved chain may ask the AI providers in another order than the privacy page states (site.js).
+configureModelSettings({ sqlClient: sql, app: APP_ID, tell: tellOwnerOfModelChains, providerOrder: PRIVACY_PROVIDER_ORDER });
 
 // A provider's ping is a health check of its main model in the chains in use when it is sent (providerPing). The
 // provider state hands it a signal, which the reply fires when the check's answer no longer matters; it goes on to the

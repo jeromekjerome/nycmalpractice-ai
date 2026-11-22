@@ -5109,7 +5109,9 @@ test("the nightly job's watch of the providers' model lists keeps its table in s
 
 test('the site keeps its model chains in its own database, under its own name in the measurements, and tells the owner of a saved model the registry does not have through operations.js', () => {
   const server = readFileSync(new URL('../server.js', import.meta.url), 'utf8');
-  assert.match(server, /configureModelSettings\(\{ sqlClient: sql, app: APP_ID, tell: tellOwnerOfModelChains \}\);/);
+  // With the order of the providers its privacy page states (site.js), which no saved chain may contradict.
+  assert.match(server, /configureModelSettings\(\{ sqlClient: sql, app: APP_ID, tell: tellOwnerOfModelChains, providerOrder: PRIVACY_PROVIDER_ORDER \}\);/);
+  assert.match(server, /import \{[^}]*\bPRIVACY_PROVIDER_ORDER\b[^}]*\} from '\.\/site\.js'/);
   assert.match(server, /import \{[^}]*\btellOwnerOfModelChains\b[^}]*\} from '\.\/operations\.js'/);
   assert.match(server, /import \{[^}]*\bconfigureModelSettings\b[^}]*\} from '\.\/model-settings\.js'/);
   // The measurements a run records are named by the app's adapter (measure/app.mjs), and the site by site.js: the two agree.
@@ -6559,6 +6561,30 @@ test('the Models routes are closed without the admin secret, give the page the c
       assert.equal((await call('POST', '/api/admin/models/chains', { answer: ['gpt-6.1-terra'], small: ['gpt-5.4-mini'], override: 'yes' })).status, 422);
       assert.equal((await call('POST', '/api/admin/models/chains', { answer: 'gpt-6.1-terra', small: [] })).status, 422);
       assert.equal((await call('POST', '/api/admin/models/chains', { answer: ['gpt-6.1-terra'] })).status, 422);
+    })));
+  } finally {
+    await server.close();
+  }
+});
+
+test('the Models routes refuse chains that ask the providers in another order than the privacy page states, even under the override, with the words of the page', async () => {
+  const { PRIVACY_PROVIDER_ORDER } = await import('../site.js');
+  const database = settingsClient();
+  const offered = { openai: ['gpt-6.1-terra', 'gpt-6-luna'], anthropic: ['claude-haiku-5-5'], google: ['gemini-3.5-flash-lite'] };
+  const keys = { OPENAI_API_KEY: 'a-key', ANTHROPIC_API_KEY: 'a-key', GEMINI_API_KEY: 'a-key' };
+  const admin = { 'content-type': 'application/json', 'x-admin-secret': process.env.ADMIN_SECRET };
+  const server = await startServer(app);
+  try {
+    await capturingLogs(() => withModelSettings({ sqlClient: database.client, app: 'nycmalpractice', env: keys, providerOrder: PRIVACY_PROVIDER_ORDER, modelsOffered: async providers => Object.fromEntries(providers.map(provider => [provider, offered[provider]])) }, () => withOutboundHttp(async () => jsonResponse(EMPTY_ROWS), async () => {
+      const save = body => fetch(`${server.baseUrl}/api/admin/models/chains`, { method: 'POST', headers: admin, body: JSON.stringify(body) }).then(async response => ({ status: response.status, body: await response.json() }));
+      // gemini-3.5-flash-lite meets the whole reply bar here, so only the page's order stands in the way of this one.
+      const refused = await save({ answer: ['gemini-3.5-flash-lite', 'gpt-6.1-terra'], small: ['gpt-6-luna', 'claude-haiku-5-5'], override: true });
+      assert.equal(refused.status, 422);
+      assert.deepEqual(refused.body.errors, ["The reply chain starts with gemini-3.5-flash-lite, google's, but the privacy page says a visitor's conversation goes to openai normally, to anthropic only when openai cannot answer, and to google only when neither openai nor anthropic can. A chain asks its providers in that order, though it may leave one out; change the privacy page first. The override does not lift this."]);
+      assert.equal(database.settings.size, 0);
+      // The same models in the page's order are saved under the override.
+      const saved = await save({ answer: ['gpt-6.1-terra', 'gemini-3.5-flash-lite'], small: ['gpt-6-luna', 'claude-haiku-5-5'], override: true });
+      assert.equal(saved.status, 200, JSON.stringify(saved.body));
     })));
   } finally {
     await server.close();

@@ -14,7 +14,8 @@
 //   facts (the measurements on record in model_measurements, which providers have a key, what each provider lists
 //   today) and saves only when nothing is wrong. A model with no measurement, or one that misses the part of the bar
 //   its place needs, is let in only under the owner's override, which the row records and the daily summary repeats
-//   until each such model has a measurement on record.
+//   until each such model has a measurement on record. A chain that asks the providers in another order than the one
+//   the app's privacy page states (providerOrderProblems) is refused, and no override lifts that: the page changes first.
 // - A measurement run gives the app chains of its own (useChainsForMeasurement), and no setting is read.
 //
 // This file is the same in each app. The app gives it the database client, the app's name in model_measurements and
@@ -78,7 +79,7 @@ function measurementProblem({ name, as }, model, place, measured, override) {
 }
 
 // The whole check: the errors, the warnings, and the models the override let in, as [{ model, role }].
-function review(proposed, { measurements = [], keysPresent = [], liveModels = {}, override = false, now = Date.now(), entryFor = registryEntryFor } = {}) {
+function review(proposed, { measurements = [], keysPresent = [], liveModels = {}, override = false, now = Date.now(), entryFor = registryEntryFor, providerOrder = null } = {}) {
   const keyed = new Set(keysPresent);
   const errors = [];
   const warnings = [];
@@ -142,8 +143,57 @@ function review(proposed, { measurements = [], keysPresent = [], liveModels = {}
     }
     if (distinct.size === 1) warnings.push(`The ${name} has one provider; it has no fallback if that provider is down.`);
     if (distinct.size === 2) warnings.push(`The ${name} has two providers, not three: if both are down at once, it has no fallback.`);
+
+    // The privacy page states the order in which a visitor's conversation goes to the AI providers, and no override
+    // lets a chain contradict it.
+    const outOfOrder = orderProblem(place, chain, providerOrder, entryFor);
+    if (outOfOrder) errors.push(outOfOrder);
   }
   return { errors: [...new Set(errors)], warnings: [...new Set(warnings)], waived: [...waived.values()] };
+}
+
+// What the privacy page states, from the order of providers the app says it states: a visitor's conversation goes to
+// the first normally, and to each next only when those before it cannot answer.
+function orderStated(order) {
+  const parts = order.map((provider, at) => {
+    if (at === 0) return `to ${provider} normally`;
+    if (at === 1) return `to ${provider} only when ${order[0]} cannot answer`;
+    const before = order.slice(0, at);
+    return `to ${provider} only when ${before.length === 2 ? `neither ${before[0]} nor ${before[1]}` : `none of ${before.join(', ')}`} can`;
+  });
+  if (parts.length < 3) return parts.join(' and ');
+  return `${parts.slice(0, -1).join(', ')}, and ${parts.at(-1)}`;
+}
+
+// A chain against the order the privacy page states, in the owner's words, or null. The chain's first model must be
+// the first provider's, and the order in which its providers first appear must keep the page's: a provider may be left
+// out, and may come back after another, but may never come before one the page puts ahead of it. With no order given,
+// as in a measurement run, nothing is checked.
+function orderProblem({ name }, chain, order, entryFor) {
+  if (!Array.isArray(order) || !order.length || !isChain(chain)) return null;
+  const named = chain.map(model => ({ model, provider: entryFor(model)?.provider ?? null })).filter(({ provider }) => provider);
+  if (!named.length) return null;
+  const pageSays = `but the privacy page says a visitor's conversation goes ${orderStated(order)}. A chain asks its providers in that order, though it may leave one out; change the privacy page first. The override does not lift this.`;
+  const [lead] = named;
+  if (lead.provider !== order[0]) return `The ${name} starts with ${lead.model}, ${lead.provider}'s, ${pageSays}`;
+  const unnamed = named.find(({ provider }) => !order.includes(provider));
+  if (unnamed) return `The ${name} names ${unnamed.model}, ${unnamed.provider}'s, a provider the privacy page does not name, ${pageSays}`;
+  const seen = [...new Set(named.map(({ provider }) => provider))];
+  const out = seen.findIndex((provider, at) => at > 0 && order.indexOf(provider) < order.indexOf(seen[at - 1]));
+  return out === -1 ? null : `The ${name} asks ${seen[out - 1]} before ${seen[out]}, ${pageSays}`;
+}
+
+/**
+ * What is wrong with the chains against the order of the AI providers the privacy page states, one line for each chain
+ * that breaks it; none when they keep it, or when no order is given. A save checks this with the rest (checkChains,
+ * saveChains); it is apart so that an app can check its built-in chains against its own page.
+ * @param {{ answer: string[], small: string[] }} proposed
+ * @param {string[] | null} order   the providers in the order the page states, as each app's server.js gives it
+ * @param {Function} [entryFor]     the registry (model-registry.js)
+ * @returns {string[]}
+ */
+export function providerOrderProblems(proposed, order, entryFor = registryEntryFor) {
+  return CHAINS.map(place => orderProblem(place, proposed?.[place.role], order, entryFor)).filter(Boolean);
 }
 
 /**
@@ -156,6 +206,8 @@ function review(proposed, { measurements = [], keysPresent = [], liveModels = {}
  * @param {boolean} [facts.override]   the owner's "use anyway, not measured"
  * @param {number} [facts.now]         the time, for the retirement dates
  * @param {Function} [facts.entryFor]  the registry (model-registry.js); tests give a registry of stand-ins
+ * @param {string[]} [facts.providerOrder]  the providers in the order the app's privacy page states; a chain against it
+ *   is refused whatever the override (providerOrderProblems). None given, as in a measurement run: nothing is checked.
  * @returns {{ ok: boolean, errors: string[], warnings: string[] }}
  */
 export function checkChains(proposed, facts = {}) {
@@ -258,9 +310,11 @@ function providersIn(proposed) {
  *   the app's telling decides how often the owner is emailed.
  * @param {object} [options.env]          where the keys and the database address are looked up, by name
  * @param {Function} [options.modelsOffered]  (providers) -> { [provider]: names | null }: what each provider lists
+ * @param {string[]} [options.providerOrder]   the providers in the order the app's privacy page states (server.js):
+ *   a save against it is refused, under the override too
  * @returns {{ chains, measurements, recordMeasurements, saveChains, unmeasuredOverride, useChainsForMeasurement }}
  */
-export function modelSettings({ sqlClient = null, app = null, now = Date.now, tell = null, env = process.env, modelsOffered = listedByProviders } = {}) {
+export function modelSettings({ sqlClient = null, app = null, now = Date.now, tell = null, env = process.env, modelsOffered = listedByProviders, providerOrder = null } = {}) {
   // The last read of the row, used for a minute: { at, settled: { answer, small, source, override } }.
   let memory = null;
   // The read in flight, which every caller meanwhile waits for. A save made while it is in flight wins over what it
@@ -363,7 +417,7 @@ export function modelSettings({ sqlClient = null, app = null, now = Date.now, te
     const keysPresent = Object.keys(KEY_NAMES).filter(provider => Boolean(env[KEY_NAMES[provider]]));
     const listing = providersIn(proposed).filter(provider => keysPresent.includes(provider));
     const [onRecord, liveModels] = await Promise.all([measurements(), listing.length ? modelsOffered(listing) : {}]);
-    const { errors, warnings, waived } = review(proposed, { measurements: onRecord, keysPresent, liveModels, override: override === true, now: now() });
+    const { errors, warnings, waived } = review(proposed, { measurements: onRecord, keysPresent, liveModels, override: override === true, now: now(), providerOrder });
     if (errors.length) return { ok: false, errors, warnings };
 
     const value = {

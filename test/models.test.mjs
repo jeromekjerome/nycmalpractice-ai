@@ -71,12 +71,27 @@ test('every model in the chains has a measured time limit for each job, within t
       assert.equal(limitFor(model, job), limit, `${model} ${job}`);
     }
   }
-  // A model the measurement has not timed here is given the cap for each job's kind: those of the other providers too,
-  // until this app measures them.
+  // The other providers' candidates this app measured (the reply and small-job runs of plan 2) have limits for the jobs
+  // their runs timed, and for no other: claude-haiku-5-5 and gemini-3.5-flash-lite were measured on replies and small
+  // jobs, claude-sonnet-5-5 and gemini-3.8-flash on replies only.
+  const timed = { 'claude-haiku-5-5': jobs, 'claude-sonnet-5-5': ['reply', 'rewrite'], 'gemini-3.8-flash': ['reply', 'rewrite'], 'gemini-3.5-flash-lite': jobs };
+  for (const [model, jobsTimed] of Object.entries(timed)) {
+    assert.ok(Object.hasOwn(LIMITS_MS, model), `${model} has no time limits`);
+    assert.deepEqual(Object.keys(LIMITS_MS[model]).sort(), [...jobsTimed].sort(), model);
+  }
+  // Every limit on record is of the same kind: a whole number of 100 ms, within the cap for its job's kind.
+  for (const [model, limitsOf] of Object.entries(LIMITS_MS)) {
+    for (const [job, limit] of Object.entries(limitsOf)) {
+      assert.ok(jobs.includes(job), `${model} has a limit for ${job}, which is no job of this app`);
+      assert.ok(Number.isInteger(limit) && limit > 0 && limit % 100 === 0 && limit <= capFor(job), `${model} ${job}: ${limit}`);
+    }
+  }
+  // A model the measurement has not timed here is given the cap for each job's kind, and so is a job a model was not
+  // timed for: claude-opus-5-5 was left out of this app's measurement, and claude-sonnet-5-5 was not asked a small job.
   assert.equal(limitFor('gpt-6.2-sol', 'grade'), 8_000);
   assert.equal(limitFor('gpt-6.2-sol', 'rewrite'), 20_000);
-  assert.equal(limitFor('claude-haiku-5-5', 'reply'), 20_000);
-  assert.equal(limitFor('gemini-3.5-flash-lite', 'classify'), 8_000);
+  assert.equal(limitFor('claude-opus-5-5', 'reply'), 20_000);
+  assert.equal(limitFor('claude-sonnet-5-5', 'grade'), 8_000);
   assert.ok(Object.isFrozen(LIMITS_MS) && Object.values(LIMITS_MS).every(Object.isFrozen));
   // The longest a visitor waits for a reply, which every model call of that reply shares.
   assert.equal(DEFAULT_ASK_REPLY_DEADLINE_MS, 45_000);

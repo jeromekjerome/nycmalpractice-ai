@@ -44,16 +44,24 @@ export function replyReserveMs(deadlineMs) {
 // (providers.js). A job with fewer than ten measured calls is given, for the rewrite, the model's limit for the
 // reply, and otherwise the cap.
 //
-// Worked out on 22 November 2026 by the report's timeLimits (measure/report.mjs; npm run models:report prints them)
-// from this app's own runs of plan 1, in measure/results/: base-1 to base-3, small-base-1 to small-base-3,
-// reply-gpt-6.1-terra, reply-gpt-6-luna, reply-gpt-5.4-mini, small-gpt-6-luna, small-gpt-6.1-terra,
-// small-gpt-5.4-mini, chosen-with-rule and smoke-chosen. Only the models of the built-in chains are listed. A model
-// this app has not measured, the other providers' among them, is given the cap. Re-measure a model before changing
-// its limits.
+// Worked out on 22 November 2026 by npm run models:report (it prints them) from this app's runs of plan 2, in
+// measure/results/: providers-1 to providers-3 and small-luna-1 to small-luna-3 (gpt-6.1-terra and gpt-6-luna), and
+// the candidates' runs reply-claude-haiku-5-5, reply-claude-sonnet-5-5-low, reply-gemini-3.8-flash,
+// reply-gemini-3.5-flash-lite, small-claude-haiku-5-5 and small-gemini-3.5-flash-lite. Every one of them ran at the
+// effort its registry entry records (model-registry.js). A job a candidate was not timed for is left out of its entry,
+// and is given the cap. Exceptions, from this app's runs of plan 1: gpt-6-luna's reply and rewrite limits
+// (reply-gpt-6-luna), since plan 2 asked it only for the small jobs; gpt-6.1-terra's small-job limits
+// (small-gpt-6.1-terra), since plan 2 gave it only the reply and the rewrite; and gpt-5.4-mini's entry, not measured
+// again. A model this app has not measured, claude-opus-5-5 among them, is given the cap. Re-measure a model before
+// changing its limits.
 const limits = {
-  'gpt-6.1-terra': { reply: 12_800, rewrite: 12_800, classify: 4_500, leadScore: 7_400, caseCard: 8_000, grade: 8_000 },
-  'gpt-6-luna': { reply: 14_600, rewrite: 14_600, classify: 5_100, leadScore: 8_000, caseCard: 8_000, grade: 8_000 },
+  'gpt-6.1-terra': { reply: 13_800, rewrite: 12_500, classify: 4_500, leadScore: 7_400, caseCard: 8_000, grade: 8_000 },
+  'gpt-6-luna': { reply: 14_600, rewrite: 14_600, classify: 4_300, leadScore: 8_000, caseCard: 8_000, grade: 8_000 },
   'gpt-5.4-mini': { reply: 10_100, rewrite: 10_100, classify: 2_400, leadScore: 5_400, caseCard: 6_000, grade: 6_100 },
+  'claude-haiku-5-5': { reply: 20_000, rewrite: 20_000, classify: 4_700, leadScore: 8_000, caseCard: 8_000, grade: 8_000 },
+  'claude-sonnet-5-5': { reply: 20_000, rewrite: 20_000 },
+  'gemini-3.8-flash': { reply: 20_000, rewrite: 20_000 },
+  'gemini-3.5-flash-lite': { reply: 13_600, rewrite: 13_600, classify: 1_500, leadScore: 2_000, caseCard: 2_800, grade: 3_400 },
 };
 export const LIMITS_MS = Object.freeze(Object.fromEntries(Object.entries(limits).map(([model, jobs]) => [model, Object.freeze(jobs)])));
 

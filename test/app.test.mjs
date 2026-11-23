@@ -1320,7 +1320,7 @@ test('Vercel uses the bounded single-function setup and protects static response
     'api/*.js': { includeFiles: '{public,rubrics,content}/**', maxDuration: 60 },
   });
   assert.deepEqual(vercel.rewrites, [{ source: '/(.*)', destination: '/api' }]);
-  assert.deepEqual(vercel.crons, [{ path: '/api/cron', schedule: '0 7 * * *' }]);
+  assert.deepEqual(vercel.crons, [{ path: '/api/cron/statute-watch', schedule: '0 6 * * *' }, { path: '/api/cron', schedule: '0 7 * * *' }]);
   const all = vercel.headers.find(rule => rule.source === '/(.*)');
   const { SECURITY_HEADERS } = await import('../security-headers.js');
   assert.deepEqual(Object.fromEntries(all.headers.map(({ key, value }) => [key, value])), { ...SECURITY_HEADERS });
@@ -5000,7 +5000,7 @@ test('/health/deep reports the database, its columns and the nightly job, for an
   const previous = process.env.HEALTH_DEEP_CACHE_MS;
   process.env.HEALTH_DEEP_CACHE_MS = '0';
   const columns = ['firms.card_declined_at', 'leads.decline_reason', 'user_interactions.outcome', 'job_runs.ran_at', 'ai_usage.created_at', 'auctions.reminder_sent_at',
-    'ai_provider_state.failed_replies', 'app_settings.value', 'model_measurements.bar_ok', 'provider_model_lists.models'];
+    'ai_provider_state.failed_replies', 'app_settings.value', 'model_measurements.bar_ok', 'provider_model_lists.models', 'statute_watch.unread_emailed_at'];
   const pgTime = ms => new Date(ms).toISOString().replace('T', ' ').replace('Z', '+00');
   let world = {};
   const handler = async (url, init) => {
@@ -5008,6 +5008,7 @@ test('/health/deep reports the database, its columns and the nightly job, for an
     if (world.down) return jsonResponse({ message: 'database unavailable' }, 500);
     if (/^SELECT 1$/.test(q)) return rowsResponse([['?column?', INT]], [['1']]);
     if (/FROM information_schema\.columns/.test(q)) return rowsResponse([['col', TEXT]], (world.columns || columns).map(col => [col]));
+    if (/FROM job_runs WHERE job = 'statute-watch'/.test(q)) return rowsResponse([['last_ok', BOOL], ['last_run', TIMESTAMPTZ], ['last_ok_at', TIMESTAMPTZ]], [[null, null, null]]);
     if (/FROM job_runs/.test(q)) return rowsResponse([['last_ok', BOOL], ['last_run', TIMESTAMPTZ]], [[world.lastOk ?? 't', world.lastRun ?? pgTime(Date.now() - 3600_000)]]);
     return jsonResponse(EMPTY_ROWS);
   };
@@ -5018,15 +5019,15 @@ test('/health/deep reports the database, its columns and the nightly job, for an
   };
   try {
     await capturingLogs(() => withOutboundHttp(handler, async () => {
-      assert.deepEqual(await check(), { status: 200, body: { ok: true, database: 'ok', schema: 'ok', nightlyJob: 'ok' } });
+      assert.deepEqual(await check(), { status: 200, body: { ok: true, database: 'ok', schema: 'ok', nightlyJob: 'ok', statuteWatch: 'not run yet', statuteWatchLastOk: null } });
       world = { columns: columns.slice(1) };
-      assert.deepEqual((await check()).body, { ok: false, database: 'ok', schema: 'missing columns', nightlyJob: 'ok' });
+      assert.deepEqual((await check()).body, { ok: false, database: 'ok', schema: 'missing columns', nightlyJob: 'ok', statuteWatch: 'not run yet', statuteWatchLastOk: null });
       world = { lastOk: 'f' };
       assert.equal((await check()).body.nightlyJob, 'failed');
       world = { lastRun: pgTime(Date.now() - 30 * 3600_000) };
       assert.equal((await check()).status, 503);
       world = { down: true };
-      assert.deepEqual(await check(), { status: 503, body: { ok: false, database: 'down', schema: 'unknown', nightlyJob: 'unknown' } });
+      assert.deepEqual(await check(), { status: 503, body: { ok: false, database: 'down', schema: 'unknown', nightlyJob: 'unknown', statuteWatch: 'unknown', statuteWatchLastOk: null } });
     }));
   } finally {
     if (previous === undefined) delete process.env.HEALTH_DEEP_CACHE_MS; else process.env.HEALTH_DEEP_CACHE_MS = previous;
@@ -5037,7 +5038,7 @@ test('/health/deep reports the database, its columns and the nightly job, for an
 test("/health/deep fails a database that lacks the provider state's table, the model settings' two or the model watch's, and names the columns it looked for", async () => {
   const previous = process.env.HEALTH_DEEP_CACHE_MS;
   process.env.HEALTH_DEEP_CACHE_MS = '0';
-  // Every column the check looks for except those of the four newest tables, as in a deploy whose npm run setup-db
+  // Every column the check looks for except those of the five newest tables, as in a deploy whose npm run setup-db
   // was not run.
   const older = ['firms.card_declined_at', 'leads.decline_reason', 'user_interactions.outcome', 'job_runs.ran_at', 'ai_usage.created_at', 'auctions.reminder_sent_at'];
   const asked = [];
@@ -5049,15 +5050,16 @@ test("/health/deep fails a database that lacks the provider state's table, the m
       asked.push(...String(params[0]).replace(/"/g, '').split(/[{},]/).filter(Boolean));
       return rowsResponse([['col', TEXT]], older.map(col => [col]));
     }
+    if (/FROM job_runs WHERE job = 'statute-watch'/.test(q)) return rowsResponse([['last_ok', BOOL], ['last_run', TIMESTAMPTZ], ['last_ok_at', TIMESTAMPTZ]], [[null, null, null]]);
     if (/FROM job_runs/.test(q)) return rowsResponse([['last_ok', BOOL], ['last_run', TIMESTAMPTZ]], [['t', new Date(Date.now() - 3600_000).toISOString().replace('T', ' ').replace('Z', '+00')]]);
     return jsonResponse(EMPTY_ROWS);
   };
   const server = await startServer(app);
   try {
     const { result, logs } = await capturingLogs(() => withOutboundHttp(handler, async () => (await fetch(`${server.baseUrl}/health/deep`)).json()));
-    assert.deepEqual(result, { ok: false, database: 'ok', schema: 'missing columns', nightlyJob: 'ok' });
-    for (const table of ['ai_provider_state', 'app_settings', 'model_measurements', 'provider_model_lists']) assert.ok(asked.includes(table), `${table} was not looked for`);
-    assert.ok(logs.includes('[health] the database is missing columns the code uses: ai_provider_state.failed_replies, app_settings.value, model_measurements.bar_ok, provider_model_lists.models'), logs.join('\n'));
+    assert.deepEqual(result, { ok: false, database: 'ok', schema: 'missing columns', nightlyJob: 'ok', statuteWatch: 'not run yet', statuteWatchLastOk: null });
+    for (const table of ['ai_provider_state', 'app_settings', 'model_measurements', 'provider_model_lists', 'statute_watch']) assert.ok(asked.includes(table), `${table} was not looked for`);
+    assert.ok(logs.includes('[health] the database is missing columns the code uses: ai_provider_state.failed_replies, app_settings.value, model_measurements.bar_ok, provider_model_lists.models, statute_watch.unread_emailed_at'), logs.join('\n'));
   } finally {
     if (previous === undefined) delete process.env.HEALTH_DEEP_CACHE_MS; else process.env.HEALTH_DEEP_CACHE_MS = previous;
     await server.close();
@@ -5190,6 +5192,58 @@ test("the daily summary gives the day's replies by the model that wrote them, sa
   assert.ok(queries.some(query => /^SELECT \(SELECT count\(\*\) FROM user_interactions/.test(query) && !/operation = 'reply'/.test(query)), queries.join('\n'));
 });
 
+test("the daily summary carries the statute watch's lines, and goes without them when they cannot be read", async () => {
+  const { sendDailyDigest } = await import('../operations.js');
+  const hoursAgo = hours => new Date(Date.now() - hours * 3_600_000).toISOString().replace('T', ' ').replace('Z', '+00');
+  // 'broken' makes the query fail, as a missing table or a refused connection does. The table holds no row: until this app's
+  // notes file is reshaped it names no watched section, so the lines that name one are checked once it does.
+  let jobRuns = [[hoursAgo(1), 't']];
+  let watchRows = [];
+  const queries = [];
+  const handler = async (url, init) => {
+    if (!url.endsWith('/sql')) throw new Error(`Unexpected outbound request in test: ${url}`);
+    const query = JSON.parse(init.body).query.replace(/\s+/g, ' ').trim();
+    queries.push(query);
+    if (/FROM job_runs WHERE job = 'statute-watch' ORDER BY ran_at DESC LIMIT 1/.test(query)) {
+      if (jobRuns === 'broken') return jsonResponse({ message: 'relation "job_runs" does not exist', code: '42P01' }, 400);
+      return rowsResponse([['ran_at', TIMESTAMPTZ], ['ok', BOOL]], jobRuns);
+    }
+    if (/FROM statute_watch/.test(query)) {
+      if (watchRows === 'broken') return jsonResponse({ message: 'relation "statute_watch" does not exist', code: '42P01' }, 400);
+      return rowsResponse([['source_id', TEXT], ['differs_since', TIMESTAMPTZ], ['last_read_at', TIMESTAMPTZ], ['unread_since', TEXT]], watchRows);
+    }
+    return jsonResponse(EMPTY_ROWS);
+  };
+  const summaries = [];
+  const { logs } = await capturingLogs(() => withDigest(() => withOperatorMail(async sent => {
+    await withOutboundHttp(handler, async () => {
+      await sendDailyDigest();
+      watchRows = 'broken';
+      await sendDailyDigest();
+      jobRuns = 'broken';
+      watchRows = [];
+      await sendDailyDigest();
+    });
+    summaries.push(...sent.map(mail => String(mail.html)));
+  })));
+  assert.equal(summaries.length, 3);
+  const rest = ['the last 24 hours', 'Chat messages', 'Estimated AI spend', 'The nightly job ran every step.'];
+  // The watch's lines, under their own heading, after the table and before the nightly job's line.
+  assert.ok(summaries[0].includes('Statute watch'), summaries[0]);
+  assert.ok(summaries[0].includes('The statute watch ran at '), summaries[0]);
+  assert.ok(summaries[0].indexOf('</table>') < summaries[0].indexOf('Statute watch'));
+  assert.ok(summaries[0].indexOf('Statute watch') < summaries[0].indexOf('The nightly job ran every step.'));
+  for (const line of rest) assert.ok(summaries[0].includes(line), line);
+  // The watch's table cannot be read: the summary says so, and keeps the rest.
+  assert.ok(summaries[1].includes("The statute watch's records could not be read for this summary."), summaries[1]);
+  for (const line of rest) assert.ok(summaries[1].includes(line), line);
+  // The job log cannot be read: the email still goes, without the watch's section.
+  assert.doesNotMatch(summaries[2], /Statute watch|statute watch/);
+  for (const line of rest) assert.ok(summaries[2].includes(line), line);
+  assert.ok(logs.some(line => /\[digest\] The statute watch could not be read, so the summary goes without it:/.test(line)), logs.join('\n'));
+  assert.ok(queries.some(query => /FROM job_runs WHERE job = 'statute-watch'/.test(query)));
+});
+
 test("the site sets providers.js to tell the owner through one telling, of a provider's 400 and of a provider marked down or back up, and keeps the provider state in its own database", () => {
   const server = readFileSync(new URL('../server.js', import.meta.url), 'utf8');
   assert.match(server, /const stateOfProviders = providerState\(\{ sqlClient: sql, ping: pingProvider, tell: tellOwnerOfProviders \}\);/);
@@ -5209,7 +5263,7 @@ test("the nightly job's watch of the providers' model lists keeps its table in s
   assert.match(setup, /CREATE TABLE IF NOT EXISTS provider_model_lists \( provider TEXT NOT NULL, month DATE NOT NULL, models JSONB NOT NULL, PRIMARY KEY \(provider, month\) \)/);
   const server = readFileSync(new URL('../server.js', import.meta.url), 'utf8');
   assert.match(server, /\['watch the model lists of the providers', watchProviderModels\],\s+\]\);/);
-  assert.match(server, /modelWatch\(\{ today: new Date\(\), sqlClient: sql, adapters: adaptersFor\(process\.env\), notify: notifyOperator, inUse: modelsInUse, registry: MODELS, site: 'NYCMalpractice\.ai' \}\)/);
+  assert.match(server, /modelWatch\(\{ today: new Date\(\), sqlClient: sql, adapters: adaptersFor\(process\.env\), notify: notifyOperator, inUse: modelsInUse, registry: MODELS, site: SITE_NAME \}\)/);
   assert.match(server, /return \[\.\.\.answer, \.\.\.small, \.\.\.DEFAULTS\.answer, \.\.\.DEFAULTS\.small, \.\.\.DEFAULTS\.embedding\];/);
 });
 
@@ -6777,4 +6831,137 @@ test('sendOperatorNotice says whether the notice went out, and notifyOperator st
       if (value === undefined) delete process.env[name]; else process.env[name] = value;
     }
   }
+});
+
+// ─── The nightly watch of the watched statutes: its route, its job and its place in /health/deep ───
+// The Senate's host and Neon's HTTP endpoint are answered here, so nothing reaches the network or a database. These route tests
+// stop before the notes file is read. The ones that serve the saved statute texts come with this app's reshaped notes file.
+
+// Records each request to the Senate's host, which is never answered with a text here, and each run given to the job log.
+function statuteWatchWorld() {
+  const world = { requests: [], jobRuns: [] };
+  world.handler = async (url, init = {}) => {
+    if (url.startsWith('https://legislation.nysenate.gov/')) {
+      world.requests.push(url);
+      return jsonResponse({ success: false, message: 'no such section' }, 404);
+    }
+    if (!url.endsWith('/sql')) throw new Error(`Unexpected outbound request in test: ${url}`);
+    const { query, params } = JSON.parse(init.body);
+    if (/^INSERT INTO job_runs/.test(query.replace(/\s+/g, ' ').trim())) world.jobRuns.push(params);
+    return jsonResponse(EMPTY_ROWS);
+  };
+  return world;
+}
+
+async function withSenateKey(key, fn) {
+  const previous = process.env.NYSENATE_API_KEY;
+  if (key === undefined) delete process.env.NYSENATE_API_KEY; else process.env.NYSENATE_API_KEY = key;
+  try {
+    return await fn();
+  } finally {
+    if (previous === undefined) delete process.env.NYSENATE_API_KEY; else process.env.NYSENATE_API_KEY = previous;
+  }
+}
+
+const runStatuteWatch = baseUrl => fetch(`${baseUrl}/api/cron/statute-watch`, { headers: { authorization: `Bearer ${process.env.CRON_SECRET}` } });
+
+test("the statute-watch route is closed without the scheduler's secret", async () => {
+  const world = statuteWatchWorld();
+  const server = await startServer(app);
+  try {
+    await capturingLogs(() => withSenateKey('senate-test-key', () => withoutMail(() => withOutboundHttp(world.handler, async () => {
+      assert.equal((await fetch(`${server.baseUrl}/api/cron/statute-watch`)).status, 401);
+      const wrong = await fetch(`${server.baseUrl}/api/cron/statute-watch`, { headers: { authorization: 'Bearer not-the-secret' } });
+      assert.equal(wrong.status, 401);
+      assert.deepEqual(await wrong.json(), { error: 'Unauthorized' });
+      assert.equal(world.requests.length, 0, 'the Senate was asked on a request without the secret');
+      assert.equal(world.jobRuns.length, 0);
+    }))));
+  } finally {
+    await server.close();
+  }
+});
+
+test('a failed statute-watch step answers 500 and emails the failed step', async () => {
+  const world = statuteWatchWorld();
+  const server = await startServer(app);
+  try {
+    await capturingLogs(() => withSenateKey(undefined, () => withOperatorMail(async sent => {
+      await withOutboundHttp(world.handler, async () => {
+        const response = await runStatuteWatch(server.baseUrl);
+        assert.equal(response.status, 500);
+        assert.deepEqual(await response.json(), { ok: false, checked: null, differing: null, unread: null, failed: ['check the watched statutes'] });
+      });
+      assert.equal(world.requests.length, 0, 'the Senate was asked without a key');
+      assert.equal(world.jobRuns.length, 1);
+      assert.equal(String(world.jobRuns[0][0]), 'statute-watch');
+      assert.equal(String(world.jobRuns[0][1]), 'false');
+      assert.match(String(world.jobRuns[0][2]), /NYSENATE_API_KEY is not set in this deployment/);
+      assert.equal(sent.length, 1);
+      assert.match(sent[0].subject, /1 step of the statute watch job failed/);
+      assert.match(sent[0].html, /check the watched statutes/);
+    })));
+  } finally {
+    await server.close();
+  }
+});
+
+test('/health/deep reports the statute watch: not run yet is healthy, failed and late are not', async () => {
+  const previous = process.env.HEALTH_DEEP_CACHE_MS;
+  process.env.HEALTH_DEEP_CACHE_MS = '0';
+  const columns = ['firms.card_declined_at', 'leads.decline_reason', 'user_interactions.outcome', 'job_runs.ran_at', 'ai_usage.created_at', 'auctions.reminder_sent_at',
+    'ai_provider_state.failed_replies', 'app_settings.value', 'model_measurements.bar_ok', 'provider_model_lists.models', 'statute_watch.unread_emailed_at'];
+  const pgTime = ms => new Date(ms).toISOString().replace('T', ' ').replace('Z', '+00');
+  const now = Math.floor(Date.now() / 1000) * 1000;
+  const lastGood = now - 3 * 3600_000;
+  let watch = null; // { lastOk, lastRun, lastOkAt }, or null for no run yet
+  let present = columns;
+  const handler = async (url, init) => {
+    const q = JSON.parse(init.body).query.replace(/\s+/g, ' ').trim();
+    if (/^SELECT 1$/.test(q)) return rowsResponse([['?column?', INT]], [['1']]);
+    if (/FROM information_schema\.columns/.test(q)) return rowsResponse([['col', TEXT]], present.map(col => [col]));
+    if (/FROM job_runs WHERE job = 'statute-watch'/.test(q)) {
+      return rowsResponse([['last_ok', BOOL], ['last_run', TIMESTAMPTZ], ['last_ok_at', TIMESTAMPTZ]],
+        [watch ? [watch.lastOk, pgTime(watch.lastRun), watch.lastOkAt ? pgTime(watch.lastOkAt) : null] : [null, null, null]]);
+    }
+    if (/FROM job_runs/.test(q)) return rowsResponse([['last_ok', BOOL], ['last_run', TIMESTAMPTZ]], [['t', pgTime(now - 3600_000)]]);
+    return jsonResponse(EMPTY_ROWS);
+  };
+  const server = await startServer(app);
+  const check = async () => {
+    const response = await fetch(server.baseUrl + '/health/deep');
+    return { status: response.status, body: await response.json() };
+  };
+  try {
+    await capturingLogs(() => withOutboundHttp(handler, async () => {
+      assert.deepEqual(await check(), { status: 200, body: { ok: true, database: 'ok', schema: 'ok', nightlyJob: 'ok', statuteWatch: 'not run yet', statuteWatchLastOk: null } });
+      watch = { lastOk: 't', lastRun: lastGood, lastOkAt: lastGood };
+      assert.deepEqual(await check(), { status: 200, body: { ok: true, database: 'ok', schema: 'ok', nightlyJob: 'ok', statuteWatch: 'ok', statuteWatchLastOk: new Date(lastGood).toISOString() } });
+      // The last run failed (an earlier one was good): not healthy, and the time of the last good one is reported.
+      watch = { lastOk: 'f', lastRun: now - 3600_000, lastOkAt: lastGood - 24 * 3600_000 };
+      assert.deepEqual(await check(), { status: 503, body: { ok: false, database: 'ok', schema: 'ok', nightlyJob: 'ok', statuteWatch: 'failed', statuteWatchLastOk: new Date(lastGood - 24 * 3600_000).toISOString() } });
+      // Longer than 26 hours since the last run, however it ended.
+      watch = { lastOk: 't', lastRun: now - 30 * 3600_000, lastOkAt: now - 30 * 3600_000 };
+      const late = await check();
+      assert.equal(late.status, 503);
+      assert.equal(late.body.statuteWatch, 'late');
+      assert.equal(late.body.statuteWatchLastOk, new Date(now - 30 * 3600_000).toISOString());
+      // A database that lacks the table fails the schema check.
+      watch = null;
+      present = columns.slice(0, -1);
+      const missing = await check();
+      assert.equal(missing.status, 503);
+      assert.equal(missing.body.schema, 'missing columns');
+    }));
+  } finally {
+    if (previous === undefined) delete process.env.HEALTH_DEEP_CACHE_MS; else process.env.HEALTH_DEEP_CACHE_MS = previous;
+    await server.close();
+  }
+});
+
+test('vercel.json schedules the statute watch at 06:00 UTC and the nightly job at 07:00', () => {
+  const vercel = JSON.parse(readFileSync(new URL('../vercel.json', import.meta.url), 'utf8'));
+  assert.deepEqual(vercel.crons.find(cron => cron.path === '/api/cron/statute-watch'), { path: '/api/cron/statute-watch', schedule: '0 6 * * *' });
+  assert.deepEqual(vercel.crons.find(cron => cron.path === '/api/cron'), { path: '/api/cron', schedule: '0 7 * * *' });
+  assert.equal(vercel.crons.length, 2);
 });

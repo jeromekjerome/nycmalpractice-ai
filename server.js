@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { neon } from '@neondatabase/serverless';
 import { answerUserQuestion } from './ask.js';
-import { closeExpiredAuctions, createAuction, deliverColdLead, getAuctionStatus, placeBid, acceptLead, declineLead, notifyOperatorOfContactRequest, notifyOperator, TIER_CONFIG, DECLINE_REASONS, deliverLeadByHand, remindClosingAuctions, openAuctionsFor, portalAuctionLink } from './auction.js';
+import { closeExpiredAuctions, createAuction, deliverColdLead, getAuctionStatus, placeBid, acceptLead, declineLead, notifyOperatorOfContactRequest, notifyOperator, sendOperatorNotice, TIER_CONFIG, DECLINE_REASONS, deliverLeadByHand, remindClosingAuctions, openAuctionsFor, portalAuctionLink } from './auction.js';
 import { registerFirm, sendVerificationCode, verifyPhoneCode, validateToken, updateFirmSubscription, getFirm, updateFirmProfile, createMagicLink, VerificationLimitError, recentDeclineCounts, linkOpensAuction, linkOpensLead, linkOpensAccount, approveFirm, setSubscriptionStatus, ensureStripeCustomer, changeUnverifiedPhone, setCustomerCard, findFirmByEmail } from './firms.js';
 import { rateLimit } from './rate-limit.js';
 import { alertOperatorOnce, tellOwnerOfProviders, tellOwnerOfModelChains, recordInteraction, deepHealth, runSteps, recordJobRun, reportFailedSteps, sendDailyDigest } from './operations.js';
@@ -15,6 +15,10 @@ import nodemailer from 'nodemailer';
 import { createSubscriptionCheckout, createPortalSession, constructWebhookEvent, getSubscriptionDetails, getCustomerCard, liveSubscription } from './stripe.js';
 import { runJob, replyClock, MIN_TIME_LEFT_MS, configureProviders, withoutKeys, providerPing, providerStates, adaptersFor } from './providers.js';
 import { modelWatch } from './model-watch.js';
+import { statuteWatch } from './statute-watch.js';
+import { sourceReader } from './statute-text.js';
+import { readLawFile, snapshotReader } from './law-file.js';
+import { CURRENT_LAW_FILE, STATUTE_TEXTS_DIR, SITE_NAME } from './gate-config.js';
 import { providerState } from './provider-state.js';
 import { configureModelSettings, chains, measurements, saveChains, recordMeasurements, checkMeasurementRows, KEY_NAMES } from './model-settings.js';
 import { MODELS } from './model-registry.js';
@@ -1115,7 +1119,18 @@ async function modelsInUse() {
 }
 
 function watchProviderModels() {
-  return modelWatch({ today: new Date(), sqlClient: sql, adapters: adaptersFor(process.env), notify: notifyOperator, inUse: modelsInUse, registry: MODELS, site: 'NYCMalpractice.ai' });
+  return modelWatch({ today: new Date(), sqlClient: sql, adapters: adaptersFor(process.env), notify: notifyOperator, inUse: modelsInUse, registry: MODELS, site: SITE_NAME });
+}
+
+// The nightly read of every statute the notes rest on (statute-watch.js): reads and tells the owner, changes nothing a visitor
+// reads. The key is read when the step runs, so that a deploy without it fails this step, which is reported that night.
+function watchStatutes() {
+  const key = process.env.NYSENATE_API_KEY;
+  if (!key) throw new Error('NYSENATE_API_KEY is not set in this deployment');
+  return statuteWatch({
+    today: new Date(), sqlClient: sql, law: readLawFile(CURRENT_LAW_FILE), snapshotOf: snapshotReader(STATUTE_TEXTS_DIR),
+    readSource: sourceReader(key), notify: sendOperatorNotice, site: SITE_NAME,
+  });
 }
 
 // Combined nightly job — this is the path vercel.json actually schedules. Until it existed the
@@ -1154,6 +1169,27 @@ app.get('/api/cron', async (req, res) => {
       declined: results['decline overdue leads'] ?? null,
       purged: { ...(results['delete old conversations'] || {}), ...(results['delete old lead records'] || {}) },
       backup: results['back up business records offsite']?.status || null,
+      failed: failed.map(f => f.step),
+    });
+  } catch (err) {
+    serverError(req, res, err);
+  }
+});
+
+// The statute watch has a job of its own at 06:00 UTC, the hour before the nightly one: the Senate's API is slow enough that
+// reading the watched sections must not share the nightly job's minute, and Vercel stops a function at 60 seconds.
+app.get('/api/cron/statute-watch', async (req, res) => {
+  if (!verifyCron(req, res)) return;
+  try {
+    const { results, failed } = await runSteps([['check the watched statutes', watchStatutes]]);
+    await recordJobRun('statute-watch', failed).catch(err => console.error('Recording the statute watch run failed:', err.message));
+    await reportFailedSteps('statute watch', failed);
+    const watched = results['check the watched statutes'];
+    res.status(failed.length ? 500 : 200).json({
+      ok: failed.length === 0,
+      checked: watched?.checked ?? null,
+      differing: watched?.differing ?? null,
+      unread: watched?.unread ?? null,
       failed: failed.map(f => f.step),
     });
   } catch (err) {

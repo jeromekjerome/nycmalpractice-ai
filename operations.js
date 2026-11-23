@@ -12,9 +12,12 @@ import { APP_URL } from './site.js';
 import { withoutKeys, providerOfModel } from './providers.js';
 import { chains, unmeasuredOverride } from './model-settings.js';
 import { DEFAULTS } from './models.js';
+import { SITE_NAME, CURRENT_LAW_FILE } from './gate-config.js';
+import { readLawFile } from './law-file.js';
+import { statuteWatchSummary } from './statute-watch.js';
 
 const sql = neon(process.env.DATABASE_URL);
-const SITE = 'NYCMalpractice.ai';
+const SITE = SITE_NAME;
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
@@ -189,6 +192,20 @@ async function repliesByModel() {
   }
 }
 
+// The daily summary's part on the statute watch (statute-watch.js): when it last ran, what differs, what could not be read, and
+// the sources due for a review by hand. A null lastRun means the job log holds no run of it, and nothing else. Never fails: what
+// cannot be read leaves the section out, and the rest of the summary goes as it was.
+async function statuteWatchSection() {
+  try {
+    const [last] = await sql`SELECT ran_at, ok FROM job_runs WHERE job = 'statute-watch' ORDER BY ran_at DESC LIMIT 1`;
+    const lastRun = last ? { ranAt: last.ran_at, ok: last.ok } : null;
+    return await statuteWatchSummary({ sqlClient: sql, law: readLawFile(CURRENT_LAW_FILE), today: new Date(), lastRun });
+  } catch (err) {
+    console.error('[digest] The statute watch could not be read, so the summary goes without it:', withoutKeys(err?.message ?? err));
+    return '';
+  }
+}
+
 function repliesLine({ rows, first }) {
   const counted = list => list.map(row => `${escapeHtml(row.model)} ${row.replies}`).join(', ');
   if (!rows.length) return '<p>Replies by the model that wrote them: none.</p>';
@@ -204,7 +221,8 @@ function repliesLine({ rows, first }) {
 // (provider-state.js) and the model settings (model-settings.js) work without their tables, on every provider up and
 // the built-in chains, so only this check shows that npm run setup-db was not run.
 const REQUIRED_COLUMNS = ['firms.card_declined_at', 'leads.decline_reason', 'user_interactions.outcome', 'job_runs.ran_at', 'ai_usage.created_at', 'auctions.reminder_sent_at',
-  'ai_provider_state.failed_replies', 'app_settings.value', 'model_measurements.bar_ok', 'provider_model_lists.models'];
+  'ai_provider_state.failed_replies', 'app_settings.value', 'model_measurements.bar_ok', 'provider_model_lists.models',
+  'statute_watch.unread_emailed_at'];
 let deepHealthCache = { at: 0, value: null };
 
 // For an uptime monitor: is the database reachable, does it have the columns the code uses, and did the nightly job
@@ -212,7 +230,7 @@ let deepHealthCache = { at: 0, value: null };
 export async function deepHealth() {
   const cacheMs = Number(process.env.HEALTH_DEEP_CACHE_MS ?? 30_000);
   if (deepHealthCache.value && Date.now() - deepHealthCache.at < cacheMs) return deepHealthCache.value;
-  const checks = { database: 'down', schema: 'unknown', nightlyJob: 'unknown' };
+  const checks = { database: 'down', schema: 'unknown', nightlyJob: 'unknown', statuteWatch: 'unknown', statuteWatchLastOk: null };
   try {
     await timeLimit(sql`SELECT 1`, 3000, 'The database');
     checks.database = 'ok';
@@ -231,11 +249,22 @@ export async function deepHealth() {
       checks.nightlyJob = !job?.last_run ? 'not run yet'
         : Date.now() - new Date(job.last_run).getTime() > 26 * HOUR ? 'late'
           : job.last_ok ? 'ok' : 'failed';
+      // The nightly read of the watched statutes (statute-watch.js), judged the same way. Not run yet is healthy: the
+      // demo has no scheduled job.
+      const [watch] = await timeLimit(sql`
+        SELECT (SELECT ok FROM job_runs WHERE job = 'statute-watch' ORDER BY ran_at DESC LIMIT 1) AS last_ok,
+               (SELECT max(ran_at) FROM job_runs WHERE job = 'statute-watch') AS last_run,
+               (SELECT max(ran_at) FROM job_runs WHERE job = 'statute-watch' AND ok) AS last_ok_at`, 3000, 'The statute watch check');
+      checks.statuteWatch = !watch?.last_run ? 'not run yet'
+        : Date.now() - new Date(watch.last_run).getTime() > 26 * HOUR ? 'late'
+          : watch.last_ok ? 'ok' : 'failed';
+      checks.statuteWatchLastOk = watch?.last_ok_at ? new Date(watch.last_ok_at).toISOString() : null;
     }
   } catch (err) {
     console.error('[health] deep check failed:', err.message);
   }
-  const ok = checks.database === 'ok' && checks.schema === 'ok' && ['ok', 'not run yet'].includes(checks.nightlyJob);
+  const ok = checks.database === 'ok' && checks.schema === 'ok' && ['ok', 'not run yet'].includes(checks.nightlyJob)
+    && ['ok', 'not run yet'].includes(checks.statuteWatch);
   deepHealthCache = { at: Date.now(), value: { ok, ...checks } };
   return deepHealthCache.value;
 }
@@ -293,6 +322,8 @@ export async function sendDailyDigest({ failed = [] } = {}) {
   const override = await unmeasuredOverride();
   // Never fails: a query that cannot be read leaves its line out.
   const replies = await repliesByModel();
+  // Never fails: a watch that cannot be read leaves its section out.
+  const watch = await statuteWatchSection();
   const row = (label, value) => `<tr><td style="color:#666;padding:4px 12px 4px 0">${label}</td><td><strong>${escapeHtml(value ?? 0)}</strong></td></tr>`;
   const html = `
     <div style="font-family:sans-serif;max-width:600px">
@@ -313,6 +344,7 @@ export async function sendDailyDigest({ failed = [] } = {}) {
       ${day?.unplaced ? `<p>Deliver waiting requests by hand from the <a href="${escapeHtml(APP_URL)}/admin.html">admin page</a>.</p>` : ''}
       ${replies ? repliesLine(replies) : ''}
       ${override ? overrideLine(override) : ''}
+      ${watch ? `<h3 style="margin-bottom:0.25rem">Statute watch</h3>${watch}` : ''}
       <p>${failed.length ? `The nightly job had ${failed.length} failed step${failed.length === 1 ? '' : 's'}: ${failed.map(f => escapeHtml(f.step)).join(', ')}.` : 'The nightly job ran every step.'}</p>
     </div>`;
   await notifyOperator(`${SITE} daily summary: ${day?.messages || 0} messages, ${day?.requests || 0} contact requests, ${day?.leads || 0} leads`, html);

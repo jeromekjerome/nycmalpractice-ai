@@ -238,6 +238,24 @@ async function setup() {
     )
   `;
 
+  // What the nightly read of the watched statutes (statute-watch.js) has seen and told the owner, one row to a source.
+  await sql`
+    CREATE TABLE IF NOT EXISTS statute_watch (
+      source_id           TEXT PRIMARY KEY,
+      seen_fingerprint    TEXT,
+      seen_text           TEXT,
+      seen_active_date    TEXT,
+      differs_since       TIMESTAMPTZ,
+      emailed_fingerprint TEXT,
+      email_claimed_at    TIMESTAMPTZ,
+      last_checked_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_read_at        TIMESTAMPTZ,
+      unread_since        DATE,
+      unread_emailed_at   TIMESTAMPTZ,
+      last_error          TEXT
+    )
+  `;
+
   // The last decisions found for each case type, used when CourtListener cannot be searched (case-memory.js).
   await sql`
     CREATE TABLE IF NOT EXISTS search_cache (

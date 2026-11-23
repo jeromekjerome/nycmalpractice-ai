@@ -371,9 +371,11 @@
         "USC-28-2401",
         "USC-42-233",
         "EPTL-5-4.1",
-        "CPLR-208-A"
+        "CPLR-208-A",
+        "GML-50-I",
+        "CCA-10"
       ],
-      "about": "the first part of the malpractice period, \"2 years and 6 months\", in the reply prompt for a patient: the deadline, Lavern's Law, the foreign object and the comparison with the federal claim (4); the written claim to a federal agency, whose providers include community health centers with staff deemed federal employees, in both reply prompts (2); the wrongful death limitation period, in the reply prompt for a family (1); and the two-year window after release from custody that section 208-a of the CPLR gives a patient hurt while held in a state prison or a local jail, in the reply prompt for a patient (1)"
+      "about": "the first part of the malpractice period, \"2 years and 6 months\", in the reply prompt for a patient: the deadline, Lavern's Law, the foreign object and the comparison with the federal claim (4); the written claim to a federal agency, whose providers include community health centers with staff deemed federal employees, in both reply prompts (2); the wrongful death limitation period, in the reply prompt for a family (1); and the two-year window after release from custody that section 208-a of the CPLR gives a patient hurt while held in a state prison or a local jail, in the reply prompt for a patient (1) The custody occurrence rests also on subdivision 6 of section 50-i of the General Municipal Law and subdivision 11 of section 10 of the Court of Claims Act, which give the same window against a city and the State; each is a source."
     },
     {
       "file": "ask.js",
@@ -495,9 +497,10 @@
         "HHC-20",
         "PAL-3316",
         "PAL-3415",
-        "PAL-3641"
+        "PAL-3641",
+        "CCA-10"
       ],
-      "about": "the wrongful death limitation period, in the lead scorer's prompt (1), and the time to sue a public hospital for a death, in the prompt's public hospitals line (1). Against a public hospital that time is set by the General Municipal Law for a city or county hospital, and by section 2981 of the Public Authorities Law for NYC Health + Hospitals (the Health and Hospitals Corporation Act) and the county health care corporations (Westchester, Nassau and Erie), whose own sections send the action there; each is a source."
+      "about": "the wrongful death limitation period, in the lead scorer's prompt (1), and the time to sue a public hospital for a death, in the prompt's public hospitals line (1). Against a public hospital that time is set by the General Municipal Law for a city or county hospital, and by section 2981 of the Public Authorities Law for NYC Health + Hospitals (the Health and Hospitals Corporation Act) and the county health care corporations (Westchester, Nassau and Erie), whose own sections send the action there; each is a source. For a State hospital, section 10 of the Court of Claims Act gives the 2 years for a death, and it is a source."
     },
     {
       "file": "auction.js",
@@ -528,9 +531,10 @@
         "PAL-3316",
         "PAL-3415",
         "PAL-3641",
-        "PAL-2980"
+        "PAL-2980",
+        "CCA-10"
       ],
-      "about": "a public hospital's notice of claim, in the lead scorer's prompt, beside the time to sue a city or county hospital, and, for a death, counted from the estate representative's appointment. For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source. The notice for the family's claim against NYC Health + Hospitals and the county health care corporations rests also on section 2980 of the Public Authorities Law, which requires it for a wrongful death action and to which the corporations' own sections send that action; it is a source."
+      "about": "a public hospital's notice of claim, in the lead scorer's prompt, beside the time to sue a city or county hospital, and, for a death, counted from the estate representative's appointment. For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source. The notice for the family's claim against NYC Health + Hospitals and the county health care corporations rests also on section 2980 of the Public Authorities Law, which requires it for a wrongful death action and to which the corporations' own sections send that action; it is a source. For a State hospital, section 10 of the Court of Claims Act gives the 90 days (a claim or a notice of intention), and it is a source."
     },
     {
       "file": "auction.js",
@@ -1046,9 +1050,10 @@
         "PAL-3316",
         "PAL-3415",
         "PAL-3641",
-        "CPLR-208-A"
+        "CPLR-208-A",
+        "CCA-10"
       ],
-      "about": "the wrongful death limitation period, in the warning and in the list of special rules (2); the first part of the malpractice period, \"2 years and 6 months\": the general rule, the foreign object and Lavern's Law (3); the time to sue a public hospital for a death, in the list's public hospitals item (1); and the two-year window after release from custody that section 208-a of the CPLR adds for someone hurt while held in a state prison or a local jail, in the list's custody item (1). Against a public hospital the time to sue for a death is set by the General Municipal Law for a city or county hospital, and by section 2981 of the Public Authorities Law for NYC Health + Hospitals (the Health and Hospitals Corporation Act) and the county health care corporations (Westchester, Nassau and Erie), whose own sections send the action there; each is a source."
+      "about": "the wrongful death limitation period, in the warning and in the list of special rules (2); the first part of the malpractice period, \"2 years and 6 months\": the general rule, the foreign object and Lavern's Law (3); the time to sue a public hospital for a death, in the list's public hospitals item (1); and the two-year window after release from custody that section 208-a of the CPLR adds for someone hurt while held in a state prison or a local jail, in the list's custody item (1). Against a public hospital the time to sue for a death is set by the General Municipal Law for a city or county hospital, and by section 2981 of the Public Authorities Law for NYC Health + Hospitals (the Health and Hospitals Corporation Act) and the county health care corporations (Westchester, Nassau and Erie), whose own sections send the action there; each is a source. The custody occurrence rests also on subdivision 6 of section 50-i of the General Municipal Law and subdivision 11 of section 10 of the Court of Claims Act, which give the same window against a city and the State; each is a source."
     },
     {
       "file": "public/disclaimer.html",

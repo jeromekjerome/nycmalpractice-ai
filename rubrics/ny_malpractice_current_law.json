@@ -1,23 +1,267 @@
 {
   "id": "ny_malpractice_current_law",
   "jurisdiction": "New York",
-  "as_of": "2026-11-14",
   "purpose": "New York law that the models this app calls may state wrongly: changes after their training data, and bills they may mistake for law. The notes are injected into the drafting prompt, the Gatekeeper evaluator and the case-analysis prompt so replies state current law. Review and update this file whenever New York medical malpractice or wrongful death law changes.",
   "notes": [
     {
       "id": "NY-WD-GRIEVING-FAMILIES-ACT",
       "topic": "Wrongful death deadline and damages — EPTL §5-4.1 and §5-4.3",
-      "rule": "The Grieving Families Act is not law: the Governor has vetoed it four times, most recently on December 5, 2025. A wrongful death action must still be started within 2 years of the death (EPTL §5-4.1), and damages are still limited to the family's pecuniary losses (EPTL §5-4.3) — such as lost financial support and services and, for a child, the loss of a parent's guidance — plus medical and funeral expenses. Survivors cannot recover for their grief or loss of companionship. The patient's own conscious pain and suffering is recovered through the survival claim (EPTL §11-3.2)."
+      "rule": "The Grieving Families Act is not law: the Governor has vetoed it four times, most recently on December 5, 2025. A wrongful death action must still be started within 2 years of the death (EPTL §5-4.1), and damages are still limited to the family's pecuniary losses (EPTL §5-4.3) — such as lost financial support and services and, for a child, the loss of a parent's guidance — plus medical and funeral expenses. Survivors cannot recover for their grief or loss of companionship. The patient's own conscious pain and suffering is recovered through the survival claim (EPTL §11-3.2).",
+      "sources": [
+        "EPTL-5-4.1",
+        "EPTL-5-4.3",
+        "EPTL-11-3.2",
+        "BILL-GRIEVING-FAMILIES-ACT"
+      ]
     },
     {
       "id": "NY-2026-EE-NOT-MALPRACTICE",
       "topic": "The 2026 motor-vehicle tort reform does not reach medical malpractice",
-      "rule": "Part EE of Chapter 58 of the Laws of 2026, in effect May 26, 2026, changed rules for motor vehicle (no-fault) cases only: the serious injury threshold of Insurance Law §5102(d), Insurance Law §5104, and a new CPLR §1411(b) that bars a motor-vehicle claimant who is more at fault than the defendants. It did not change medical malpractice law. CPLR §1411(a) pure comparative negligence still applies to malpractice: a patient's own fault reduces damages in proportion but does not bar recovery. CPLR §214-a, EPTL §5-4.1 and the 90-day notice of claim (GML §50-e) are unchanged."
+      "rule": "Part EE of Chapter 58 of the Laws of 2026, in effect May 26, 2026, changed rules for motor vehicle (no-fault) cases only: the serious injury threshold of Insurance Law §5102(d), Insurance Law §5104, and a new CPLR §1411(b) that bars a motor-vehicle claimant who is more at fault than the defendants. It did not change medical malpractice law. CPLR §1411(a) pure comparative negligence still applies to malpractice: a patient's own fault reduces damages in proportion but does not bar recovery. CPLR §214-a, EPTL §5-4.1 and the 90-day notice of claim (GML §50-e) are unchanged.",
+      "sources": [
+        "LAWS-2026-58",
+        "INS-5102",
+        "INS-5104",
+        "CPLR-1411",
+        "CPLR-214-A",
+        "EPTL-5-4.1",
+        "GML-50-E"
+      ]
     },
     {
       "id": "US-FTCA-FEDERAL-PROVIDERS",
       "topic": "Federal providers — Federal Tort Claims Act, 28 U.S.C. §§2401(b) and 2675",
-      "rule": "Malpractice by a federal provider is a claim against the United States under the Federal Tort Claims Act, not under CPLR §214-a: VA hospitals and clinics, military hospitals, the Indian Health Service, and community health centers whose doctors and staff are deemed federal employees under 42 U.S.C. §233 (many New York City community health centers are). A written administrative claim, usually on Standard Form 95, must be presented to the responsible agency within 2 years after the claim accrues. Federal law decides when that is: generally when the patient knew or should have known of the injury and its cause, and federal courts in New York have also applied a continuous-treatment rule. It can come sooner than CPLR §214-a's 2 years and 6 months, and New York's own extensions such as Lavern's Law do not apply. No lawsuit may be filed until the agency denies the claim in writing or 6 months pass without a final decision, and the lawsuit must be filed within 6 months after a written denial. Active-duty service members generally cannot sue (they have a separate administrative claim), and care by an independent contractor at a federal facility may not be covered; whether a provider is covered is a question for an attorney to check promptly."
+      "rule": "Malpractice by a federal provider is a claim against the United States under the Federal Tort Claims Act, not under CPLR §214-a: VA hospitals and clinics, military hospitals, the Indian Health Service, and community health centers whose doctors and staff are deemed federal employees under 42 U.S.C. §233 (many New York City community health centers are). A written administrative claim, usually on Standard Form 95, must be presented to the responsible agency within 2 years after the claim accrues. Federal law decides when that is: generally when the patient knew or should have known of the injury and its cause, and federal courts in New York have also applied a continuous-treatment rule. It can come sooner than CPLR §214-a's 2 years and 6 months, and New York's own extensions such as Lavern's Law do not apply. No lawsuit may be filed until the agency denies the claim in writing or 6 months pass without a final decision, and the lawsuit must be filed within 6 months after a written denial. Active-duty service members generally cannot sue (they have a separate administrative claim), and care by an independent contractor at a federal facility may not be covered; whether a provider is covered is a question for an attorney to check promptly.",
+      "sources": [
+        "USC-28-2401",
+        "USC-28-2675",
+        "CPLR-214-A",
+        "USC-42-233"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "id": "CCA-10",
+      "kind": "section",
+      "name": "Court of Claims Act § 10",
+      "lawId": "CTC",
+      "locationId": "10",
+      "url": "https://www.nysenate.gov/legislation/laws/CTC/10",
+      "fingerprint": "sha256:51725b5b6c8d20071717ca27ba0e8c21c639b4b32a6f7d78d9dc0284b41d490c",
+      "approved_on": "2026-11-23",
+      "active_date": "2026-02-20"
+    },
+    {
+      "id": "CPLR-208",
+      "kind": "section",
+      "name": "CPLR § 208",
+      "lawId": "CVP",
+      "locationId": "208",
+      "url": "https://www.nysenate.gov/legislation/laws/CVP/208",
+      "fingerprint": "sha256:eda01c101231d297d0418405520c6802e13f7973516968a84ca1e26fe70f34bb",
+      "approved_on": "2026-11-23",
+      "active_date": "2019-02-15"
+    },
+    {
+      "id": "CPLR-210",
+      "kind": "section",
+      "name": "CPLR § 210",
+      "lawId": "CVP",
+      "locationId": "210",
+      "url": "https://www.nysenate.gov/legislation/laws/CVP/210",
+      "fingerprint": "sha256:3ec5ccbec552f30ea6906632a2cc74ebc281fd8c7d83c8f7e9185456848efe54",
+      "approved_on": "2026-11-23",
+      "active_date": "2014-09-22"
+    },
+    {
+      "id": "CPLR-214-A",
+      "kind": "section",
+      "name": "CPLR § 214-a",
+      "lawId": "CVP",
+      "locationId": "214-A",
+      "url": "https://www.nysenate.gov/legislation/laws/CVP/214-A",
+      "fingerprint": "sha256:dff46314f388daad06a43e0eb3f0b3d8081579b0a4e20c94e785752e756af8c2",
+      "approved_on": "2026-11-23",
+      "active_date": "2018-02-02"
+    },
+    {
+      "id": "CPLR-1411",
+      "kind": "section",
+      "name": "CPLR § 1411",
+      "lawId": "CVP",
+      "locationId": "1411",
+      "url": "https://www.nysenate.gov/legislation/laws/CVP/1411",
+      "fingerprint": "sha256:6f4cb4aa1350eb26f55171abd76b03a2e437a7264a5dfa19da1ae16f6fbfa19d",
+      "approved_on": "2026-11-23",
+      "active_date": "2026-05-29"
+    },
+    {
+      "id": "CPLR-3012-A",
+      "kind": "section",
+      "name": "CPLR § 3012-a",
+      "lawId": "CVP",
+      "locationId": "3012-A",
+      "url": "https://www.nysenate.gov/legislation/laws/CVP/3012-A",
+      "fingerprint": "sha256:bb43d364a05ec613263293eb75b3ed944aa0029cabdc93aae1c2c7bcf47acf67",
+      "approved_on": "2026-11-23",
+      "active_date": "2014-09-22"
+    },
+    {
+      "id": "EPTL-5-4.1",
+      "kind": "section",
+      "name": "EPTL § 5-4.1",
+      "lawId": "EPT",
+      "locationId": "5-4.1",
+      "url": "https://www.nysenate.gov/legislation/laws/EPT/5-4.1",
+      "fingerprint": "sha256:f4b9d3d95460793b4f392fd45d26f316fc44fd8489c5a43f035c8a2ce75c7d90",
+      "approved_on": "2026-11-23",
+      "active_date": "2014-09-22"
+    },
+    {
+      "id": "EPTL-5-4.3",
+      "kind": "section",
+      "name": "EPTL § 5-4.3",
+      "lawId": "EPT",
+      "locationId": "5-4.3",
+      "url": "https://www.nysenate.gov/legislation/laws/EPT/5-4.3",
+      "fingerprint": "sha256:a47bd768ef0328df576abe17e3f16e18ce4243f073a082c86db4b52056ffda75",
+      "approved_on": "2026-11-23",
+      "active_date": "2014-09-22"
+    },
+    {
+      "id": "EPTL-11-3.2",
+      "kind": "section",
+      "name": "EPTL § 11-3.2",
+      "lawId": "EPT",
+      "locationId": "11-3.2",
+      "url": "https://www.nysenate.gov/legislation/laws/EPT/11-3.2",
+      "fingerprint": "sha256:897aa5d98ae47b8aebfda2a3a094aaadb72570958f1094f903226bf95788bcb2",
+      "approved_on": "2026-11-23",
+      "active_date": "2014-09-22"
+    },
+    {
+      "id": "GML-50-E",
+      "kind": "section",
+      "name": "General Municipal Law § 50-e",
+      "lawId": "GMU",
+      "locationId": "50-E",
+      "url": "https://www.nysenate.gov/legislation/laws/GMU/50-E",
+      "fingerprint": "sha256:8ede020982600a198951b5d2bb47374065f8a79fbee56856a056ea4762737ae8",
+      "approved_on": "2026-11-23",
+      "active_date": "2026-02-20"
+    },
+    {
+      "id": "GML-50-I",
+      "kind": "section",
+      "name": "General Municipal Law § 50-i",
+      "lawId": "GMU",
+      "locationId": "50-I",
+      "url": "https://www.nysenate.gov/legislation/laws/GMU/50-I",
+      "fingerprint": "sha256:55e3957449153c3c20ac3f5a55fd05c5abba4011295816661152c1a8c32aacd6",
+      "approved_on": "2026-11-23",
+      "active_date": "2026-02-20"
+    },
+    {
+      "id": "INS-5102",
+      "kind": "section",
+      "name": "Insurance Law § 5102",
+      "lawId": "ISC",
+      "locationId": "5102",
+      "url": "https://www.nysenate.gov/legislation/laws/ISC/5102",
+      "fingerprint": "sha256:120f7bbeb16f4ed709df1c0a8ba6858f7e1ca535b7ed794e8c1283248235a485",
+      "approved_on": "2026-11-23",
+      "active_date": "2026-05-29"
+    },
+    {
+      "id": "INS-5104",
+      "kind": "section",
+      "name": "Insurance Law § 5104",
+      "lawId": "ISC",
+      "locationId": "5104",
+      "url": "https://www.nysenate.gov/legislation/laws/ISC/5104",
+      "fingerprint": "sha256:1ed2f5f3e0b699a271ace01ec6b7f099eb35ba5bfa7a551acc86ffbc22693fae",
+      "approved_on": "2026-11-23",
+      "active_date": "2026-05-29"
+    },
+    {
+      "id": "HHC-20",
+      "kind": "section",
+      "name": "New York City Health and Hospitals Corporation Act § 20",
+      "lawId": "HHC",
+      "locationId": "20",
+      "url": "https://www.nysenate.gov/legislation/laws/HHC/20",
+      "fingerprint": "sha256:ee616a2c54c3a192a3a5b8fca98e445a9573036b2f7aca9b64de920a8ed6f416",
+      "approved_on": "2026-11-23",
+      "active_date": "2014-09-22"
+    },
+    {
+      "id": "PAL-3316",
+      "kind": "section",
+      "name": "Public Authorities Law § 3316 (Westchester County Health Care Corporation)",
+      "lawId": "PBA",
+      "locationId": "3316",
+      "url": "https://www.nysenate.gov/legislation/laws/PBA/3316",
+      "fingerprint": "sha256:e1cda04fa985b67fd25a5c057ee8c021c1acb75b6009ee9fb3634a9adcbf0b70",
+      "approved_on": "2026-11-23",
+      "active_date": "2014-09-22"
+    },
+    {
+      "id": "PAL-3415",
+      "kind": "section",
+      "name": "Public Authorities Law § 3415 (Nassau Health Care Corporation)",
+      "lawId": "PBA",
+      "locationId": "3415",
+      "url": "https://www.nysenate.gov/legislation/laws/PBA/3415",
+      "fingerprint": "sha256:41fd375257cb189eb8a8d8a5aba9706bf58858ec09791f3fcab2b7319fc1110f",
+      "approved_on": "2026-11-23",
+      "active_date": "2014-09-22"
+    },
+    {
+      "id": "PAL-3641",
+      "kind": "section",
+      "name": "Public Authorities Law § 3641 (Erie County Medical Center Corporation)",
+      "lawId": "PBA",
+      "locationId": "3641",
+      "url": "https://www.nysenate.gov/legislation/laws/PBA/3641",
+      "fingerprint": "sha256:a5fc8c064cfaf4dcb2add4f0c2f5cdec9a1523ff004ea4c88a59d2b470cfe82f",
+      "approved_on": "2026-11-23",
+      "active_date": "2014-09-22"
+    },
+    {
+      "id": "LAWS-2026-58",
+      "kind": "by_hand",
+      "name": "Chapter 58 of the Laws of 2026 (A.10008-C, Part EE)",
+      "url": "https://www.nysenate.gov/legislation/bills/2025/A10008",
+      "reviewed_on": "2026-11-14"
+    },
+    {
+      "id": "USC-28-2401",
+      "kind": "by_hand",
+      "name": "28 U.S.C. § 2401",
+      "url": "https://www.law.cornell.edu/uscode/text/28/2401",
+      "reviewed_on": "2026-11-14"
+    },
+    {
+      "id": "USC-28-2675",
+      "kind": "by_hand",
+      "name": "28 U.S.C. § 2675",
+      "url": "https://www.law.cornell.edu/uscode/text/28/2675",
+      "reviewed_on": "2026-11-14"
+    },
+    {
+      "id": "USC-42-233",
+      "kind": "by_hand",
+      "name": "42 U.S.C. § 233",
+      "url": "https://www.law.cornell.edu/uscode/text/42/233",
+      "reviewed_on": "2026-11-14"
+    },
+    {
+      "id": "BILL-GRIEVING-FAMILIES-ACT",
+      "kind": "by_hand",
+      "name": "Grieving Families Act (S10171 / A11340, 2025-2026 session; vetoed as S4423 on December 5, 2025)",
+      "url": "https://www.nysenate.gov/legislation/bills/2025/S10171",
+      "reviewed_on": "2026-11-14"
     }
   ]
 }

@@ -2419,15 +2419,19 @@ test('the prompt block reads the same as before, its date now from the sources',
 });
 
 test('the drafting prompt carries the rules for the step and current New York law', () => {
-  assert.equal(loadCurrentLawNotes().jurisdiction, 'New York');
-  const law = renderCurrentLawForPrompt();
-  assert.match(law, /The Grieving Families Act is not law/);
-  assert.match(law, /CPLR §1411\(a\) pure comparative negligence still applies to malpractice/);
+  const law = loadCurrentLawNotes();
+  assert.equal(law.jurisdiction, 'New York');
+  assert.equal(law.as_of, undefined);
+  assert.ok(law.sources.length >= 3 && law.sources.every(source => source.url.startsWith('https://')));
+  const block = renderCurrentLawForPrompt();
+  assert.ok(block.startsWith(`CURRENT NEW YORK LAW (verified as of ${earliestSourceDate(law)}).`));
+  assert.match(block, /The Grieving Families Act is not law/);
+  assert.match(block, /CPLR §1411\(a\) pure comparative negligence still applies to malpractice/);
   const personal = renderRubricForPrompt('personal', 3);
   assert.match(personal, /This is turn 3/);
   assert.match(personal, /CPLR §214-a/);
   assert.match(personal, /Contact Details Requested in the Chat/);
-  assert.ok(personal.includes(law), 'the current-law notes are not in the prompt');
+  assert.ok(personal.includes(block), 'the current-law notes are not in the prompt');
   assert.match(renderRubricForPrompt('estate', 3), /EPTL §5-4\.1/);
 });
 

@@ -6,18 +6,29 @@
     {
       "id": "NY-WD-GRIEVING-FAMILIES-ACT",
       "topic": "Wrongful death deadline and damages — EPTL §5-4.1 and §5-4.3",
-      "rule": "The Grieving Families Act is not law: the Governor has vetoed it four times, most recently on December 5, 2025. A wrongful death action must still be started within 2 years of the death (EPTL §5-4.1), and damages are still limited to the family's pecuniary losses (EPTL §5-4.3) — such as lost financial support and services and, for a child, the loss of a parent's guidance — plus medical and funeral expenses. Survivors cannot recover for their grief or loss of companionship. The patient's own conscious pain and suffering is recovered through the survival claim (EPTL §11-3.2).",
+      "rule": "The Grieving Families Act is not law: the Governor has vetoed it four times, most recently on December 5, 2025. A wrongful death action must still be started within 2 years of the death (EPTL §5-4.1), and damages are still limited to the family's pecuniary losses (EPTL §5-4.3) — such as lost financial support and services and, for a child, the loss of a parent's guidance — plus medical and funeral expenses, and punitive damages only where they would have been recoverable had the patient survived (EPTL §5-4.3(b)), which in malpractice is rare. Survivors cannot recover for their grief or loss of companionship. The patient's own conscious pain and suffering is recovered through the survival claim (EPTL §11-3.2).",
       "sources": [
         "EPTL-5-4.1",
         "EPTL-5-4.3",
         "EPTL-11-3.2",
-        "BILL-GRIEVING-FAMILIES-ACT"
+        "BILL-GRIEVING-FAMILIES-ACT",
+        "EPTL-4-1.1",
+        "EPTL-5-4.4",
+        "GML-50-E",
+        "GML-50-I",
+        "CCA-10",
+        "HHC-20",
+        "PAL-2980",
+        "PAL-2981",
+        "PAL-3316",
+        "PAL-3415",
+        "PAL-3641"
       ]
     },
     {
       "id": "NY-2026-EE-NOT-MALPRACTICE",
       "topic": "The 2026 motor-vehicle tort reform does not reach medical malpractice",
-      "rule": "Part EE of Chapter 58 of the Laws of 2026, in effect May 26, 2026, changed rules for motor vehicle (no-fault) cases only: the serious injury threshold of Insurance Law §5102(d), Insurance Law §5104, and a new CPLR §1411(b) that bars a motor-vehicle claimant who is more at fault than the defendants. It did not change medical malpractice law. CPLR §1411(a) pure comparative negligence still applies to malpractice: a patient's own fault reduces damages in proportion but does not bar recovery. CPLR §214-a, EPTL §5-4.1 and the 90-day notice of claim (GML §50-e) are unchanged.",
+      "rule": "Part EE of Chapter 58 of the Laws of 2026, in effect May 26, 2026, changed rules for motor vehicle (no-fault) cases only: the serious injury threshold of Insurance Law §5102(d), Insurance Law §5104, and a new CPLR §1411(b) that bars a motor-vehicle claimant who is more at fault than the defendants. It did not change medical malpractice law. CPLR §1411(a) pure comparative negligence still applies to malpractice: a patient's own fault reduces damages in proportion but does not bar recovery. Part EE did not change CPLR §214-a, EPTL §5-4.1 or the 90-day notice of claim (GML §50-e).",
       "sources": [
         "LAWS-2026-58",
         "INS-5102",
@@ -25,7 +36,12 @@
         "CPLR-1411",
         "CPLR-214-A",
         "EPTL-5-4.1",
-        "GML-50-E"
+        "GML-50-E",
+        "GML-50-I",
+        "HHC-20",
+        "PAL-3316",
+        "PAL-3415",
+        "PAL-3641"
       ]
     },
     {
@@ -229,6 +245,72 @@
       "active_date": "2014-09-22"
     },
     {
+      "id": "PAL-2980",
+      "kind": "section",
+      "name": "Public Authorities Law § 2980",
+      "lawId": "PBA",
+      "locationId": "2980",
+      "url": "https://www.nysenate.gov/legislation/laws/PBA/2980",
+      "fingerprint": "sha256:1ee2a45614a109ba8f2f676b5caa2b700c0582bcbb7040d99369761dfb40a1e2",
+      "approved_on": "2026-11-23",
+      "active_date": "2014-09-22"
+    },
+    {
+      "id": "PAL-2981",
+      "kind": "section",
+      "name": "Public Authorities Law § 2981",
+      "lawId": "PBA",
+      "locationId": "2981",
+      "url": "https://www.nysenate.gov/legislation/laws/PBA/2981",
+      "fingerprint": "sha256:e6cb80ec438a574b7b88f8a5abac7b53ce7bcdb2c0c35859911107fb7a2981e8",
+      "approved_on": "2026-11-23",
+      "active_date": "2014-09-22"
+    },
+    {
+      "id": "CPLR-208-A",
+      "kind": "section",
+      "name": "CPLR § 208-a",
+      "lawId": "CVP",
+      "locationId": "208-A",
+      "url": "https://www.nysenate.gov/legislation/laws/CVP/208-A",
+      "fingerprint": "sha256:c14fb9e7e5bd3a735f2dd682a2630761646b3bbc9c6bad56d49db8fb789f8d31",
+      "approved_on": "2026-11-23",
+      "active_date": "2026-02-20"
+    },
+    {
+      "id": "EPTL-4-1.1",
+      "kind": "section",
+      "name": "EPTL § 4-1.1",
+      "lawId": "EPT",
+      "locationId": "4-1.1",
+      "url": "https://www.nysenate.gov/legislation/laws/EPT/4-1.1",
+      "fingerprint": "sha256:8013b91b86853f8d5586a2744c4e1a75dad5b5a214507386990df78d30318597",
+      "approved_on": "2026-11-23",
+      "active_date": "2019-11-01"
+    },
+    {
+      "id": "EPTL-5-4.4",
+      "kind": "section",
+      "name": "EPTL § 5-4.4",
+      "lawId": "EPT",
+      "locationId": "5-4.4",
+      "url": "https://www.nysenate.gov/legislation/laws/EPT/5-4.4",
+      "fingerprint": "sha256:47b3d7edac0be19c6e8540f536a194ab93df4b4360bc318b2e06e2635face29f",
+      "approved_on": "2026-11-23",
+      "active_date": "2014-09-22"
+    },
+    {
+      "id": "CPLR-1601",
+      "kind": "section",
+      "name": "CPLR § 1601",
+      "lawId": "CVP",
+      "locationId": "1601",
+      "url": "https://www.nysenate.gov/legislation/laws/CVP/1601",
+      "fingerprint": "sha256:df3f6ad5755f0b339cb8f1dfbaa0db0d29a0cb3f751219fb3c66efa711c108c4",
+      "approved_on": "2026-11-23",
+      "active_date": "2014-09-22"
+    },
+    {
       "id": "LAWS-2026-58",
       "kind": "by_hand",
       "name": "Chapter 58 of the Laws of 2026 (A.10008-C, Part EE)",
@@ -339,9 +421,10 @@
         "HHC-20",
         "PAL-3316",
         "PAL-3415",
-        "PAL-3641"
+        "PAL-3641",
+        "PAL-2980"
       ],
-      "about": "the notice of claim to NYC Health + Hospitals or another city- or county-run hospital, in the reply prompt for a patient (1), and the same notice for a wrongful death claim, counted from the estate representative's appointment, in the reply prompt for a family (1). For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source. NEEDS A SOURCE (in part): section 2980 of the Public Authorities Law, which requires the notice of claim for a wrongful death action against NYC Health + Hospitals or a county health care corporation; the corporations' own sections among the sources send that action to it."
+      "about": "the notice of claim to NYC Health + Hospitals or another city- or county-run hospital, in the reply prompt for a patient (1), and the same notice for a wrongful death claim, counted from the estate representative's appointment, in the reply prompt for a family (1). For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source. The notice for the family's claim against NYC Health + Hospitals and the county health care corporations rests also on section 2980 of the Public Authorities Law, which requires it for a wrongful death action and to which the corporations' own sections send that action; it is a source."
     },
     {
       "file": "ask.js",
@@ -376,9 +459,10 @@
         "PAL-3316",
         "PAL-3415",
         "PAL-3641",
-        "CCA-10"
+        "CCA-10",
+        "PAL-2980"
       ],
-      "about": "a public hospital's notice of claim, in the preliminary assessment the reply prompt for a patient asks for and in the case analysis's rule for its deadline warning; the hospital may be one run by New York City, a county or the State (the Court of Claims Act). For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source."
+      "about": "a public hospital's notice of claim, in the preliminary assessment the reply prompt for a patient asks for and in the case analysis's rule for its deadline warning; the hospital may be one run by New York City, a county or the State (the Court of Claims Act). For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source. The case analysis's rule serves families too, and the notice for the family's claim against NYC Health + Hospitals and the county health care corporations rests also on section 2980 of the Public Authorities Law, which requires it for a wrongful death action and to which the corporations' own sections send that action; it is a source."
     },
     {
       "file": "ask.js",
@@ -436,9 +520,10 @@
         "HHC-20",
         "PAL-3316",
         "PAL-3415",
-        "PAL-3641"
+        "PAL-3641",
+        "PAL-2980"
       ],
-      "about": "a public hospital's notice of claim, in the lead scorer's prompt, beside the time to sue a city or county hospital. For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source."
+      "about": "a public hospital's notice of claim, in the lead scorer's prompt, beside the time to sue a city or county hospital. For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source. The lead scorer scores families' leads too, and the notice for the family's claim against NYC Health + Hospitals and the county health care corporations rests also on section 2980 of the Public Authorities Law, which requires it for a wrongful death action and to which the corporations' own sections send that action; it is a source."
     },
     {
       "file": "auction.js",
@@ -496,9 +581,10 @@
         "PAL-3316",
         "PAL-3415",
         "PAL-3641",
-        "CCA-10"
+        "CCA-10",
+        "PAL-2980"
       ],
-      "about": "the written notice the module warns of for a public hospital run by New York City, a county or the State (the Court of Claims Act for the State), in the comment on the hospital match. For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source."
+      "about": "the written notice the module warns of for a public hospital run by New York City, a county or the State (the Court of Claims Act for the State), in the comment on the hospital match. For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source. The module's notice is shown to families too, and the notice for the family's claim against NYC Health + Hospitals and the county health care corporations rests also on section 2980 of the Public Authorities Law, which requires it for a wrongful death action and to which the corporations' own sections send that action; it is a source."
     },
     {
       "file": "deadlines.js",
@@ -511,9 +597,10 @@
         "PAL-3316",
         "PAL-3415",
         "PAL-3641",
-        "CCA-10"
+        "CCA-10",
+        "PAL-2980"
       ],
-      "about": "the notice the module warns of for a public hospital, in the comment recounting the old false alarm. For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source."
+      "about": "the notice the module warns of for a public hospital, in the comment recounting the old false alarm. For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source. The module's notice is shown to families too, and the notice for the family's claim against NYC Health + Hospitals and the county health care corporations rests also on section 2980 of the Public Authorities Law, which requires it for a wrongful death action and to which the corporations' own sections send that action; it is a source."
     },
     {
       "file": "deadlines.js",
@@ -576,16 +663,17 @@
         "PAL-3316",
         "PAL-3415",
         "PAL-3641",
-        "CCA-10"
+        "CCA-10",
+        "PAL-2980"
       ],
-      "about": "the government notice deadline, a label the shared file keeps for the sister app, which this app's deadline module never returns (1), and the public hospital notice deadline, for a hospital run by New York City, a county or the State (1), both named in the summary email. For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source."
+      "about": "the government notice deadline, a label the shared file keeps for the sister app, which this app's deadline module never returns (1), and the public hospital notice deadline, for a hospital run by New York City, a county or the State (1), both named in the summary email. For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source. The public hospital label serves families' leads too, and the notice for the family's claim against NYC Health + Hospitals and the county health care corporations rests also on section 2980 of the Public Authorities Law, which requires it for a wrongful death action and to which the corporations' own sections send that action; it is a source."
     },
     {
       "file": "summary.js",
       "states": "1-year",
       "count": 1,
       "rule": false,
-      "about": "NEEDS A SOURCE: the Port Authority filing deadline named in the summary email. It rests wholly on the Port Authority's consent to suit, section 7107 of the Unconsolidated Laws, which is not a source of this file; the label is the shared file's, for the sister app, and this app's deadline module never returns it."
+      "about": "nycinjury.ai's label in the shared summary code, for the Port Authority's filing deadline; Malpractice's deadline module never returns it, so it is never shown here"
     },
     {
       "file": "summary.js",
@@ -601,7 +689,7 @@
       "states": "30-day",
       "count": 1,
       "rule": false,
-      "about": "NEEDS A SOURCE: the no-fault application deadline named in the summary email. It rests wholly on the no-fault regulation, part 65 of title 11 of the New York Codes, Rules and Regulations, which is not a source of this file; the label is the shared file's, for the sister app, and this app's deadline module never returns it."
+      "about": "nycinjury.ai's label in the shared summary code, for the no-fault application deadline; Malpractice's deadline module never returns it, so it is never shown here"
     },
     {
       "file": "public/index.html",
@@ -623,9 +711,10 @@
         "PAL-3316",
         "PAL-3415",
         "PAL-3641",
-        "CCA-10"
+        "CCA-10",
+        "PAL-2980"
       ],
-      "about": "in the statute of limitations card for a patient, the notice of claim to a city or county hospital (1) and the State hospital's claim or notice of intention (1); in the public hospital notice, for a hospital run by New York City, a county or the State, the written notice for the patient's own claim (1) and for a wrongful death claim, after the estate's representative is appointed (1). For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source. NEEDS A SOURCE (in part): section 2980 of the Public Authorities Law, which requires the notice of claim for a wrongful death action against NYC Health + Hospitals or a county health care corporation; the corporations' own sections among the sources send that action to it."
+      "about": "in the statute of limitations card for a patient, the notice of claim to a city or county hospital (1) and the State hospital's claim or notice of intention (1); in the public hospital notice, for a hospital run by New York City, a county or the State, the written notice for the patient's own claim (1) and for a wrongful death claim, after the estate's representative is appointed (1). For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source. The notice for the family's claim against NYC Health + Hospitals and the county health care corporations rests also on section 2980 of the Public Authorities Law, which requires it for a wrongful death action and to which the corporations' own sections send that action; it is a source."
     },
     {
       "file": "public/index.html",
@@ -709,9 +798,10 @@
         "PAL-3316",
         "PAL-3415",
         "PAL-3641",
-        "CCA-10"
+        "CCA-10",
+        "PAL-2980"
       ],
-      "about": "the public hospital notice's heading, for a hospital run by New York City, a county or the State. For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source."
+      "about": "the public hospital notice's heading, for a hospital run by New York City, a county or the State. For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source. The heading stands over the family's paragraph too, and the notice for the family's claim against NYC Health + Hospitals and the county health care corporations rests also on section 2980 of the Public Authorities Law, which requires it for a wrongful death action and to which the corporations' own sections send that action; it is a source."
     },
     {
       "file": "public/lead.html",
@@ -724,9 +814,10 @@
         "PAL-3316",
         "PAL-3415",
         "PAL-3641",
-        "CCA-10"
+        "CCA-10",
+        "PAL-2980"
       ],
-      "about": "the supervising attorney's check of any public hospital's notice of claim (1), and the heading of the public hospital card (1), for a hospital run by New York City, a county or the State. For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source."
+      "about": "the supervising attorney's check of any public hospital's notice of claim (1), and the heading of the public hospital card (1), for a hospital run by New York City, a county or the State. For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source. Both serve families' leads too, and the notice for the family's claim against NYC Health + Hospitals and the county health care corporations rests also on section 2980 of the Public Authorities Law, which requires it for a wrongful death action and to which the corporations' own sections send that action; it is a source."
     },
     {
       "file": "public/lead.html",
@@ -739,9 +830,10 @@
         "PAL-3316",
         "PAL-3415",
         "PAL-3641",
-        "CCA-10"
+        "CCA-10",
+        "PAL-2980"
       ],
-      "about": "the public hospital card: the notice of claim to a city or county hospital, and the State hospital's claim or notice of intention under the Court of Claims Act. For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source."
+      "about": "the public hospital card: the notice of claim to a city or county hospital, and the State hospital's claim or notice of intention under the Court of Claims Act. For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source. The card serves families' leads too, and the notice for the family's claim against NYC Health + Hospitals and the county health care corporations rests also on section 2980 of the Public Authorities Law, which requires it for a wrongful death action and to which the corporations' own sections send that action; it is a source."
     },
     {
       "file": "public/lead.html",
@@ -793,9 +885,10 @@
         "PAL-3316",
         "PAL-3415",
         "PAL-3641",
-        "CCA-10"
+        "CCA-10",
+        "PAL-2980"
       ],
-      "about": "the public hospitals' notice of claim for a wrongful death claim, after an administrator is appointed, in the statute of limitations card for a family (1); and, in the card for a patient, the notice of claim to a city or county hospital (1) and the State hospital's claim or notice of intention (1). For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source. NEEDS A SOURCE (in part): section 2980 of the Public Authorities Law, which requires the notice of claim for a wrongful death action against NYC Health + Hospitals or a county health care corporation; the corporations' own sections among the sources send that action to it."
+      "about": "the public hospitals' notice of claim for a wrongful death claim, after an administrator is appointed, in the statute of limitations card for a family (1); and, in the card for a patient, the notice of claim to a city or county hospital (1) and the State hospital's claim or notice of intention (1). For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source. The notice for the family's claim against NYC Health + Hospitals and the county health care corporations rests also on section 2980 of the Public Authorities Law, which requires it for a wrongful death action and to which the corporations' own sections send that action; it is a source."
     },
     {
       "file": "public/script.js",
@@ -857,9 +950,10 @@
         "PAL-3316",
         "PAL-3415",
         "PAL-3641",
-        "CCA-10"
+        "CCA-10",
+        "PAL-2980"
       ],
-      "about": "the notice shown for a city, county or State hospital, in the comment on the deadline notices. For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source."
+      "about": "the notice shown for a city, county or State hospital, in the comment on the deadline notices. For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source. The notices are shown to families too, and the notice for the family's claim against NYC Health + Hospitals and the county health care corporations rests also on section 2980 of the Public Authorities Law, which requires it for a wrongful death action and to which the corporations' own sections send that action; it is a source."
     },
     {
       "file": "public/script.js",
@@ -1034,9 +1128,10 @@
         "HHC-20",
         "PAL-3316",
         "PAL-3415",
-        "PAL-3641"
+        "PAL-3641",
+        "PAL-2980"
       ],
-      "about": "the notice of claim for a wrongful death claim, counted from the representative's appointment, when a city- or county-run hospital such as NYC Health + Hospitals is involved, which a reply may anchor to. For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source. NEEDS A SOURCE (in part): section 2980 of the Public Authorities Law, which requires the notice of claim for a wrongful death action against NYC Health + Hospitals or a county health care corporation; the corporations' own sections among the sources send that action to it."
+      "about": "the notice of claim for a wrongful death claim, counted from the representative's appointment, when a city- or county-run hospital such as NYC Health + Hospitals is involved, which a reply may anchor to. For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source. The notice for the family's claim against NYC Health + Hospitals and the county health care corporations rests also on section 2980 of the Public Authorities Law, which requires it for a wrongful death action and to which the corporations' own sections send that action; it is a source."
     },
     {
       "file": "rubrics/malpractice_estate.json",
@@ -1071,9 +1166,10 @@
         "HHC-20",
         "PAL-3316",
         "PAL-3415",
-        "PAL-3641"
+        "PAL-3641",
+        "PAL-2980"
       ],
-      "about": "a public hospital's notice of claim under the General Municipal Law, counted from the representative's appointment, in the supervising attorney's checklist. For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source. NEEDS A SOURCE (in part): section 2980 of the Public Authorities Law, which requires the notice of claim for a wrongful death action against NYC Health + Hospitals or a county health care corporation; the corporations' own sections among the sources send that action to it."
+      "about": "a public hospital's notice of claim under the General Municipal Law, counted from the representative's appointment, in the supervising attorney's checklist. For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source. The notice for the family's claim against NYC Health + Hospitals and the county health care corporations rests also on section 2980 of the Public Authorities Law, which requires it for a wrongful death action and to which the corporations' own sections send that action; it is a source."
     },
     {
       "file": "rubrics/malpractice_personal.json",

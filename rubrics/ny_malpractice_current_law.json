@@ -263,5 +263,1007 @@
       "url": "https://www.nysenate.gov/legislation/bills/2025/S10171",
       "reviewed_on": "2026-11-14"
     }
+  ],
+  "register_files": [
+    "ask.js",
+    "auction.js",
+    "deadlines.js",
+    "gate-config.js",
+    "summary.js",
+    "public/index.html",
+    "public/lead.html",
+    "public/script.js",
+    "public/about.html",
+    "public/disclaimer.html",
+    "rubrics/malpractice_estate.json",
+    "rubrics/malpractice_personal.json",
+    "content/blog/*.md"
+  ],
+  "register": [
+    {
+      "file": "ask.js",
+      "states": "2 years",
+      "count": 7,
+      "sources": [
+        "CPLR-214-A",
+        "USC-28-2401",
+        "USC-42-233",
+        "EPTL-5-4.1"
+      ],
+      "about": "the first part of the malpractice period, \"2 years and 6 months\", in the reply prompt for a patient: the deadline, Lavern's Law, the foreign object and the comparison with the federal claim (4); the written claim to a federal agency, whose providers include community health centers with staff deemed federal employees, in both reply prompts (2); and the wrongful death limitation period, in the reply prompt for a family (1)"
+    },
+    {
+      "file": "ask.js",
+      "states": "6 months",
+      "count": 6,
+      "sources": [
+        "CPLR-214-A",
+        "USC-28-2675"
+      ],
+      "about": "the second part of the malpractice period, \"2 years and 6 months\", in the reply prompt for a patient (4), and the wait for the agency's decision before a federal lawsuit, in both reply prompts (2)"
+    },
+    {
+      "file": "ask.js",
+      "states": "7 years",
+      "count": 1,
+      "sources": [
+        "CPLR-214-A"
+      ],
+      "about": "Lavern's Law's outer limit for a missed cancer diagnosis, in the reply prompt for a patient"
+    },
+    {
+      "file": "ask.js",
+      "states": "1 year",
+      "count": 1,
+      "sources": [
+        "CPLR-214-A"
+      ],
+      "about": "the time to sue after a foreign object is discovered, in the reply prompt for a patient"
+    },
+    {
+      "file": "ask.js",
+      "states": "10 years",
+      "count": 1,
+      "sources": [
+        "CPLR-208"
+      ],
+      "about": "the limit on the infancy extension in malpractice cases, in the reply prompt for a patient"
+    },
+    {
+      "file": "ask.js",
+      "states": "90 days",
+      "count": 2,
+      "sources": [
+        "GML-50-E",
+        "GML-50-I",
+        "HHC-20",
+        "PAL-3316",
+        "PAL-3415",
+        "PAL-3641"
+      ],
+      "about": "the notice of claim to NYC Health + Hospitals or another city- or county-run hospital, in the reply prompt for a patient (1), and the same notice for a wrongful death claim, counted from the estate representative's appointment, in the reply prompt for a family (1). For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source. NEEDS A SOURCE (in part): section 2980 of the Public Authorities Law, which requires the notice of claim for a wrongful death action against NYC Health + Hospitals or a county health care corporation; the corporations' own sections among the sources send that action to it."
+    },
+    {
+      "file": "ask.js",
+      "states": "1 year and 90 days",
+      "count": 1,
+      "sources": [
+        "HHC-20",
+        "GML-50-I",
+        "PAL-3316",
+        "PAL-3415",
+        "PAL-3641"
+      ],
+      "about": "the time to sue a public hospital, in the reply prompt for a patient: NYC Health + Hospitals (the Health and Hospitals Corporation Act), the county health care corporations (Westchester, Nassau and Erie), or another city or county hospital"
+    },
+    {
+      "file": "ask.js",
+      "states": "2.5-year",
+      "count": 1,
+      "sources": [
+        "CPLR-214-A"
+      ],
+      "about": "the malpractice limitation period, in the preliminary assessment the reply prompt for a patient asks for"
+    },
+    {
+      "file": "ask.js",
+      "states": "90-day",
+      "count": 2,
+      "sources": [
+        "GML-50-E",
+        "GML-50-I",
+        "HHC-20",
+        "PAL-3316",
+        "PAL-3415",
+        "PAL-3641",
+        "CCA-10"
+      ],
+      "about": "a public hospital's notice of claim, in the preliminary assessment the reply prompt for a patient asks for and in the case analysis's rule for its deadline warning; the hospital may be one run by New York City, a county or the State (the Court of Claims Act). For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source."
+    },
+    {
+      "file": "ask.js",
+      "states": "2-year",
+      "count": 4,
+      "sources": [
+        "USC-28-2401",
+        "EPTL-5-4.1"
+      ],
+      "about": "a federal provider's administrative claim, in the preliminary assessment the reply prompt for a patient asks for and in the case analysis's rule for its deadline warning (2), and the wrongful death limitation period, in the preliminary assessment and the referral step of the reply prompt for a family (2)"
+    },
+    {
+      "file": "auction.js",
+      "states": "2.5 years",
+      "count": 1,
+      "sources": [
+        "CPLR-214-A"
+      ],
+      "about": "the malpractice limitation period, in the lead scorer's prompt"
+    },
+    {
+      "file": "auction.js",
+      "states": "2 years",
+      "count": 1,
+      "sources": [
+        "EPTL-5-4.1"
+      ],
+      "about": "the wrongful death limitation period, in the lead scorer's prompt"
+    },
+    {
+      "file": "auction.js",
+      "states": "7-year",
+      "count": 1,
+      "sources": [
+        "CPLR-214-A"
+      ],
+      "about": "Lavern's Law's outer limit for a missed cancer diagnosis, in the lead scorer's prompt"
+    },
+    {
+      "file": "auction.js",
+      "states": "1 year",
+      "count": 1,
+      "sources": [
+        "CPLR-214-A"
+      ],
+      "about": "the time to sue after a foreign object is discovered, in the lead scorer's prompt"
+    },
+    {
+      "file": "auction.js",
+      "states": "90-day",
+      "count": 1,
+      "sources": [
+        "GML-50-E",
+        "GML-50-I",
+        "HHC-20",
+        "PAL-3316",
+        "PAL-3415",
+        "PAL-3641"
+      ],
+      "about": "a public hospital's notice of claim, in the lead scorer's prompt, beside the time to sue a city or county hospital. For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source."
+    },
+    {
+      "file": "auction.js",
+      "states": "1 year and 90 days",
+      "count": 1,
+      "sources": [
+        "HHC-20",
+        "GML-50-I",
+        "PAL-3316",
+        "PAL-3415",
+        "PAL-3641"
+      ],
+      "about": "the time to sue a public hospital, in the lead scorer's prompt: NYC Health + Hospitals (the Health and Hospitals Corporation Act), the county health care corporations (Westchester, Nassau and Erie), or another city or county hospital"
+    },
+    {
+      "file": "auction.js",
+      "states": "30 days",
+      "count": 2,
+      "rule": false,
+      "about": "business timings, not law: how long a firm's portal link works (1) and the window over which a firm's declines are counted for its refund (1)"
+    },
+    {
+      "file": "auction.js",
+      "states": "1 hour",
+      "count": 1,
+      "rule": false,
+      "about": "an operations timing, not law: an auction still closing an hour after its time is reported as stuck"
+    },
+    {
+      "file": "auction.js",
+      "states": "3 days",
+      "count": 3,
+      "rule": false,
+      "about": "a business term, not law: the time a firm has to accept or decline a lead (the Terms of Service)"
+    },
+    {
+      "file": "deadlines.js",
+      "states": "2 years",
+      "count": 3,
+      "sources": [
+        "CPLR-214-A",
+        "USC-28-2401",
+        "USC-42-233"
+      ],
+      "about": "the first part of the usual malpractice period, \"2 years and 6 months\", against which the module's deadlines are shorter, in the comments on the hospital and federal matches (2), and the written claim to a federal agency, the community health centers whose staff are deemed federal employees among the providers, in the comment on the federal match (1)"
+    },
+    {
+      "file": "deadlines.js",
+      "states": "90 days",
+      "count": 1,
+      "sources": [
+        "GML-50-E",
+        "GML-50-I",
+        "HHC-20",
+        "PAL-3316",
+        "PAL-3415",
+        "PAL-3641",
+        "CCA-10"
+      ],
+      "about": "the written notice the module warns of for a public hospital run by New York City, a county or the State (the Court of Claims Act for the State), in the comment on the hospital match. For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source."
+    },
+    {
+      "file": "deadlines.js",
+      "states": "90-day",
+      "count": 1,
+      "sources": [
+        "GML-50-E",
+        "GML-50-I",
+        "HHC-20",
+        "PAL-3316",
+        "PAL-3415",
+        "PAL-3641",
+        "CCA-10"
+      ],
+      "about": "the notice the module warns of for a public hospital, in the comment recounting the old false alarm. For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source."
+    },
+    {
+      "file": "deadlines.js",
+      "states": "6 months",
+      "count": 1,
+      "sources": [
+        "USC-28-2675"
+      ],
+      "about": "the wait for the agency's decision before a federal lawsuit, in the comment on the federal match"
+    },
+    {
+      "file": "gate-config.js",
+      "states": "2 years",
+      "count": 1,
+      "sources": [
+        "CPLR-214-A"
+      ],
+      "about": "the first part of the malpractice period (\"2 years 6 months\"), in the default checklist for the supervising attorney"
+    },
+    {
+      "file": "gate-config.js",
+      "states": "6 months",
+      "count": 1,
+      "sources": [
+        "CPLR-214-A"
+      ],
+      "about": "the second part of the malpractice period (\"2 years 6 months\"), in the default checklist for the supervising attorney"
+    },
+    {
+      "file": "gate-config.js",
+      "states": "10-year",
+      "count": 1,
+      "sources": [
+        "CPLR-208"
+      ],
+      "about": "the cap on the infancy extension in malpractice cases, in the default checklist for the supervising attorney"
+    },
+    {
+      "file": "gate-config.js",
+      "states": "90-day",
+      "count": 1,
+      "sources": [
+        "GML-50-E",
+        "GML-50-I",
+        "HHC-20",
+        "PAL-3316",
+        "PAL-3415",
+        "PAL-3641"
+      ],
+      "about": "a public hospital's notice of claim under the General Municipal Law, in the default checklist for the supervising attorney. For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source."
+    },
+    {
+      "file": "summary.js",
+      "states": "90-day",
+      "count": 2,
+      "sources": [
+        "GML-50-E",
+        "GML-50-I",
+        "HHC-20",
+        "PAL-3316",
+        "PAL-3415",
+        "PAL-3641",
+        "CCA-10"
+      ],
+      "about": "the government notice deadline, a label the shared file keeps for the sister app, which this app's deadline module never returns (1), and the public hospital notice deadline, for a hospital run by New York City, a county or the State (1), both named in the summary email. For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source."
+    },
+    {
+      "file": "summary.js",
+      "states": "1-year",
+      "count": 1,
+      "rule": false,
+      "about": "NEEDS A SOURCE: the Port Authority filing deadline named in the summary email. It rests wholly on the Port Authority's consent to suit, section 7107 of the Unconsolidated Laws, which is not a source of this file; the label is the shared file's, for the sister app, and this app's deadline module never returns it."
+    },
+    {
+      "file": "summary.js",
+      "states": "2-year",
+      "count": 1,
+      "sources": [
+        "USC-28-2401"
+      ],
+      "about": "the federal claim deadline named in the summary email"
+    },
+    {
+      "file": "summary.js",
+      "states": "30-day",
+      "count": 1,
+      "rule": false,
+      "about": "NEEDS A SOURCE: the no-fault application deadline named in the summary email. It rests wholly on the no-fault regulation, part 65 of title 11 of the New York Codes, Rules and Regulations, which is not a source of this file; the label is the shared file's, for the sister app, and this app's deadline module never returns it."
+    },
+    {
+      "file": "public/index.html",
+      "states": "2.5 years",
+      "count": 1,
+      "sources": [
+        "CPLR-214-A"
+      ],
+      "about": "the malpractice limitation period, in the statute of limitations card for a patient"
+    },
+    {
+      "file": "public/index.html",
+      "states": "90 days",
+      "count": 4,
+      "sources": [
+        "GML-50-E",
+        "GML-50-I",
+        "HHC-20",
+        "PAL-3316",
+        "PAL-3415",
+        "PAL-3641",
+        "CCA-10"
+      ],
+      "about": "in the statute of limitations card for a patient, the notice of claim to a city or county hospital (1) and the State hospital's claim or notice of intention (1); in the public hospital notice, for a hospital run by New York City, a county or the State, the written notice for the patient's own claim (1) and for a wrongful death claim, after the estate's representative is appointed (1). For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source. NEEDS A SOURCE (in part): section 2980 of the Public Authorities Law, which requires the notice of claim for a wrongful death action against NYC Health + Hospitals or a county health care corporation; the corporations' own sections among the sources send that action to it."
+    },
+    {
+      "file": "public/index.html",
+      "states": "1 year and 90 days",
+      "count": 1,
+      "sources": [
+        "HHC-20",
+        "GML-50-I",
+        "PAL-3316",
+        "PAL-3415",
+        "PAL-3641"
+      ],
+      "about": "the lawsuit against a city or county hospital, in the statute of limitations card for a patient: NYC Health + Hospitals (the Health and Hospitals Corporation Act), the county health care corporations (Westchester, Nassau and Erie), or another city or county hospital"
+    },
+    {
+      "file": "public/index.html",
+      "states": "2 years",
+      "count": 5,
+      "sources": [
+        "USC-28-2401",
+        "USC-42-233",
+        "EPTL-5-4.1",
+        "CPLR-214-A"
+      ],
+      "about": "the written claim to a federal agency, many community health centers among the providers, in the statute of limitations card and in the federal notice for a patient and for a family (3); the wrongful death limitation period, in the card (1); and the first part of New York's malpractice period, \"2 years and 6 months\", in the federal notice (1)"
+    },
+    {
+      "file": "public/index.html",
+      "states": "1 year",
+      "count": 1,
+      "sources": [
+        "CPLR-214-A"
+      ],
+      "about": "the time to sue after a foreign object is discovered, among the card's later deadlines"
+    },
+    {
+      "file": "public/index.html",
+      "states": "7 years",
+      "count": 1,
+      "sources": [
+        "CPLR-214-A"
+      ],
+      "about": "Lavern's Law's outer limit for a missed cancer diagnosis, among the card's later deadlines"
+    },
+    {
+      "file": "public/index.html",
+      "states": "10 years",
+      "count": 1,
+      "sources": [
+        "CPLR-208"
+      ],
+      "about": "the limit on the infancy extension, among the card's later deadlines"
+    },
+    {
+      "file": "public/index.html",
+      "states": "2-year",
+      "count": 1,
+      "sources": [
+        "USC-28-2401"
+      ],
+      "about": "the federal notice's heading"
+    },
+    {
+      "file": "public/index.html",
+      "states": "6 months",
+      "count": 3,
+      "sources": [
+        "CPLR-214-A",
+        "USC-28-2675"
+      ],
+      "about": "the second part of New York's malpractice period, \"2 years and 6 months\" (1), and the wait for the agency's decision before a federal lawsuit, for a patient and for a family (2), in the federal notice"
+    },
+    {
+      "file": "public/index.html",
+      "states": "90-day",
+      "count": 1,
+      "sources": [
+        "GML-50-E",
+        "GML-50-I",
+        "HHC-20",
+        "PAL-3316",
+        "PAL-3415",
+        "PAL-3641",
+        "CCA-10"
+      ],
+      "about": "the public hospital notice's heading, for a hospital run by New York City, a county or the State. For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source."
+    },
+    {
+      "file": "public/lead.html",
+      "states": "90-day",
+      "count": 2,
+      "sources": [
+        "GML-50-E",
+        "GML-50-I",
+        "HHC-20",
+        "PAL-3316",
+        "PAL-3415",
+        "PAL-3641",
+        "CCA-10"
+      ],
+      "about": "the supervising attorney's check of any public hospital's notice of claim (1), and the heading of the public hospital card (1), for a hospital run by New York City, a county or the State. For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source."
+    },
+    {
+      "file": "public/lead.html",
+      "states": "90 days",
+      "count": 1,
+      "sources": [
+        "GML-50-E",
+        "GML-50-I",
+        "HHC-20",
+        "PAL-3316",
+        "PAL-3415",
+        "PAL-3641",
+        "CCA-10"
+      ],
+      "about": "the public hospital card: the notice of claim to a city or county hospital, and the State hospital's claim or notice of intention under the Court of Claims Act. For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source."
+    },
+    {
+      "file": "public/lead.html",
+      "states": "2-year",
+      "count": 1,
+      "sources": [
+        "USC-28-2401"
+      ],
+      "about": "the federal card's heading"
+    },
+    {
+      "file": "public/lead.html",
+      "states": "2 years",
+      "count": 1,
+      "sources": [
+        "USC-28-2401",
+        "USC-42-233"
+      ],
+      "about": "the written claim to a federal agency, in the federal card, which names community health centers whose staff may be deemed federal employees"
+    },
+    {
+      "file": "public/lead.html",
+      "states": "6 months",
+      "count": 1,
+      "sources": [
+        "USC-28-2675"
+      ],
+      "about": "the wait for the agency's decision before a federal lawsuit, in the federal card"
+    },
+    {
+      "file": "public/script.js",
+      "states": "2 years",
+      "count": 5,
+      "sources": [
+        "EPTL-5-4.1",
+        "USC-28-2401",
+        "USC-42-233"
+      ],
+      "about": "the wrongful death limitation period, in the statute of limitations card for a family and for a patient and in the welcome for a family (3), and the written claim to a federal agency, many community health centers among the providers, in both cards (2)"
+    },
+    {
+      "file": "public/script.js",
+      "states": "90 days",
+      "count": 3,
+      "sources": [
+        "GML-50-E",
+        "GML-50-I",
+        "HHC-20",
+        "PAL-3316",
+        "PAL-3415",
+        "PAL-3641",
+        "CCA-10"
+      ],
+      "about": "the public hospitals' notice of claim for a wrongful death claim, after an administrator is appointed, in the statute of limitations card for a family (1); and, in the card for a patient, the notice of claim to a city or county hospital (1) and the State hospital's claim or notice of intention (1). For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source. NEEDS A SOURCE (in part): section 2980 of the Public Authorities Law, which requires the notice of claim for a wrongful death action against NYC Health + Hospitals or a county health care corporation; the corporations' own sections among the sources send that action to it."
+    },
+    {
+      "file": "public/script.js",
+      "states": "2.5 years",
+      "count": 1,
+      "sources": [
+        "CPLR-214-A"
+      ],
+      "about": "the malpractice limitation period, in the statute of limitations card for a patient"
+    },
+    {
+      "file": "public/script.js",
+      "states": "1 year and 90 days",
+      "count": 1,
+      "sources": [
+        "HHC-20",
+        "GML-50-I",
+        "PAL-3316",
+        "PAL-3415",
+        "PAL-3641"
+      ],
+      "about": "the lawsuit against a city or county hospital, in the statute of limitations card for a patient: NYC Health + Hospitals (the Health and Hospitals Corporation Act), the county health care corporations (Westchester, Nassau and Erie), or another city or county hospital"
+    },
+    {
+      "file": "public/script.js",
+      "states": "1 year",
+      "count": 1,
+      "sources": [
+        "CPLR-214-A"
+      ],
+      "about": "the time to sue after a foreign object is discovered, among the later deadlines of the card for a patient"
+    },
+    {
+      "file": "public/script.js",
+      "states": "7 years",
+      "count": 1,
+      "sources": [
+        "CPLR-214-A"
+      ],
+      "about": "Lavern's Law's outer limit for a missed cancer diagnosis, among the later deadlines of the card for a patient"
+    },
+    {
+      "file": "public/script.js",
+      "states": "10 years",
+      "count": 1,
+      "sources": [
+        "CPLR-208"
+      ],
+      "about": "the limit on the infancy extension, among the later deadlines of the card for a patient"
+    },
+    {
+      "file": "public/script.js",
+      "states": "90-day",
+      "count": 1,
+      "sources": [
+        "GML-50-E",
+        "GML-50-I",
+        "HHC-20",
+        "PAL-3316",
+        "PAL-3415",
+        "PAL-3641",
+        "CCA-10"
+      ],
+      "about": "the notice shown for a city, county or State hospital, in the comment on the deadline notices. For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source."
+    },
+    {
+      "file": "public/script.js",
+      "states": "2-year",
+      "count": 1,
+      "sources": [
+        "USC-28-2401"
+      ],
+      "about": "the claim shown for a federal provider, in the comment on the deadline notices"
+    },
+    {
+      "file": "public/about.html",
+      "states": "2 years",
+      "count": 4,
+      "sources": [
+        "EPTL-5-4.1",
+        "CPLR-214-A"
+      ],
+      "about": "the wrongful death limitation period: the wrongful death mode, the wrongful death distinction and its warning (3); and the first part of the malpractice period, \"2 years and 6 months\", in the foreign object exception (1)"
+    },
+    {
+      "file": "public/about.html",
+      "states": "2.5-year",
+      "count": 1,
+      "sources": [
+        "CPLR-214-A"
+      ],
+      "about": "the malpractice limitation period, in the framework's list"
+    },
+    {
+      "file": "public/about.html",
+      "states": "1 year",
+      "count": 1,
+      "sources": [
+        "CPLR-214-A"
+      ],
+      "about": "the time to sue after a foreign object is discovered, in the foreign object exception"
+    },
+    {
+      "file": "public/about.html",
+      "states": "6 months",
+      "count": 1,
+      "sources": [
+        "CPLR-214-A"
+      ],
+      "about": "the second part of the malpractice period, \"2 years and 6 months\", in the foreign object exception"
+    },
+    {
+      "file": "public/about.html",
+      "states": "10 years",
+      "count": 1,
+      "sources": [
+        "CPLR-208"
+      ],
+      "about": "the limit on the infancy toll in malpractice cases"
+    },
+    {
+      "file": "public/about.html",
+      "states": "$199",
+      "count": 1,
+      "rule": false,
+      "about": "a business term, not law: the price of a firm's monthly subscription"
+    },
+    {
+      "file": "public/disclaimer.html",
+      "states": "2.5 years",
+      "count": 1,
+      "sources": [
+        "CPLR-214-A"
+      ],
+      "about": "the malpractice limitation period, in the statute of limitations warning"
+    },
+    {
+      "file": "public/disclaimer.html",
+      "states": "2 years",
+      "count": 5,
+      "sources": [
+        "EPTL-5-4.1",
+        "CPLR-214-A"
+      ],
+      "about": "the wrongful death limitation period, in the warning and in the list of special rules (2), and the first part of the malpractice period, \"2 years and 6 months\": the general rule, the foreign object and Lavern's Law (3)"
+    },
+    {
+      "file": "public/disclaimer.html",
+      "states": "6 months",
+      "count": 3,
+      "sources": [
+        "CPLR-214-A"
+      ],
+      "about": "the second part of the malpractice period, \"2 years and 6 months\": the general rule, the foreign object and Lavern's Law"
+    },
+    {
+      "file": "public/disclaimer.html",
+      "states": "1 year",
+      "count": 1,
+      "sources": [
+        "CPLR-214-A"
+      ],
+      "about": "the time to sue after a foreign object is discovered"
+    },
+    {
+      "file": "public/disclaimer.html",
+      "states": "10 years",
+      "count": 1,
+      "sources": [
+        "CPLR-208"
+      ],
+      "about": "the limit on the infancy toll in malpractice cases"
+    },
+    {
+      "file": "public/disclaimer.html",
+      "states": "7 years",
+      "count": 1,
+      "sources": [
+        "CPLR-214-A"
+      ],
+      "about": "Lavern's Law's outer limit for a missed cancer diagnosis"
+    },
+    {
+      "file": "public/disclaimer.html",
+      "states": "90 days",
+      "count": 1,
+      "sources": [
+        "GML-50-E",
+        "GML-50-I",
+        "HHC-20",
+        "PAL-3316",
+        "PAL-3415",
+        "PAL-3641"
+      ],
+      "about": "the notice of claim to NYC Health + Hospitals or another city- or county-run hospital, in the list of special rules. For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source."
+    },
+    {
+      "file": "public/disclaimer.html",
+      "states": "1 year and 90 days",
+      "count": 1,
+      "sources": [
+        "HHC-20",
+        "GML-50-I",
+        "PAL-3316",
+        "PAL-3415",
+        "PAL-3641"
+      ],
+      "about": "the lawsuit against NYC Health + Hospitals (the Health and Hospitals Corporation Act), the county health care corporations (Westchester, Nassau and Erie), or another city or county hospital, in the list of special rules"
+    },
+    {
+      "file": "rubrics/malpractice_estate.json",
+      "states": "2-year",
+      "count": 2,
+      "sources": [
+        "EPTL-5-4.1"
+      ],
+      "about": "the wrongful death limitation period, which the evaluator expects the preliminary assessment to cover (a required criterion) and the supervising attorney to verify (the checklist)"
+    },
+    {
+      "file": "rubrics/malpractice_estate.json",
+      "states": "2 years",
+      "count": 2,
+      "sources": [
+        "EPTL-5-4.1",
+        "BILL-GRIEVING-FAMILIES-ACT"
+      ],
+      "about": "the wrongful death limitation period a reply may anchor to (1), and the wrongful death deadline that a reply fails for calling longer: outdated law that the current-law notes contradict while the Grieving Families Act is not law (1)"
+    },
+    {
+      "file": "rubrics/malpractice_estate.json",
+      "states": "90-day",
+      "count": 1,
+      "sources": [
+        "GML-50-E",
+        "GML-50-I",
+        "HHC-20",
+        "PAL-3316",
+        "PAL-3415",
+        "PAL-3641"
+      ],
+      "about": "the notice of claim for a wrongful death claim, counted from the representative's appointment, when a city- or county-run hospital such as NYC Health + Hospitals is involved, which a reply may anchor to. For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source. NEEDS A SOURCE (in part): section 2980 of the Public Authorities Law, which requires the notice of claim for a wrongful death action against NYC Health + Hospitals or a county health care corporation; the corporations' own sections among the sources send that action to it."
+    },
+    {
+      "file": "rubrics/malpractice_estate.json",
+      "states": "$1,000,000",
+      "count": 1,
+      "rule": false,
+      "about": "a sample guarantee the rubric forbids a reply to give; not law"
+    },
+    {
+      "file": "rubrics/malpractice_estate.json",
+      "states": "$500,000",
+      "count": 1,
+      "rule": false,
+      "about": "a sample guarantee the rubric forbids a reply to give; not law"
+    },
+    {
+      "file": "rubrics/malpractice_estate.json",
+      "states": "one year",
+      "count": 1,
+      "sources": [
+        "CPLR-210"
+      ],
+      "about": "the representative's time to sue on the survival claim after a death, in the supervising attorney's checklist"
+    },
+    {
+      "file": "rubrics/malpractice_estate.json",
+      "states": "90 days",
+      "count": 1,
+      "sources": [
+        "GML-50-E",
+        "GML-50-I",
+        "HHC-20",
+        "PAL-3316",
+        "PAL-3415",
+        "PAL-3641"
+      ],
+      "about": "a public hospital's notice of claim under the General Municipal Law, counted from the representative's appointment, in the supervising attorney's checklist. For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source. NEEDS A SOURCE (in part): section 2980 of the Public Authorities Law, which requires the notice of claim for a wrongful death action against NYC Health + Hospitals or a county health care corporation; the corporations' own sections among the sources send that action to it."
+    },
+    {
+      "file": "rubrics/malpractice_personal.json",
+      "states": "2 years",
+      "count": 2,
+      "sources": [
+        "CPLR-214-A"
+      ],
+      "about": "the first part of the malpractice period, \"2 years and 6 months\", which a reply may anchor to (a required criterion) and the supervising attorney verifies (the checklist)"
+    },
+    {
+      "file": "rubrics/malpractice_personal.json",
+      "states": "6 months",
+      "count": 2,
+      "sources": [
+        "CPLR-214-A"
+      ],
+      "about": "the second part of the malpractice period, which a reply may anchor to (a required criterion) and the supervising attorney verifies (the checklist)"
+    },
+    {
+      "file": "rubrics/malpractice_personal.json",
+      "states": "1 year",
+      "count": 1,
+      "sources": [
+        "CPLR-214-A"
+      ],
+      "about": "the time to sue after a foreign object is discovered, which a reply may anchor to"
+    },
+    {
+      "file": "rubrics/malpractice_personal.json",
+      "states": "7 years",
+      "count": 1,
+      "sources": [
+        "CPLR-214-A"
+      ],
+      "about": "Lavern's Law's outer limit for a missed cancer diagnosis, which a reply may anchor to"
+    },
+    {
+      "file": "rubrics/malpractice_personal.json",
+      "states": "10 years",
+      "count": 1,
+      "sources": [
+        "CPLR-208"
+      ],
+      "about": "the limit on the infancy extension in malpractice cases, which a reply may anchor to"
+    },
+    {
+      "file": "rubrics/malpractice_personal.json",
+      "states": "90-day",
+      "count": 2,
+      "sources": [
+        "GML-50-E",
+        "GML-50-I",
+        "HHC-20",
+        "PAL-3316",
+        "PAL-3415",
+        "PAL-3641"
+      ],
+      "about": "a public hospital's notice of claim under the General Municipal Law: when a city- or county-run hospital such as NYC Health + Hospitals is involved, which a reply may anchor to (a required criterion), and in the supervising attorney's checklist. For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source."
+    },
+    {
+      "file": "rubrics/malpractice_personal.json",
+      "states": "$500,000",
+      "count": 1,
+      "rule": false,
+      "about": "a sample guarantee the rubric forbids a reply to give; not law"
+    },
+    {
+      "file": "rubrics/malpractice_personal.json",
+      "states": "$250,000",
+      "count": 1,
+      "rule": false,
+      "about": "a sample guarantee the rubric forbids a reply to give; not law"
+    },
+    {
+      "file": "rubrics/malpractice_personal.json",
+      "states": "10-year",
+      "count": 1,
+      "sources": [
+        "CPLR-208"
+      ],
+      "about": "the cap on the infancy extension, in the supervising attorney's checklist"
+    },
+    {
+      "file": "content/blog/how-long-medical-malpractice-case-nyc.md",
+      "states": "6 months",
+      "count": 3,
+      "rule": false,
+      "about": "estimates of how long a case takes, not law: the pre-litigation phase (\"3-6 months\", twice) and settlement negotiations (\"1-6 months\")"
+    },
+    {
+      "file": "content/blog/how-long-medical-malpractice-case-nyc.md",
+      "states": "24 months",
+      "count": 2,
+      "rule": false,
+      "about": "an estimate of how long discovery takes (\"18-24 months\", twice), not law"
+    },
+    {
+      "file": "content/blog/how-long-medical-malpractice-case-nyc.md",
+      "states": "3 years",
+      "count": 1,
+      "rule": false,
+      "about": "an estimate of how long a case that settles takes from filing (\"2-3 years\"), not law"
+    },
+    {
+      "file": "content/blog/how-long-medical-malpractice-case-nyc.md",
+      "states": "12 months",
+      "count": 1,
+      "rule": false,
+      "about": "an estimate of how long trial preparation and trial take (\"3-12 months\"), not law"
+    },
+    {
+      "file": "content/blog/how-long-medical-malpractice-case-nyc.md",
+      "states": "4 years",
+      "count": 1,
+      "rule": false,
+      "about": "an estimate of the whole timeline of a case that settles (\"2-4 years\"), not law"
+    },
+    {
+      "file": "content/blog/what-is-medical-malpractice-new-york-state.md",
+      "states": "2 years",
+      "count": 4,
+      "sources": [
+        "CPLR-214-A",
+        "EPTL-5-4.1"
+      ],
+      "about": "the first part of the malpractice period, \"2 years and 6 months\": the general rule, the foreign object and Lavern's Law (3), and the wrongful death limitation period (1)"
+    },
+    {
+      "file": "content/blog/what-is-medical-malpractice-new-york-state.md",
+      "states": "6 months",
+      "count": 3,
+      "sources": [
+        "CPLR-214-A"
+      ],
+      "about": "the second part of the malpractice period, \"2 years and 6 months\": the general rule, the foreign object and Lavern's Law"
+    },
+    {
+      "file": "content/blog/what-is-medical-malpractice-new-york-state.md",
+      "states": "1 year",
+      "count": 1,
+      "sources": [
+        "CPLR-214-A"
+      ],
+      "about": "the time to sue after a foreign object is discovered"
+    },
+    {
+      "file": "content/blog/what-is-medical-malpractice-new-york-state.md",
+      "states": "7 years",
+      "count": 1,
+      "sources": [
+        "CPLR-214-A"
+      ],
+      "about": "Lavern's Law's outer limit for a missed cancer diagnosis"
+    },
+    {
+      "file": "content/blog/what-is-medical-malpractice-new-york-state.md",
+      "states": "90 days",
+      "count": 1,
+      "sources": [
+        "GML-50-E",
+        "GML-50-I",
+        "HHC-20",
+        "PAL-3316",
+        "PAL-3415",
+        "PAL-3641"
+      ],
+      "about": "the notice of claim to NYC Health + Hospitals or another city- or county-run hospital. For a public hospital corporation the notice rests also on the act that created it (the New York City Health and Hospitals Corporation Act; the acts creating the Nassau, Westchester and Erie County health care corporations), each of which is a source."
+    },
+    {
+      "file": "content/blog/what-is-medical-malpractice-new-york-state.md",
+      "states": "1 year and 90 days",
+      "count": 1,
+      "sources": [
+        "HHC-20",
+        "GML-50-I",
+        "PAL-3316",
+        "PAL-3415",
+        "PAL-3641"
+      ],
+      "about": "the lawsuit against NYC Health + Hospitals (the Health and Hospitals Corporation Act), the county health care corporations (Westchester, Nassau and Erie), or another city or county hospital"
+    },
+    {
+      "file": "content/blog/what-is-medical-malpractice-new-york-state.md",
+      "states": "10 years",
+      "count": 1,
+      "sources": [
+        "CPLR-208"
+      ],
+      "about": "the limit on the infancy extension in malpractice cases"
+    }
   ]
 }

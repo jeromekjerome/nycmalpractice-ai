@@ -9,7 +9,8 @@
 // - dotenv, which db.js and server.js load, is pointed at an empty file;
 // - the database address is one no database answers at, so that no client is ever made for another;
 // - OpenAI's key is a made-up one, and Anthropic's and Google's are empty, so that Claude and Gemini have no adapter, as
-//   in production before the owner adds their keys. They are set, not left unset, because dotenv leaves a variable
+//   in production before the owner adds their keys. The New York Senate's key is empty too, so that no test reaches the
+//   Senate's service with the owner's. They are set, not left unset, because dotenv leaves a variable
 //   that is already set (even empty) alone.
 // A test that needs another value sets it itself, after this.
 //
@@ -23,3 +24,4 @@ process.env.DATABASE_URL = 'postgres://user:pass@localhost:5432/testdb';
 process.env.OPENAI_API_KEY = 'test-openai-key';
 process.env.ANTHROPIC_API_KEY = '';
 process.env.GEMINI_API_KEY = '';
+process.env.NYSENATE_API_KEY = '';

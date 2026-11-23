@@ -37,6 +37,7 @@ test('the test settings are forced whatever the shell has set: no local .env is 
     NODE_ENV: 'production', DOTENV_CONFIG_PATH: '.env', DOTENV_CONFIG_QUIET: 'false',
     DATABASE_URL: 'postgres://made-up:live-looking@db.example.invalid/neondb',
     OPENAI_API_KEY: 'sk-made-up-but-live-looking', ANTHROPIC_API_KEY: 'sk-ant-made-up-but-live-looking', GEMINI_API_KEY: 'AIza-made-up-but-live-looking',
+    NYSENATE_API_KEY: 'live-looking-value',
   };
   const names = Object.keys(shell);
   const script = `await import(${JSON.stringify(pathToFileURL(fileURLToPath(new URL('./test-settings.mjs', FOLDER))).href)});
@@ -51,6 +52,7 @@ console.log(JSON.stringify(Object.fromEntries(${JSON.stringify(names)}.map(name 
     OPENAI_API_KEY: 'test-openai-key',
     ANTHROPIC_API_KEY: '',
     GEMINI_API_KEY: '',
+    NYSENATE_API_KEY: '',
   });
   // This process runs with them too.
   for (const name of names) assert.equal(process.env[name], JSON.parse(child.stdout)[name], name);

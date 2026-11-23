@@ -252,7 +252,7 @@ test('nothing shaped like a key is kept or printed, even when a provider quotes 
 });
 
 test('the exact value of each configured secret is withheld whatever its shape, read when called, and an unset or very short one withholds nothing', () => {
-  const names = ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'COURTLISTENER_TOKEN', 'ADMIN_SECRET', 'ADMIN_SECRET_FOR_UPLOAD', 'CRON_SECRET', 'STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET', 'TWILIO_AUTH_TOKEN', 'SMTP_PASS', 'BACKUP_SECRET_ACCESS_KEY', 'BACKUP_ENCRYPTION_KEY', 'ETHEREAL_API_KEY'];
+  const names = ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'COURTLISTENER_TOKEN', 'ADMIN_SECRET', 'ADMIN_SECRET_FOR_UPLOAD', 'CRON_SECRET', 'STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET', 'TWILIO_AUTH_TOKEN', 'SMTP_PASS', 'BACKUP_SECRET_ACCESS_KEY', 'BACKUP_ENCRYPTION_KEY', 'ETHEREAL_API_KEY', 'NYSENATE_API_KEY'];
   const saved = Object.fromEntries(names.map(name => [name, process.env[name]]));
   try {
     for (const name of names) delete process.env[name];
@@ -264,6 +264,10 @@ test('the exact value of each configured secret is withheld whatever its shape, 
     assert.equal(withoutKeys(`Gemini said: key ${dotted} is not valid`), 'Gemini said: key [key withheld] is not valid');
     assert.equal(withoutKeys(`${dotted} and ${dotted}`), '[key withheld] and [key withheld]');
     assert.equal(withoutKeys('login failed for plain-made-up-admin-secret / pa/ss+word=madeup9'), 'login failed for [key withheld] / [key withheld]');
+    // The Senate key's own value is withheld when a request's address that carries it is quoted in an error.
+    process.env.NYSENATE_API_KEY = 'nysenate-sentinel-key-123';
+    assert.equal(withoutKeys('GET https://legislation.nysenate.gov/api/3/laws?key=nysenate-sentinel-key-123 failed'), 'GET https://legislation.nysenate.gov/api/3/laws?key=[key withheld] failed');
+    delete process.env.NYSENATE_API_KEY;
     // The patterns still work beside it.
     assert.equal(withoutKeys(`Bearer sk-test_ABCDEFGH12345678 then ${dotted}`), 'Bearer [key withheld] then [key withheld]');
     // Read at the time of the call: a value set later is withheld, and one removed is not.

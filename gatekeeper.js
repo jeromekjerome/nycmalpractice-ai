@@ -18,6 +18,7 @@ import { readFileSync } from 'fs';
 import { auditDraftCitations, flagUnanchoredCitations, textOutsideCitations, VERIFY_PLACEHOLDER } from './citator.js';
 import { runJob } from './providers.js';
 import { withoutKeys } from './without-keys.js';
+import { earliestSourceDate } from './law-file.js';
 import {
   RUBRIC_FILES, CURRENT_LAW_FILE, SERVICE_DESCRIPTION, DEFAULT_HUMAN_VERIFICATION_CHECKLIST, DEFAULT_GATE_TARGETS, normalizeMode,
 } from './gate-config.js';
@@ -91,19 +92,26 @@ export function loadCurrentLawNotes() {
 /**
  * The current-law notes as a prompt block. Returns '' (and logs) if the file cannot be read, so
  * a missing notes file degrades the prompts instead of taking the product down.
+ * A law object may be given (a test does); with none, the notes file is read. The date is the file's own `as_of` when it has
+ * one, and otherwise the earliest approval or review among the sources the notes rest on.
  */
-export function renderCurrentLawForPrompt() {
-  let law;
-  try {
-    law = loadCurrentLawNotes();
-  } catch (err) {
-    console.error('[Gatekeeper] Current-law notes unavailable:', err.message);
-    return '';
+export function renderCurrentLawForPrompt(given) {
+  let law = given;
+  if (!law) {
+    try {
+      law = loadCurrentLawNotes();
+    } catch (err) {
+      console.error('[Gatekeeper] Current-law notes unavailable:', err.message);
+      return '';
+    }
   }
   const notes = (Array.isArray(law.notes) ? law.notes : []).filter(note => note && note.rule);
   if (!notes.length) return '';
+  // With no date to give, the line makes no claim of verification; the notes are still the corrections the model needs.
+  const verifiedAt = law.as_of ?? earliestSourceDate(law);
+  const verified = verifiedAt ? ` (verified as of ${verifiedAt})` : '';
   return [
-    `CURRENT ${String(law.jurisdiction || 'New York').toUpperCase()} LAW (verified as of ${law.as_of}). These statutory changes may post-date your training data. Where they apply they control over anything you remember, and you must not state the superseded rule as current law:`,
+    `CURRENT ${String(law.jurisdiction || 'New York').toUpperCase()} LAW${verified}. These statutory changes may post-date your training data. Where they apply they control over anything you remember, and you must not state the superseded rule as current law:`,
     ...notes.map(note => `- ${note.topic}: ${note.rule}`),
   ].join('\n');
 }

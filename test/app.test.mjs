@@ -1837,6 +1837,7 @@ const {
   evaluateAndRemediateDraft,
   toPublicEvaluation,
 } = await import('../gatekeeper.js');
+const { earliestSourceDate } = await import('../law-file.js');
 
 // The CourtListener "context packet" a turn retrieved.
 const RETRIEVED_CASES = [
@@ -2376,6 +2377,45 @@ test('the personal and estate rubrics load, each with its disclaimer, citation g
   // Any other mode is graded as a patient's own claim.
   assert.equal(loadRubric('professor').mode, 'personal');
   assert.equal(loadRubric(undefined).mode, 'personal');
+});
+
+test('the prompt block reads the same as before, its date now from the sources', () => {
+  const notes = [
+    { id: 'A', topic: 'First topic', rule: 'First rule.', sources: ['S-1'] },
+    { id: 'B', topic: 'Second topic', rule: 'Second rule.', sources: ['S-2', 'S-3'] },
+    { id: 'C', topic: 'No rule', rule: '' },
+  ];
+  const oldLaw = { jurisdiction: 'New York', as_of: '2026-11-14', sources: ['https://example.test/a'], notes };
+  const newLaw = {
+    jurisdiction: 'New York',
+    sources: [
+      { id: 'S-1', kind: 'section', approved_on: '2026-11-24', fingerprint: 'sha256:abc' },
+      { id: 'S-2', kind: 'by_hand', reviewed_on: '2026-11-20' },
+      { id: 'S-3', kind: 'by_hand', reviewed_on: null },
+      { id: 'S-0', kind: 'by_hand', reviewed_on: '2026-01-01' },
+    ],
+    notes,
+    register: [{ file: 'ask.js', states: '3 years', count: 1, sources: ['S-0'], about: 'x' }],
+  };
+  const oldLines = renderCurrentLawForPrompt(oldLaw).split('\n');
+  const newLines = renderCurrentLawForPrompt(newLaw).split('\n');
+  assert.ok(oldLines[0].startsWith('CURRENT NEW YORK LAW (verified as of 2026-11-14). These statutory changes'));
+  assert.equal(newLines[0], oldLines[0].replace('2026-11-14', earliestSourceDate(newLaw)));
+  assert.ok(newLines[0].startsWith('CURRENT NEW YORK LAW (verified as of 2026-11-20). These statutory changes'));
+  assert.deepEqual(newLines.slice(1), oldLines.slice(1));
+  assert.deepEqual(newLines.slice(1), ['- First topic: First rule.', '- Second topic: Second rule.']);
+  // With no source dated (none at all, or only one not yet reviewed), the line makes no claim of verification and keeps every note.
+  for (const undated of [
+    { jurisdiction: 'New York', notes: [{ id: 'A', topic: 'T', rule: 'R.' }], sources: [] },
+    { jurisdiction: 'New York', notes: [{ id: 'A', topic: 'T', rule: 'R.', sources: ['H'] }], sources: [{ id: 'H', kind: 'by_hand', reviewed_on: null }] },
+  ]) {
+    const lines = renderCurrentLawForPrompt(undated).split('\n');
+    assert.ok(lines[0].startsWith('CURRENT NEW YORK LAW. These statutory changes may post-date'), lines[0]);
+    assert.ok(!lines[0].includes('null') && !lines[0].includes('verified'));
+    assert.deepEqual(lines.slice(1), ['- T: R.']);
+  }
+  const real = renderCurrentLawForPrompt();
+  assert.ok(!real.includes('sha256:') && !real.includes('register'));
 });
 
 test('the drafting prompt carries the rules for the step and current New York law', () => {

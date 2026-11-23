@@ -5198,11 +5198,14 @@ test("the daily summary gives the day's replies by the model that wrote them, sa
 
 test("the daily summary carries the statute watch's lines, and goes without them when they cannot be read", async () => {
   const { sendDailyDigest } = await import('../operations.js');
+  const { readLawFile } = await import('../law-file.js');
+  const { CURRENT_LAW_FILE } = await import('../gate-config.js');
+  const watched = readLawFile(CURRENT_LAW_FILE).sources.find(source => source.kind === 'section');
+  const watchedName = String(watched.name || watched.id).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   const hoursAgo = hours => new Date(Date.now() - hours * 3_600_000).toISOString().replace('T', ' ').replace('Z', '+00');
-  // 'broken' makes the query fail, as a missing table or a refused connection does. The table holds no row: until this app's
-  // notes file is reshaped it names no watched section, so the lines that name one are checked once it does.
+  // 'broken' makes the query fail, as a missing table or a refused connection does.
   let jobRuns = [[hoursAgo(1), 't']];
-  let watchRows = [];
+  let watchRows = [[watched.id, hoursAgo(30), hoursAgo(1), null]];
   const queries = [];
   const handler = async (url, init) => {
     if (!url.endsWith('/sql')) throw new Error(`Unexpected outbound request in test: ${url}`);
@@ -5225,7 +5228,7 @@ test("the daily summary carries the statute watch's lines, and goes without them
       watchRows = 'broken';
       await sendDailyDigest();
       jobRuns = 'broken';
-      watchRows = [];
+      watchRows = [[watched.id, hoursAgo(30), hoursAgo(1), null]];
       await sendDailyDigest();
     });
     summaries.push(...sent.map(mail => String(mail.html)));
@@ -5235,6 +5238,8 @@ test("the daily summary carries the statute watch's lines, and goes without them
   // The watch's lines, under their own heading, after the table and before the nightly job's line.
   assert.ok(summaries[0].includes('Statute watch'), summaries[0]);
   assert.ok(summaries[0].includes('The statute watch ran at '), summaries[0]);
+  assert.ok(summaries[0].includes('watched section differs from the approved text:'), summaries[0]);
+  assert.ok(summaries[0].includes(watchedName), summaries[0]);
   assert.ok(summaries[0].indexOf('</table>') < summaries[0].indexOf('Statute watch'));
   assert.ok(summaries[0].indexOf('Statute watch') < summaries[0].indexOf('The nightly job ran every step.'));
   for (const line of rest) assert.ok(summaries[0].includes(line), line);
@@ -6838,20 +6843,73 @@ test('sendOperatorNotice says whether the notice went out, and notifyOperator st
 });
 
 // ─── The nightly watch of the watched statutes: its route, its job and its place in /health/deep ───
-// The Senate's host and Neon's HTTP endpoint are answered here, so nothing reaches the network or a database. These route tests
-// stop before the notes file is read. The ones that serve the saved statute texts come with this app's reshaped notes file.
+// The Senate's host is answered here with Senate-shaped JSON from the saved approved texts, and the statute_watch table by a
+// small in-memory stand-in over Neon's HTTP endpoint. Nothing reaches the network or a database.
 
-// Records each request to the Senate's host, which is never answered with a text here, and each run given to the job log.
-function statuteWatchWorld() {
-  const world = { requests: [], jobRuns: [] };
+const WATCHED_LAW = JSON.parse(readFileSync(new URL('../rubrics/ny_malpractice_current_law.json', import.meta.url), 'utf8'));
+const WATCHED_SOURCES = WATCHED_LAW.sources.filter(source => source.kind === 'section' || source.kind === 'bill');
+
+// The world of one or more nights: the Senate answers each section with its approved text unless `changes` gives another, and
+// the table keeps its rows from night to night.
+function statuteWatchWorld({ changes = {}, gone = [] } = {}) {
+  const rows = new Map();
+  const world = { rows, requests: [], treeRequests: [], sql: [], jobRuns: [], changes };
   world.handler = async (url, init = {}) => {
-    if (url.startsWith('https://legislation.nysenate.gov/')) {
+    if (url.startsWith('https://legislation.nysenate.gov/api/3/')) {
+      // A law's tree, in the Senate's shape: the root, with its children under documents.items. It lists every watched section
+      // of that law except those in `gone`.
+      const [, treeLawId] = new URL(url).pathname.match(/^\/api\/3\/laws\/([^/]+)$/) || [];
+      if (treeLawId) {
+        world.treeRequests.push(url);
+        const items = WATCHED_SOURCES.filter(item => item.lawId === treeLawId && !gone.includes(item.id))
+          .map(item => ({ lawId: treeLawId, locationId: item.locationId, title: item.name, docType: 'SECTION', documents: { items: [], size: 0 } }));
+        return jsonResponse({ success: true, message: '', responseType: 'single', result: { lawId: treeLawId, documents: { lawId: treeLawId, locationId: '', title: treeLawId, docType: 'CHAPTER', documents: { items, size: items.length } } } });
+      }
       world.requests.push(url);
-      return jsonResponse({ success: false, message: 'no such section' }, 404);
+      const [, lawId, locationId] = new URL(url).pathname.match(/^\/api\/3\/laws\/([^/]+)\/([^/]+)$/) || [];
+      const source = WATCHED_SOURCES.find(item => item.lawId === lawId && item.locationId === locationId);
+      if (!source) return jsonResponse({ success: false, message: 'no such section' }, 404);
+      const text = world.changes[source.id] ?? readFileSync(new URL(`../rubrics/statutes/${source.id}.txt`, import.meta.url), 'utf8');
+      // The live API writes a line break in `text` as a backslash and an n.
+      return jsonResponse({ success: true, message: '', responseType: 'single', result: { lawId, locationId, title: source.name, text: text.replace(/\n/g, '\\n'), activeDate: '2026-02-20' } });
     }
     if (!url.endsWith('/sql')) throw new Error(`Unexpected outbound request in test: ${url}`);
     const { query, params } = JSON.parse(init.body);
-    if (/^INSERT INTO job_runs/.test(query.replace(/\s+/g, ' ').trim())) world.jobRuns.push(params);
+    const q = query.replace(/\s+/g, ' ').trim();
+    world.sql.push({ query: q, params });
+    if (/^SELECT source_id, seen_fingerprint, emailed_fingerprint FROM statute_watch/.test(q)) {
+      return rowsResponse([['source_id', TEXT], ['seen_fingerprint', TEXT], ['emailed_fingerprint', TEXT]],
+        [...rows.values()].map(row => [row.source_id, row.seen_fingerprint ?? null, row.emailed_fingerprint ?? null]));
+    }
+    if (/^INSERT INTO statute_watch \(source_id, last_checked_at, last_read_at\)/.test(q)) {
+      const row = rows.get(params[0]) || { source_id: params[0] };
+      Object.assign(row, { seen_fingerprint: null, seen_text: null, differs_since: null, unread_since: null, email_claimed_at: row.email_claimed_at ?? null });
+      if (/emailed_fingerprint = NULL/.test(q)) row.emailed_fingerprint = null; else row.emailed_fingerprint ??= null;
+      rows.set(params[0], row);
+      return jsonResponse(EMPTY_ROWS);
+    }
+    if (/^INSERT INTO statute_watch \(source_id, seen_fingerprint, seen_text/.test(q)) {
+      const row = rows.get(params[0]) || { source_id: params[0], emailed_fingerprint: null, email_claimed_at: null };
+      Object.assign(row, { seen_fingerprint: params[1], seen_text: params[2], differs_since: row.differs_since ?? params[4] });
+      rows.set(params[0], row);
+      return jsonResponse(EMPTY_ROWS);
+    }
+    if (/^UPDATE statute_watch SET email_claimed_at = \$1::timestamptz WHERE source_id = \$2 AND seen_fingerprint = \$3/.test(q)) {
+      const row = rows.get(params[1]);
+      if (!row || row.seen_fingerprint !== params[2] || row.emailed_fingerprint === params[2] || row.email_claimed_at) return jsonResponse(EMPTY_ROWS);
+      row.email_claimed_at = params[0];
+      return rowsResponse([['source_id', TEXT]], [[params[1]]], 'UPDATE');
+    }
+    if (/^UPDATE statute_watch SET emailed_fingerprint = \$1, email_claimed_at = NULL WHERE source_id = \$2/.test(q)) {
+      Object.assign(rows.get(params[1]), { emailed_fingerprint: params[0], email_claimed_at: null });
+      return jsonResponse(EMPTY_ROWS);
+    }
+    if (/^UPDATE statute_watch SET email_claimed_at = NULL WHERE source_id = \$1/.test(q)) {
+      rows.get(params[0]).email_claimed_at = null;
+      return jsonResponse(EMPTY_ROWS);
+    }
+    if (/statute_watch/.test(q)) return jsonResponse({ message: `The fake table does not know this statement: ${q}` }, 500);
+    if (/^INSERT INTO job_runs/.test(q)) world.jobRuns.push(params);
     return jsonResponse(EMPTY_ROWS);
   };
   return world;
@@ -6869,7 +6927,7 @@ async function withSenateKey(key, fn) {
 
 const runStatuteWatch = baseUrl => fetch(`${baseUrl}/api/cron/statute-watch`, { headers: { authorization: `Bearer ${process.env.CRON_SECRET}` } });
 
-test("the statute-watch route is closed without the scheduler's secret", async () => {
+test("the statute-watch route is closed without the scheduler's secret and records its run", async () => {
   const world = statuteWatchWorld();
   const server = await startServer(app);
   try {
@@ -6880,6 +6938,15 @@ test("the statute-watch route is closed without the scheduler's secret", async (
       assert.deepEqual(await wrong.json(), { error: 'Unauthorized' });
       assert.equal(world.requests.length, 0, 'the Senate was asked on a request without the secret');
       assert.equal(world.jobRuns.length, 0);
+
+      const response = await runStatuteWatch(server.baseUrl);
+      assert.equal(response.status, 200);
+      assert.deepEqual(await response.json(), { ok: true, checked: WATCHED_SOURCES.length, differing: [], unread: [], failed: [] });
+      assert.equal(world.requests.length, WATCHED_SOURCES.length);
+      assert.equal(world.jobRuns.length, 1);
+      assert.equal(String(world.jobRuns[0][0]), 'statute-watch');
+      assert.equal(String(world.jobRuns[0][1]), 'true');
+      assert.equal(world.rows.size, WATCHED_SOURCES.length, 'every source is recorded as read');
     }))));
   } finally {
     await server.close();
@@ -6905,6 +6972,62 @@ test('a failed statute-watch step answers 500 and emails the failed step', async
       assert.match(sent[0].subject, /1 step of the statute watch job failed/);
       assert.match(sent[0].html, /check the watched statutes/);
     })));
+  } finally {
+    await server.close();
+  }
+});
+
+test('a watched section missing from its law\'s current tree is reported, and emailed as no longer in the law', async () => {
+  const world = statuteWatchWorld({ gone: ['CPLR-214-A'] });
+  const server = await startServer(app);
+  try {
+    await capturingLogs(() => withSenateKey('senate-test-key', () => withOperatorMail(async sent => {
+      await withOutboundHttp(world.handler, async () => {
+        const response = await runStatuteWatch(server.baseUrl);
+        assert.equal(response.status, 200);
+        assert.deepEqual(await response.json(), { ok: true, checked: WATCHED_SOURCES.length, differing: ['CPLR-214-A'], unread: [], failed: [] });
+      });
+      assert.equal(world.treeRequests.length, new Set(WATCHED_SOURCES.filter(source => source.kind === 'section').map(source => source.lawId)).size, 'one tree a law');
+      assert.equal(sent.length, 1);
+      assert.equal(sent[0].subject, 'NYCMalpractice.ai: CPLR § 214-a has changed');
+      assert.match(sent[0].html, /no longer in its law's current text/);
+      assert.ok(!sent[0].html.includes('senate-test-key'), 'the key is in the email');
+    })));
+  } finally {
+    await server.close();
+  }
+});
+
+test('through the real sendOperatorNotice, a notice that does not go out leaves the change unemailed', async () => {
+  const approved = readFileSync(new URL('../rubrics/statutes/CPLR-214-A.txt', import.meta.url), 'utf8');
+  const world = statuteWatchWorld({ changes: { 'CPLR-214-A': `${approved.trim()}\nA new subdivision the Senate has added.` } });
+  const server = await startServer(app);
+  try {
+    await capturingLogs(() => withSenateKey('senate-test-key', async () => {
+      // The test world's mail does not send: the notice reports { sent: false }, and the change stays to be emailed.
+      await withoutMail(() => withOutboundHttp(world.handler, async () => {
+        const response = await runStatuteWatch(server.baseUrl);
+        assert.equal(response.status, 200);
+        assert.deepEqual(await response.json(), { ok: true, checked: WATCHED_SOURCES.length, differing: ['CPLR-214-A'], unread: [], failed: [] });
+      }));
+      const row = world.rows.get('CPLR-214-A');
+      assert.match(row.seen_fingerprint, /^sha256:/);
+      assert.equal(row.emailed_fingerprint, null, 'a notice that did not go out was marked emailed');
+      assert.equal(row.email_claimed_at, null, 'the claim was not given up');
+      assert.ok(world.sql.some(call => /^UPDATE statute_watch SET email_claimed_at = \$1::timestamptz WHERE source_id = \$2 AND seen_fingerprint/.test(call.query)), 'the email was never claimed');
+
+      // The next night, with the mail working, the one email goes.
+      await withOperatorMail(async sent => {
+        await withOutboundHttp(world.handler, async () => {
+          assert.equal((await runStatuteWatch(server.baseUrl)).status, 200);
+        });
+        assert.equal(sent.length, 1);
+        assert.equal(sent[0].subject, 'NYCMalpractice.ai: CPLR § 214-a has changed');
+        assert.ok(sent[0].html.includes('npm run law:approve -- CPLR-214-A sha256:'));
+        assert.ok(!sent[0].html.includes('senate-test-key'), 'the key is in the email');
+      });
+      assert.equal(world.rows.get('CPLR-214-A').emailed_fingerprint, row.seen_fingerprint);
+    }));
   } finally {
     await server.close();
   }

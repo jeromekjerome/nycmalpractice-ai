@@ -6737,3 +6737,44 @@ test('an upload of measurements stores its rows for this app, a second identical
     await server.close();
   }
 });
+
+test('sendOperatorNotice says whether the notice went out, and notifyOperator still never throws', async () => {
+  const { sendOperatorNotice, notifyOperator } = await import('../auction.js');
+  const nodemailer = (await import('nodemailer')).default;
+  const original = nodemailer.createTransport;
+  const saved = { NOTIFICATION_EMAIL: process.env.NOTIFICATION_EMAIL, SMTP_USER: process.env.SMTP_USER, SMTP_PASS: process.env.SMTP_PASS };
+  const quiet = { log: console.log, warn: console.warn, error: console.error };
+  console.log = console.warn = console.error = () => {};
+  try {
+    process.env.NOTIFICATION_EMAIL = 'ops@example.test';
+    process.env.SMTP_USER = 'ops@example.test';
+    delete process.env.NOTIFICATION_EMAIL;
+    assert.deepEqual(await sendOperatorNotice('s', '<p>h</p>'), { sent: false, reason: 'NOTIFICATION_EMAIL is not set' });
+    await assert.doesNotReject(notifyOperator('s', '<p>h</p>'));
+
+    process.env.NOTIFICATION_EMAIL = 'ops@example.test';
+    delete process.env.SMTP_USER;
+    assert.deepEqual(await sendOperatorNotice('s', '<p>h</p>'), { sent: false, reason: 'the mail settings are not set' });
+    await assert.doesNotReject(notifyOperator('s', '<p>h</p>'));
+
+    process.env.SMTP_USER = 'ops@example.test';
+    process.env.SMTP_PASS = 'smtp-sentinel-password-123';
+    nodemailer.createTransport = () => ({ sendMail: async () => { throw new Error('535 login failed for smtp-sentinel-password-123'); } });
+    const failed = await sendOperatorNotice('s', '<p>h</p>');
+    assert.equal(failed.sent, false);
+    assert.match(failed.reason, /^the send failed: 535 login failed for /);
+    assert.doesNotMatch(failed.reason, /smtp-sentinel-password-123/);
+    await assert.doesNotReject(notifyOperator('s', '<p>h</p>'));
+
+    const mail = [];
+    nodemailer.createTransport = () => ({ sendMail: async message => { mail.push(message); } });
+    assert.deepEqual(await sendOperatorNotice('A subject', '<p>Body</p>'), { sent: true });
+    assert.deepEqual(mail, [{ from: 'ops@example.test', to: 'ops@example.test', subject: 'A subject', html: '<p>Body</p>' }]);
+  } finally {
+    Object.assign(console, quiet);
+    nodemailer.createTransport = original;
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name]; else process.env[name] = value;
+    }
+  }
+});

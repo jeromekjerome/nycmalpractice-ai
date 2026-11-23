@@ -807,13 +807,30 @@ export async function deliverLeadByHand({ sessionId, firmId, price, type, leadDa
   return { ok: true, leadId, emailed: true };
 }
 
-// Emails the operator (NOTIFICATION_EMAIL). Never throws: a notice that cannot be sent is logged.
-export async function notifyOperator(subject, html) {
+// Emails the operator (NOTIFICATION_EMAIL) and says whether it went out: { sent: true }, or { sent: false, reason }.
+// Never throws. A caller that must know the notice arrived (the statute watch's alerts) reads the result; one that
+// need not uses notifyOperator.
+export async function sendOperatorNotice(subject, html) {
   const adminEmail = process.env.NOTIFICATION_EMAIL;
-  if (!adminEmail) { console.warn(`[operator notice, NOTIFICATION_EMAIL not set] ${subject}`); return; }
+  if (!adminEmail) return { sent: false, reason: 'NOTIFICATION_EMAIL is not set' };
   const t = getTransporter();
-  if (!t) { console.log(`[EMAIL MOCK] Operator notice: ${subject} → ${adminEmail}`); return; }
-  await t.sendMail({ from: process.env.SMTP_USER, to: adminEmail, subject, html }).catch(err => console.error('Operator notice failed:', err.message));
+  if (!t) return { sent: false, reason: 'the mail settings are not set' };
+  try {
+    await t.sendMail({ from: process.env.SMTP_USER, to: adminEmail, subject, html });
+    return { sent: true };
+  } catch (err) {
+    return { sent: false, reason: `the send failed: ${withoutKeys(err?.message)}` };
+  }
+}
+
+// The quiet form of the same: a notice that cannot be sent is logged. Never throws.
+export async function notifyOperator(subject, html) {
+  const result = await sendOperatorNotice(subject, html);
+  if (result.sent) return;
+  const adminEmail = process.env.NOTIFICATION_EMAIL;
+  if (!adminEmail) console.warn(`[operator notice, NOTIFICATION_EMAIL not set] ${subject}`);
+  else if (result.reason === 'the mail settings are not set') console.log(`[EMAIL MOCK] Operator notice: ${subject} → ${adminEmail}`);
+  else console.error('Operator notice failed:', result.reason.replace(/^the send failed: /, ''));
 }
 
 function escapeHtml(value) {

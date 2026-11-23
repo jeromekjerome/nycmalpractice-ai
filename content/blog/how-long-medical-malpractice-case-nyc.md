@@ -14,7 +14,7 @@ Medical malpractice cases can be some of the most complex and time-consuming civ
 
 The journey of a medical malpractice case typically begins with your consultation with an attorney. During this phase, your lawyer will review your medical records, interview witnesses, and conduct an initial assessment of whether your case has merit. This initial phase can take anywhere from a few weeks to several months, depending on the complexity of the medical issues involved and the volume of records that must be reviewed.
 
-In New York, your attorney generally must file a certificate of merit with the complaint, stating that the attorney has reviewed the facts and consulted at least one physician who believes there is a reasonable basis for the case (CPLR §3012-a). Gathering expert opinions and preparing the necessary documentation can add 3-6 months to the pre-litigation phase.
+In New York, your attorney generally must file a certificate of merit with the complaint, stating that the attorney has reviewed the facts, consulted at least one physician, and concluded from that review and consultation that there is a reasonable basis for the case (CPLR §3012-a). Gathering expert opinions and preparing the necessary documentation can add 3-6 months to the pre-litigation phase.
 
 ## Filing and Pre-Trial Discovery
 

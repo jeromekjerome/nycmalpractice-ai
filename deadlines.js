@@ -1,8 +1,9 @@
 // Copyright (c) 2026 Jerome W. Dewald. All rights reserved.
 
 // A claim against a public hospital has a far shorter first deadline than the usual 2 years and 6
-// months: a written notice within 90 days (General Municipal Law § 50-e for New York City and county
-// hospitals; Court of Claims Act § 10 for State hospitals such as SUNY Downstate). When the visitor's
+// months: within 90 days, a written notice for New York City and county hospitals
+// (General Municipal Law § 50-e), and a claim or a notice of intention to file one for State hospitals
+// such as SUNY Downstate (Court of Claims Act § 10). When the visitor's
 // own words name one, the page shows that deadline beside the reply. Only the visitor's messages are
 // read, because the replies themselves name Bellevue as an example. A false alarm costs a sentence of
 // reading; a missed one can cost the claim, so the names are matched generously.

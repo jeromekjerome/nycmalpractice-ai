@@ -219,7 +219,7 @@ test('when every AI provider fails, the question goes back in the box and the de
   // The notice the visitor's own words call for is shown though no reply came, once however often they try again.
   const notices = page.locator('#conversation .deadline-notice');
   await expect(notices).toHaveCount(1);
-  await expect(notices).toContainText('a written notice of the claim generally must be filed within 90 days');
+  await expect(notices).toContainText('a written notice of the claim generally must be served within 90 days');
   await page.locator('#userInput').press('Enter');
   await expect(page.locator('#conversation .msg-notice')).toHaveCount(2);
   await expect(notices).toHaveCount(1);

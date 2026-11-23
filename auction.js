@@ -77,7 +77,7 @@ Respond ONLY with valid JSON:
 
 A viable lead requires score >= 55 AND confidence >= 0.65.
 sol_status: score 10 if well within SOL, lower if approaching deadline, 1-2 if likely expired.
-Malpractice SOL in NY: 2.5 years from act/omission or the end of continuous treatment (personal); 2 years from death (wrongful death). A missed cancer diagnosis runs from discovery (Lavern's Law, 7-year outer limit); a foreign object allows 1 year from discovery. Public hospitals: 90-day notice of claim and 1 year and 90 days to sue.`,
+Malpractice SOL in NY: 2.5 years from act/omission or the end of continuous treatment (personal); 2 years from death (wrongful death). A missed cancer diagnosis runs from discovery (Lavern's Law, 7-year outer limit); a foreign object allows 1 year from discovery. Public hospitals: 90-day notice of claim and 1 year and 90 days to sue; for a death, the notice runs from the estate representative's appointment and suit is due within 2 years of the death.`,
       }],
       json: true,
       maxTokens: 300,

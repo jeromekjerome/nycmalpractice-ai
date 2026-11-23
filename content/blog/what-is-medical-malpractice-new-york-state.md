@@ -70,7 +70,7 @@ New York imposes strict time limits—called statutes of limitations—for filin
 - **A foreign object left in your body:** you have 1 year from when you discovered it, or reasonably should have, even if the 2 years and 6 months have already run.
 - **A missed cancer diagnosis (Lavern's Law):** the 2 years and 6 months run from when you knew, or reasonably should have known, of the error and the harm it caused, but the lawsuit must be filed no later than 7 years after the error.
 
-Some deadlines are much shorter. A claim against NYC Health + Hospitals, such as Bellevue, Kings County or Elmhurst, or against another city- or county-run hospital, needs a notice of claim within **90 days** and a lawsuit within 1 year and 90 days. A wrongful death claim must be filed within **2 years** of the death. For a child, the deadline is extended, but in malpractice cases never beyond 10 years after the malpractice (CPLR §208).
+Some deadlines are much shorter. A claim against NYC Health + Hospitals, such as Bellevue, Kings County or Elmhurst, or against another city- or county-run hospital, needs a notice of claim within **90 days** and a lawsuit within 1 year and 90 days (for a death, the 90 days run from the estate representative's appointment). A wrongful death claim must be filed within **2 years** of the death, against a public hospital too. For a child, the deadline is extended, but in malpractice cases never beyond 10 years after the malpractice (CPLR §208).
 
 Because these rules have exceptions, have an attorney confirm your deadline as soon as possible.
 

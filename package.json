@@ -13,6 +13,13 @@
         "models:measure": "node --env-file=.env measure/run.mjs",
         "models:report": "node measure/report.mjs",
         "models:upload": "node --env-file=.env measure/upload.mjs",
+        "law:test-alert": "node --env-file=.env law.mjs test-alert",
+        "law:find": "node --env-file=.env law.mjs find",
+        "law:fetch": "node --env-file=.env law.mjs fetch",
+        "law:check": "node --env-file=.env law.mjs check",
+        "law:report": "node law.mjs report",
+        "law:approve": "node --env-file=.env law.mjs approve",
+        "law:reviewed": "node law.mjs reviewed",
         "test:e2e": "playwright test",
         "test:e2e:headed": "playwright test --headed"
     },

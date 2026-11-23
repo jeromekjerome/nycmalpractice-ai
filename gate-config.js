@@ -19,6 +19,12 @@ export function normalizeMode(mode) {
 // New York law the models may state wrongly (see the file's "purpose").
 export const CURRENT_LAW_FILE = new URL('./rubrics/ny_malpractice_current_law.json', import.meta.url);
 
+// The name the statute watch's notices carry in their subjects.
+export const SITE_NAME = 'NYCMalpractice.ai';
+
+// The statutes' texts the app keeps, one file for each statute the statute watch follows.
+export const STATUTE_TEXTS_DIR = new URL('./rubrics/statutes/', import.meta.url);
+
 // Who the evaluator is told it grades replies for.
 export const SERVICE_DESCRIPTION = 'a New York City medical-malpractice legal-information service';
 

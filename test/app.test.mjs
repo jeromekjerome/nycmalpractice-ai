@@ -753,6 +753,48 @@ test('POST /api/contact with consent hands the lead off with the contact details
   });
 });
 
+test('firms are sent only the case type when the summary holds the visitor details', async () => {
+  const nodemailer = (await import('nodemailer')).default;
+  const mail = [];
+  const original = nodemailer.createTransport;
+  const smtpUser = process.env.SMTP_USER;
+  process.env.SMTP_USER = 'sender@example.test';
+  nodemailer.createTransport = () => ({ sendMail: async message => { mail.push(message); } });
+  try {
+    const world = contactWorld({
+      leadScore: { ...leadScoreOf(84), tier: 'hot', reserve: 200, preview: 'Jane Roe was told the scan was clear.' },
+      firms: [{ id: 7, name: 'Test Firm', email: 'firm@example.test' }],
+    });
+    const handler = async (url, init) => {
+      if (url.endsWith('/sql') && /^INSERT INTO auctions/.test(JSON.parse(init.body).query.replace(/\s+/g, ' ').trim())) {
+        const { params } = JSON.parse(init.body);
+        world.calls.sql.push({ query: 'INSERT INTO auctions', params });
+        return rowsResponse([['id', INT], ['case_type', TEXT], ['tier', TEXT], ['quality_score', INT], ['lead_preview', TEXT], ['closes_at', TIMESTAMPTZ]],
+          [['77', 'misdiagnosis', 'hot', '84', params.find(param => typeof param === 'string' && /request in New York|scan was clear/.test(param)), '2030-01-01 00:00:00+00']], 'INSERT');
+      }
+      return world.handler(url, init);
+    };
+    const server = await startServer(app);
+    try {
+      await withOutboundHttp(handler, async () => {
+        const { response } = await postJson(server.baseUrl, '/api/contact', { sessionId: 'sess-preview', ...CONTACT });
+        assert.equal(response.status, 200);
+      });
+    } finally {
+      await server.close();
+    }
+    const inserted = world.calls.sql.find(call => call.query === 'INSERT INTO auctions');
+    assert.ok(inserted.params.includes('A failure to diagnose request in New York.'), 'the stored summary still holds the visitor name');
+    const toFirm = mail.find(message => message.to === 'firm@example.test');
+    assert.ok(toFirm, 'no email reached the firm');
+    assert.ok(toFirm.html.includes('A failure to diagnose request in New York.'));
+    assert.ok(!/Jane|Roe/.test(toFirm.html), 'the email to firms holds the visitor name');
+  } finally {
+    nodemailer.createTransport = original;
+    if (smtpUser === undefined) delete process.env.SMTP_USER; else process.env.SMTP_USER = smtpUser;
+  }
+});
+
 test('POST /api/contact sends nothing to firms without a qualifying score or a second time', async () => {
   await withoutMail(async () => {
     for (const [label, options] of [

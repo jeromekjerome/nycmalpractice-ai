@@ -47,6 +47,8 @@
     "law-file.js": "8333ef58eaf1ede0c4d841da9b3f43363df1c7c3498f17848a4412a2033c3363",
     "test/law-file.test.mjs": "7428ce78c60fe47dedbfda4f46c7bdfb69bfb2cae64cc6b059d71916187fe5af",
     "statute-watch.js": "55f4306a4850d7f611a187b8063a397f720580eebe023bc593a9b66597d442b4",
-    "test/statute-watch.test.mjs": "5226bc9406558da0746a562eb1f592456fac980d74d6abe879b5e178fff9e387"
+    "test/statute-watch.test.mjs": "5226bc9406558da0746a562eb1f592456fac980d74d6abe879b5e178fff9e387",
+    "lead-preview.js": "79a42785cc18465fe69e3dfa9e9bf385536d2e11e332c80dd8f7912c4e2a7181",
+    "test/lead-preview.test.mjs": "5d2d965c6eb623d25a2d6cdee0f6a696726af2e8291f7dd46711b2baeabfa23d"
   }
 }

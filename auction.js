@@ -8,6 +8,7 @@ import { runJob, withoutKeys } from './providers.js';
 import { chains } from './model-settings.js';
 import { renderCurrentLawForPrompt } from './gatekeeper.js';
 import { APP_URL, MAX_FIRMS_PER_LEAD, caseTypeLabel } from './site.js';
+import { previewForFirms } from './lead-preview.js';
 import { randomInt } from 'node:crypto';
 import { isDemo, demoMailer } from './demo.js';
 
@@ -309,7 +310,7 @@ export async function createAuction(sessionId, caseType, scoreData, leadData) {
   const closesAt = new Date(Date.now() + config.auctionHours * 60 * 60 * 1000);
   const [auction] = await sql`
     INSERT INTO auctions (session_id, case_type, quality_score, tier, reserve_price, current_bid, closes_at, score_dimensions, lead_preview, lead_data)
-    VALUES (${sessionId}, ${caseType}, ${scoreData.score}, ${scoreData.tier}, ${config.reserve}, ${config.reserve}, ${closesAt}, ${JSON.stringify(scoreData.dimensions)}, ${scoreData.preview}, ${JSON.stringify(leadData)})
+    VALUES (${sessionId}, ${caseType}, ${scoreData.score}, ${scoreData.tier}, ${config.reserve}, ${config.reserve}, ${closesAt}, ${JSON.stringify(scoreData.dimensions)}, ${previewForFirms(scoreData.preview, leadData?.contact, caseTypeLabel(caseType))}, ${JSON.stringify(leadData)})
     RETURNING *
   `;
   try {

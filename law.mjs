@@ -396,7 +396,7 @@ function reviewed(args, { lawUrl, now, out, err }) {
     source.seen = merged;
     source.reviewed_on = todayInNewYork(now);
     writeLawFile(lawUrl, law);
-    out(`Marked opinions ${[...new Set(numbers.map(Number))].sort((a, b) => a - b).join(', ')} of ${id} as reviewed; reviewed_on is ${source.reviewed_on}.`);
+    out(`Marked opinions ${[...new Set(numbers.map(Number))].sort((a, b) => a - b).join(', ')} of ${id} as reviewed; reviewed_on is ${source.reviewed_on}. Commit the notes file and push it; the watch reads the deployed copy.`);
     return 0;
   }
   if (numbers.length) {
@@ -410,7 +410,7 @@ function reviewed(args, { lawUrl, now, out, err }) {
   }
   source.reviewed_on = todayInNewYork(now);
   writeLawFile(lawUrl, law);
-  out(`Set reviewed_on of ${id} to ${source.reviewed_on}.`);
+  out(`Set reviewed_on of ${id} to ${source.reviewed_on}. Commit the notes file and push it; the watch reads the deployed copy.`);
   return 0;
 }
 

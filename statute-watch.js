@@ -81,10 +81,13 @@ function tableFailure(error) {
     + 'Run npm run setup-db against the production database.');
 }
 
-// The sections, bills and listings of the notes file, each once. A source kept by hand has nothing to read it from.
+// The sections, bills and listings of the notes file, each once, the listings first and the rest in the notes file's order. A
+// source kept by hand has nothing to read it from.
 function watchedSources(law) {
   const seen = new Set();
-  return (Array.isArray(law?.sources) ? law.sources : []).filter(source => {
+  const all = Array.isArray(law?.sources) ? law.sources : [];
+  const ordered = [...all.filter(source => source?.kind === 'listing'), ...all.filter(source => source?.kind !== 'listing')];
+  return ordered.filter(source => {
     if (source?.kind !== 'section' && source?.kind !== 'bill' && source?.kind !== 'listing') return false;
     if (typeof source.id !== 'string' || !source.id || seen.has(source.id)) return false;
     seen.add(source.id);
@@ -231,7 +234,7 @@ function listingBlock({ source, read }, { law }) {
   if (requirements.length) parts.push(`<p>What the site does:</p>${requirementItems(requirements)}`);
   parts.push(`<p>If an opinion concerns lead services, paid recommendations, advertising, solicitation or AI intake, compare it with ${requirements.length ? 'the list above' : 'what the site does'} and take it to a lawyer. Otherwise mark it reviewed. Mark each one reviewed once you have read it, including any you take to a lawyer.</p>`);
   parts.push(officialPage(source));
-  parts.push(`<p>To mark them reviewed: <code>npm run law:reviewed -- ${[source.id, ...numbers].map(escapeHtml).join(' ')}</code></p>`);
+  parts.push(`<p>To mark them reviewed: <code>npm run law:reviewed -- ${[source.id, ...numbers].map(escapeHtml).join(' ')}</code> Then commit the notes file and push it in both apps; until it is pushed, the watch keeps listing them.</p>`);
   return parts.join('');
 }
 

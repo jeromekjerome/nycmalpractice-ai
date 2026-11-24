@@ -497,6 +497,7 @@ test('law reviewed renews a by-hand source and refuses any other', async () => {
     const folderBefore = folderState(statutesDir);
     const io = collecting();
     assert.equal(await main(['reviewed', 'NYCRR-1'], { ...io, ...deps }), 0);
+    assert.ok(io.lines.join('\n').includes('Commit the notes file and push it; the watch reads the deployed copy.'));
     const expected = structuredClone(law);
     expected.sources[2].reviewed_on = '2026-11-22';
     assert.equal(readFileSync(file, 'utf8'), formatLawFile(expected));
@@ -560,6 +561,7 @@ test('law reviewed adds opinion numbers to a listing in numeric order, once each
     assert.equal(readFileSync(file, 'utf8'), formatLawFile(expected));
     assert.match(io.lines.join('\n'), /1310, 1311/);
     assert.match(io.lines.join('\n'), /2026-11-22/);
+    assert.ok(io.lines.join('\n').includes('Commit the notes file and push it; the watch reads the deployed copy.'));
     const after = readFileSync(file, 'utf8');
     const again = collecting();
     assert.equal(await main(['reviewed', 'NYSBA-OPINIONS', '1310', '1310', '1305'], { ...again, ...deps }), 0);

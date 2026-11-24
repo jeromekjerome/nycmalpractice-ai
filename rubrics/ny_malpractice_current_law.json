@@ -1603,7 +1603,7 @@
       ],
       "files": [
         "lead-preview.js",
-        "summary.js"
+        "auction.js"
       ],
       "tests": [
         "firms are sent only the case type when the summary holds the visitor details"

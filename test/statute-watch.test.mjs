@@ -912,9 +912,16 @@ test('a listing with new opinions sends one email naming each opinion, every req
   assert.ok(html.includes('Shows the notice &lt;before&gt; typing &amp; more'));
   assert.ok(html.includes('Charges a firm its subscription'), 'every requirement, not only those resting on the listing');
   assert.ok(html.includes('npm run law:reviewed -- NYSBA-OPINIONS 1310 1311'));
+  assert.ok(html.includes('Then commit the notes file and push it in both apps; until it is pushed, the watch keeps listing them.'));
   assert.ok(html.includes('<p>Nothing on the site changes until you act.</p>'));
   assert.ok(!html.includes('Senate'));
   assert.equal(table.row('NYSBA-OPINIONS').emailed_fingerprint, fingerprintOf(listingRead(OPINIONS).text));
+});
+
+test('a listing is read before the sections', async () => {
+  const { senate, watch } = world({ law: listingLaw() });
+  await watch(night(0));
+  assert.ok(senate.asked.indexOf('NYSBA-OPINIONS') < senate.asked.indexOf('CPLR-214'), senate.asked.join(','));
 });
 
 test('a listing opinion address that is not https is shown and not linked', async () => {

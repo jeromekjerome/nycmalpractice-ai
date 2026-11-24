@@ -13,7 +13,16 @@ import { withoutKeys } from './without-keys.js';
 
 export const NO_NEW_OPINIONS = 'No new opinions.';
 const DEFAULT_TIMEOUT_MS = 8000;
-const OPINION_LINK = /https:\/\/nysba\.org\/ethics-opinion-(\d+)-([a-z0-9-]+)\/?/gi;
+// An address on nysba.org (with or without www.) or a root-relative one, to ethics-opinion-<number> and an optional -<slug>,
+// ended by a slash, a quote, a ?, a # or white space. The number is the whole run of digits.
+const OPINION_LINK = /(?<=["'(=\s]|^)(?:https:\/\/(?:www\.)?nysba\.org)?\/ethics-opinion-(\d+)(?:-([a-z0-9%-]+?))?(?=[\/"'?#\s]|$)/gi;
+
+function titleOf(slug, number) {
+  if (!slug) return `Opinion ${number}`;
+  let words = slug;
+  try { words = decodeURIComponent(slug); } catch { /* a bad escape stays as written */ }
+  return words.toLowerCase().replace(/-+/g, ' ').trim() || `Opinion ${number}`;
+}
 
 function failure(reason) {
   return { ok: false, reason: withoutKeys(reason) };
@@ -25,7 +34,8 @@ export function parseOpinionList(html) {
   for (const match of String(html ?? '').matchAll(OPINION_LINK)) {
     const number = Number(match[1]);
     if (!Number.isSafeInteger(number) || found.has(number)) continue;
-    found.set(number, { number, title: match[2].toLowerCase().replace(/-+/g, ' ').trim(), url: match[0] });
+    const slug = match[2] ? match[2].replace(/^-+|-+$/g, '') : '';
+    found.set(number, { number, title: titleOf(slug, number), url: `https://nysba.org/ethics-opinion-${number}${slug ? `-${slug}` : ''}/` });
   }
   return [...found.values()].sort((a, b) => b.number - a.number);
 }

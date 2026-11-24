@@ -41,6 +41,28 @@ test('a page that never answers is reported as timed out', async () => {
   const never = (url, { signal }) => new Promise(() => {});
   assert.deepEqual(await readOpinionListing(source, { fetchImpl: never, timeoutMs: 20 }), { ok: false, reason: 'the request timed out' });
 });
+test('links with no slug, with www., or relative are read as new opinions', async () => {
+  const mixed = `<a href="https://nysba.org/ethics-opinion-1309-termination-of-representation/">seen</a>
+<a href="https://nysba.org/ethics-opinion-1310/">a</a>
+<a href="https://www.nysba.org/ethics-opinion-1311-with-www/">b</a>
+<a href='/ethics-opinion-1312-relative-link'>c</a>`;
+  const read = await readOpinionListing({ ...source, seen: [1309] }, { fetchImpl: answering(200, mixed) });
+  assert.deepEqual(read.opinions.map(o => o.number), [1312, 1311, 1310]);
+  assert.deepEqual(read.opinions.map(o => o.url), [
+    'https://nysba.org/ethics-opinion-1312-relative-link/',
+    'https://nysba.org/ethics-opinion-1311-with-www/',
+    'https://nysba.org/ethics-opinion-1310/',
+  ]);
+  assert.deepEqual(read.opinions.map(o => o.title), ['relative link', 'with www', 'Opinion 1310']);
+});
+test('a longer number is not read as a shorter one', () => {
+  const list = parseOpinionList('<a href="https://nysba.org/ethics-opinion-13100-long/">x</a>');
+  assert.deepEqual(list.map(o => o.number), [13100]);
+});
+test('a percent-encoded slug is kept whole', () => {
+  const list = parseOpinionList('<a href="https://nysba.org/ethics-opinion-1310-caf%C3%A9-rules/">x</a>');
+  assert.equal(list[0].url, 'https://nysba.org/ethics-opinion-1310-caf%C3%A9-rules/');
+});
 test('unseenOpinions leaves out earlier and seen numbers', () => {
   assert.deepEqual(unseenOpinions(source, parseOpinionList(page)).map(o => o.number), [1309]);
 });

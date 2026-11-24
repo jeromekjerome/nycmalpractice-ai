@@ -169,7 +169,7 @@
             <h3 class="hitl-title" id="hitlHeading">Supervising attorney checks</h3>
             <p class="hitl-intro">Confirm all three to accept this lead. They start unchecked each time this page opens; when you accept, they are recorded with the lead under your firm's supervising attorney on file.</p>
             <div class="hitl-item">
-              <label class="hitl-label"><input type="checkbox" class="hitl-check" id="hitlSol" autocomplete="off" aria-describedby="hitlSolHelp"> I verified the filing deadline myself (CPLR §214-a, or EPTL §5-4.1 for a death) and any 90-day notice of claim for a public hospital.</label>
+              <label class="hitl-label"><input type="checkbox" class="hitl-check" id="hitlSol" autocomplete="off" aria-describedby="hitlSolHelp"> I verified the filing deadline myself (CPLR §214-a, or EPTL §5-4.1 for a death) and any 90-day notice deadline for a public hospital.</label>
               <p class="hitl-help" id="hitlSolHelp" hidden></p>
             </div>
             <div class="hitl-item">
@@ -224,7 +224,7 @@
     // The deadline codes deadlines.js returns, as the firm should read them.
     const DEADLINES = {
       public_hospital: {
-        title: '90-day notice of claim: public hospital',
+        title: '90-day notice deadline: public hospital',
         desc: 'The client names a hospital run by New York City, a county or the State. A written notice of claim is due within 90 days for city and county hospitals (General Municipal Law § 50-e); for State hospitals such as SUNY Downstate, a claim or a notice of intention to file one is due within 90 days (Court of Claims Act § 10).',
       },
       federal: {

@@ -246,7 +246,7 @@ TURN 2: Ask ONE targeted question about the most critical factor — either the 
 
   if (turn === 3) return base + `
 
-TURN 3: Provide a preliminary assessment covering: (1) whether the timeline appears within the 2.5-year SOL, (2) whether a later start or a shorter deadline may apply (continuous treatment, a foreign object, a missed cancer diagnosis under Lavern's Law, infancy, a public hospital's 90-day notice of claim, or a federal provider's 2-year administrative claim), (3) the key causation question — what the standard of care required and how it was allegedly breached. Reference relevant cases.`;
+TURN 3: Provide a preliminary assessment covering: (1) whether the timeline appears within the 2.5-year SOL, (2) whether a later start or a shorter deadline may apply (continuous treatment, a foreign object, a missed cancer diagnosis under Lavern's Law, infancy, a public hospital's 90-day notice deadline, or a federal provider's 2-year administrative claim), (3) the key causation question — what the standard of care required and how it was allegedly breached. Reference relevant cases.`;
 
   if (turn === 4) return base + `
 
@@ -384,7 +384,7 @@ Rules:
 - score: integer 1-10, the overall strength of the malpractice claim on the facts given so far
 - verdict: "strong" (7-10), "moderate" (4-6), "weak" (1-3); it must agree with the score
 - complexityEstimate: null if too little is known
-- solWarning: name the deadline that may be close, or a shorter one that may apply (a public hospital's 90-day notice of claim, a federal provider's 2-year administrative claim); otherwise null. Do not compute a calendar date
+- solWarning: name the deadline that may be close, or a shorter one that may apply (a public hospital's 90-day notice deadline, a federal provider's 2-year administrative claim); otherwise null. Do not compute a calendar date
 - strengths: 2-3 specific factors from what the user actually described
 - weaknesses: 1-2 specific risks, gaps or defenses
 - Use only facts stated in the conversation. Do not invent facts and do not cite court cases`,

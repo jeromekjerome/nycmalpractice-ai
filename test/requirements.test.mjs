@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from './runner.mjs';
 import { calculateRefund } from '../auction.js';
+import { enforceDeterministicGate } from '../gatekeeper.js';
 import { CONTACT_CONSENT_TEXT, MAX_FIRMS_PER_LEAD } from '../site.js';
 
 const home = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
@@ -39,5 +40,42 @@ test('the words on how a firm is chosen match the code', () => {
   for (const name of ['deliverColdLead', 'deliverLeadByHand']) {
     const start = code.indexOf(`export async function ${name}`);
     assert.match(code.slice(start, code.indexOf('\n}\n', start)), /shuffled\(/, name);
+  }
+});
+
+const VISITOR_PAGES = ['index', 'about', 'disclaimer', 'privacy', 'terms'];
+const pageText = name => readFileSync(new URL(`../public/${name}.html`, import.meta.url), 'utf8');
+const RETIRED = [/get matched/i, /match you with/i, /qualified (?:New York|NYC)[^.<]{0,40}(?:attorney|lawyer)/i, /connected with a qualified attorney/i, /connect qualified leads/i, /Firms pay us for these referrals/i, /attorney referral/i, /that referral is not/i, /understand their rights/i, /like a referral/i];
+
+test('no visitor page uses the retired wording', () => {
+  for (const name of ['index', 'about', 'disclaimer', 'privacy']) for (const word of RETIRED) assert.doesNotMatch(pageText(name), word, name);
+  const script = readFileSync(new URL('../public/script.js', import.meta.url), 'utf8');
+  const ask = readFileSync(new URL('../ask.js', import.meta.url), 'utf8');
+  for (const word of RETIRED) { assert.doesNotMatch(script, word); assert.doesNotMatch(ask, word); }
+});
+test('the notice and the About page say firms pay, what is checked and what being chosen means', () => {
+  for (const text of [home, pageText('about')]) {
+    assert.match(text, /pay to take part/);
+    assert.match(text, /check only that/);
+    assert.match(text, /best or right one for you/);
+  }
+});
+test('the visitor pages say the site is not a law firm and gives no legal advice', () => {
+  for (const name of VISITOR_PAGES) { assert.match(pageText(name), /not a law firm/i, name); assert.match(pageText(name), /legal advice/i, name); }
+  for (const name of ['index', 'privacy', 'terms']) assert.ok(pageText(name).includes('NYCMalpractice.ai. Not a law firm. Not legal advice.'), name);
+});
+
+const BLOCK = ['I can connect you with a top New York malpractice attorney.', 'Our vetted firms can help.', 'This is the best lawyer for your case.', "We'll match you with the right firm."];
+const PASS = ['We do not recommend any lawyer.', 'You should speak with an attorney.', 'Consult a qualified attorney.', 'A qualified expert must review the case.', 'Being chosen does not mean a firm is the best or right one for you.', 'The best next step is to speak with an attorney soon.', 'On top of that, an attorney can check the deadline.', 'Have an attorney check this deadline soon.', 'It is best to call an attorney soon.', 'You have the right to an attorney.', 'It is best to see a lawyer.', 'I recommend that you see an attorney.', 'We recommend that you call a lawyer today.', 'Only a licensed attorney is qualified to give legal advice.', 'Speak with the experienced attorney you choose.'];
+
+async function violated(text, mode, id) {
+  const report = await enforceDeterministicGate({ required_checks: [], prohibited_checks: [] }, text, 5, mode, []);
+  return report.prohibited_checks.find(check => check.id === id)?.violated === true;
+}
+
+test('the reply check blocks vouching and passes ordinary advice', async () => {
+  for (const [mode, id] of [['personal', 'PROH-MM-04'], ['estate', 'PROH-MME-04']]) {
+    for (const text of BLOCK) assert.equal(await violated(text, mode, id), true, `${mode}: ${text}`);
+    for (const text of PASS) assert.equal(await violated(text, mode, id), false, `${mode}: ${text}`);
   }
 });

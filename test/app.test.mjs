@@ -897,7 +897,7 @@ test('the contact form shows the consent text the server stores, and the policy 
   assert.ok(page.includes(CONTACT_CONSENT_TEXT), 'the page shows different consent wording from the one stored');
   const policy = readFileSync(new URL('../public/privacy.html', import.meta.url), 'utf8').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
   assert.match(policy, /Nothing about your case goes to a law firm unless you use the contact form and agree to be contacted/);
-  assert.match(policy, /Firms pay us for these referrals/);
+  assert.match(policy, /Firms pay us to receive these requests/);
   assert.match(policy, /emailed case summary, we use your email address only to deliver that summary and do not save it in our database/);
   assert.doesNotMatch(policy, /implicit consent/);
   assert.doesNotMatch(policy, /We do not sell your data\./);
@@ -1191,7 +1191,7 @@ test('each visitor message gets the next step of the conversation script', async
     [1, 'TURN 2:'],
     [2, 'TURN 3:'],
     [3, 'TURN 4:'],
-    [4, 'TURN 5: If they want to speak with a qualified NYC malpractice attorney'],
+    [4, 'TURN 5: If they want to speak with a participating New York attorney'],
   ];
   for (const [earlier, expected] of steps) {
     clearSearchCache();
@@ -2409,7 +2409,7 @@ test('the personal and estate rubrics load, each with its disclaimer, citation g
     const rubric = loadRubric(mode);
     assert.equal(rubric.mode, mode);
     assert.deepEqual([...rubric.required_criteria, ...rubric.prohibited_criteria].map(c => c.id),
-      [1, 2, 3].map(n => `REQ-${prefix}-0${n}`).concat([1, 2, 3].map(n => `PROH-${prefix}-0${n}`)));
+      [1, 2, 3].map(n => `REQ-${prefix}-0${n}`).concat([1, 2, 3, 4].map(n => `PROH-${prefix}-0${n}`)));
     assert.equal(rubric.required_criteria[2].deterministic_check.phrase, 'This is general information, not legal advice');
     assert.equal(rubric.prohibited_criteria[0].deterministic_check.type, 'citation_anchoring');
     assert.equal(rubric.prohibited_criteria[1].deterministic_check.type, 'forbidden_patterns');

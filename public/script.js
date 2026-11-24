@@ -96,8 +96,8 @@ function updateModeUI() {
   estateLbl.classList.toggle('active', isEstate);
   document.getElementById('heroTitle').textContent   = isEstate ? 'Wrongful Death Malpractice\nfor New York Families' : 'Medical Malpractice Legal AI\nfor New York';
   document.getElementById('heroSubtitle').textContent = isEstate
-    ? 'Your loved one deserved better care. Get matched with a New York malpractice firm that handles cases like your family\'s.'
-    : 'Describe what happened. Get matched with a New York malpractice firm that handles cases like yours.';
+    ? 'Your loved one deserved better care. If your family chooses, your request goes to a participating New York law firm.'
+    : 'Describe what happened. If you choose, your request goes to a participating New York law firm.';
   document.getElementById('chatTitle').textContent  = isEstate ? 'Wrongful Death Claim Advisor' : 'Malpractice Case Advisor';
   document.getElementById('inputLabel').textContent = isEstate ? 'Describe what happened to your loved one' : 'Describe your situation';
   document.getElementById('userInput').placeholder  = isEstate
@@ -111,9 +111,9 @@ function updateModeUI() {
 
 function getModeWelcome() {
   if (currentMode === 'estate') {
-    return 'I\'m deeply sorry for your loss. I\'ll ask a few questions about what happened and, when your family is ready, match you with a New York malpractice firm that handles cases like yours.<br><br>When a family member dies because of a healthcare provider\'s negligence, the estate can seek accountability and compensation, but the deadline is only <strong>2 years from the date of death</strong>.<br><br><strong>To get started</strong> — tell me about your loved one: who they were, what the alleged medical error was, and when they passed away.';
+    return 'I\'m deeply sorry for your loss. I\'ll ask a few questions about what happened and, if your family chooses, send your request to a participating New York law firm.<br><br>When a family member dies because of a healthcare provider\'s negligence, the estate can seek accountability and compensation, but the deadline is only <strong>2 years from the date of death</strong>.<br><br><strong>To get started</strong> — tell me about your loved one: who they were, what the alleged medical error was, and when they passed away.';
   }
-  return 'Welcome. I\'ll ask a few questions about what happened and, when you\'re ready, match you with a New York malpractice firm that handles cases like yours.<br><br><strong>To get started</strong> — tell me what happened. What type of provider was involved, and what injury resulted?';
+  return 'Welcome. I\'ll ask a few questions about what happened and, if you choose, send your request to a participating New York law firm.<br><br><strong>To get started</strong> — tell me what happened. What type of provider was involved, and what injury resulted?';
 }
 
 // ─── Submit ───────────────────────────────────────────────────────────────────
@@ -277,7 +277,7 @@ async function submitContactForm(event) {
 function contactDoneMessage() {
   const done = document.createElement('div');
   done.className = 'msg msg-ai contact-done';
-  done.textContent = 'Thank you. Your request has been received, and a qualified New York malpractice attorney may contact you.';
+  done.textContent = 'Thank you. Your request has been received, and a participating New York attorney may contact you.';
   return done;
 }
 

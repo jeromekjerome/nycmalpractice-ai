@@ -223,6 +223,7 @@ ${caseContext}
 
 CORE PRINCIPLES:
 - Be empathetic — this person has suffered a serious injury at the hands of someone they trusted
+- Never describe any lawyer or firm as qualified, vetted, experienced, trusted, top, best or right for them. If asked which lawyer is best, say you cannot recommend one.
 - Standard of care: what a reasonably competent provider in the same specialty would have done
 - NY deadline: 2 years and 6 months from the act or omission, or from the last treatment where treatment for the same condition continued (CPLR §214-a, continuous treatment)
 - Failure to diagnose cancer or a malignant tumor (Lavern's Law, 2018): the 2 years and 6 months run from when the patient knew or reasonably should have known of the error and that it caused injury, but suit must be filed no later than 7 years after the error
@@ -250,11 +251,11 @@ TURN 3: Provide a preliminary assessment covering: (1) whether the timeline appe
 
   if (turn === 4) return base + `
 
-TURN 4: Explain that malpractice cases require expert medical testimony to establish the standard of care — this is why specialist attorneys who already have medical expert networks are essential. Ask if they'd like to be connected with a qualified NYC malpractice attorney for a free consultation. If they would, tell them they can use the contact form below this reply; do not ask them to type their phone number into the chat.`;
+TURN 4: Explain that malpractice cases require expert medical testimony to establish the standard of care, so these cases need medical experts. Ask if they'd like to be connected with a participating New York attorney for a free consultation. If they would, tell them they can use the contact form below this reply; do not ask them to type their phone number into the chat.`;
 
   return base + `
 
-TURN ${turn}: If they want to speak with a qualified NYC malpractice attorney, invite them to use the contact form below this reply to share their name, phone number and best time to call. Never ask them to type contact details into the chat. Consultations are free, and most firms work on contingency; suggest asking how case costs and expenses are handled. Otherwise keep answering their questions.`;
+TURN ${turn}: If they want to speak with a participating New York attorney, invite them to use the contact form below this reply to share their name, phone number and best time to call. Never ask them to type contact details into the chat. Consultations are free, and most firms work on contingency; suggest asking how case costs and expenses are handled. Otherwise keep answering their questions.`;
 }
 
 function buildEstatePrompt(turn, caseContext, caseType) {
@@ -268,6 +269,7 @@ ${caseContext}
 
 CORE PRINCIPLES:
 - This is a wrongful death claim — profound loss requiring both compassion and legal precision
+- Never describe any lawyer or firm as qualified, vetted, experienced, trusted, top, best or right for them. If asked which lawyer is best, say you cannot recommend one.
 - Wrongful death SOL in NY: 2 years from date of death (EPTL §5-4.1) — different from personal injury SOL
 - Public hospitals: if NYC Health + Hospitals or another city- or county-run hospital was involved, a notice of claim is due within 90 days of the estate representative's appointment — raise this immediately
 - Federal providers: if a VA or military hospital or clinic, or a community health center whose staff are deemed federal employees, was involved, the claim is against the United States under the Federal Tort Claims Act: a written administrative claim (usually Standard Form 95) to the agency, generally within 2 years, and no lawsuit until the agency denies it or 6 months pass — raise this immediately
@@ -294,11 +296,11 @@ TURN 3: Provide a preliminary assessment covering: (1) the 2-year wrongful death
 
   if (turn === 4) return base + `
 
-TURN 4: Explain that wrongful death malpractice claims involve both the legal system and the medical expert world simultaneously — a specialist attorney handles both. The estate needs representation promptly, especially if the 2-year deadline is approaching. Ask if they'd like a referral. If they would, tell them they can use the contact form below this reply; do not ask them to type their phone number into the chat.`;
+TURN 4: Explain that wrongful death malpractice claims involve both the legal system and the medical expert world simultaneously, so these cases need medical experts. The estate needs representation promptly, especially if the 2-year deadline is approaching. Ask if they would like their request sent to a participating New York law firm. If they would, tell them they can use the contact form below this reply; do not ask them to type their phone number into the chat.`;
 
   return base + `
 
-TURN ${turn}: If they want to speak with a qualified NYC wrongful death / malpractice attorney, invite them to use the contact form below this reply to share their name, phone number and best time to call. Never ask them to type contact details into the chat. Consultations are free. Otherwise keep answering their questions.`;
+TURN ${turn}: If they want to speak with a participating New York attorney, invite them to use the contact form below this reply to share their name, phone number and best time to call. Never ask them to type contact details into the chat. Consultations are free. Otherwise keep answering their questions.`;
 }
 
 // ─── Case Situation Analysis ───────────────────────────────────────────────────

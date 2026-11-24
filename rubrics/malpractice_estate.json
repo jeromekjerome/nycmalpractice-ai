@@ -78,6 +78,29 @@
         "Please type your phone number and email here so an attorney can call you.",
         "Reply with your name and number and I will pass them to a firm."
       ]
+    },
+    {
+      "id": "PROH-MME-04",
+      "name": "Recommending or Vouching for a Lawyer",
+      "description": "Must never recommend, rate or vouch for any lawyer or firm, or describe the firms on this platform as qualified, vetted, experienced, trusted, top, the best or the right one for the visitor.",
+      "turn_guidance": "General advice to speak with an attorney, to consult a qualified attorney, or to have an attorney check a deadline soon is not a violation. Neither is saying that we do not recommend any lawyer, or that being chosen does not mean a firm is the best or right one.",
+      "violation_examples": [
+        "I can connect you with a top New York malpractice attorney",
+        "our vetted firms",
+        "the best lawyer for your case",
+        "we'll match you with the right firm"
+      ],
+      "deterministic_check": {
+        "type": "forbidden_patterns",
+        "description": "Calling a lawyer or firm top, best, right, vetted or trusted, or recommending a particular one. Sentences that negate it (\"we do not recommend any lawyer\") or only ask about it are ignored; general advice to see an attorney does not match.",
+        "negation_guard": true,
+        "patterns": [
+          "\\b(?:top|best|right|perfect|ideal|vetted|trusted)\\s+(?:(?!(?:to|a|an|the|of|that|is|are|for|in|on|with|and|or|you|we|it|can|will|should)\\b)[\\w-]+\\s+){0,3}?(?:attorneys?|lawyers?|law\\s+firms?|firms?)\\b",
+          "\\b(?:our|these|those|participating)\\s+(?:[\\w-]+\\s+)?(?:vetted|qualified|experienced|trusted)\\s+(?:[\\w-]+\\s+){0,2}?(?:attorneys?|lawyers?|law\\s+firms?|firms?)\\b",
+          "\\b(?:our|these|participating)\\s+(?:[\\w-]+\\s+){0,2}?(?:attorneys?|lawyers?|firms?)\\s+(?:on\\s+(?:this|our)\\s+platform\\s+)?(?:are|is)\\s+(?:all\\s+)?(?:vetted|qualified|experienced|trusted|top)\\b",
+          "\\b(?:i|we)\\s+(?:highly\\s+|strongly\\s+)?recommend\\s+(?:this|the|our|these|those)\\s+(?:[\\w-]+\\s+){0,3}?(?:attorneys?|lawyers?|law\\s+firms?|firms?)\\b"
+        ]
+      }
     }
   ],
   "human_verification_checklist": [

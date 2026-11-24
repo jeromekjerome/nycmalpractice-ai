@@ -352,6 +352,7 @@
           loadOperations();
         } catch (e) {
           showMessage('Failed: ' + e.message, true);
+          loadOperations();
         } finally {
           btn.disabled = false;
         }

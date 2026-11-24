@@ -195,3 +195,22 @@ test('the Models section shows the chains and refuses to save an unmeasured mode
   expect(saves.at(-1)).toEqual({ answer: ['gpt-6-luna', 'gpt-6.2-sol'], small: ['gpt-6-luna'], override: true });
   expect(await page.evaluate(() => window.__xss)).toBeUndefined();
 });
+
+test('after a failed delivery the admin page reloads, so the finish button shows without a refresh', async ({ page }) => {
+  let reads = 0;
+  const row = extra => ({ session_id: 'sess-a', case_type: 'misdiagnosis', mode: 'estate', name: 'Jane Roe', phone: '5551234567', email: null, contact_consent_at: '2026-11-14T10:00:00Z', tier: 'hot', score: '84', leads: [], auctions: [], ...extra });
+  await page.route('**/api/admin/firms', route => route.fulfill(json({ firms: [], counts: { total: 0, active: 0 }, leadCounts: { total: 0 } })));
+  await mockOperations(page);
+  await page.route('**/api/admin/requests', route => { reads += 1; route.fulfill(json({ requests: [row(reads > 1 ? { unconfirmed_firms: [{ id: 12, name: 'Roe & Partners' }] } : {})], declineReasons: {} })); });
+  await page.route(url => url.pathname.endsWith('/deliver'), route => route.fulfill({ status: 502, contentType: 'application/json', body: JSON.stringify({ error: 'The charge could not be confirmed' }) }));
+  page.on('dialog', dialog => dialog.accept());
+
+  await page.goto('/admin.html');
+  await page.locator('#secretInput').fill('secret');
+  await page.locator('button.admin-btn').click();
+  const requests = page.locator('#requestsBody');
+  await expect(requests).toContainText('Jane Roe');
+  await requests.getByRole('button', { name: 'Deliver to a firm…' }).click();
+  await requests.getByRole('button', { name: 'Deliver to a firm drawn at random' }).click();
+  await expect(requests.locator('button[data-firm="12"]')).toHaveText('Finish delivery to Roe & Partners');
+});

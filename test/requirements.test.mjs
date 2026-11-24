@@ -3,7 +3,7 @@
 
 import './test-settings.mjs';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { test } from './runner.mjs';
 import { calculateRefund } from '../auction.js';
 import { enforceDeterministicGate } from '../gatekeeper.js';
@@ -88,4 +88,17 @@ test('the About page says who receives the details', () => {
   assert.ok(about.includes('firms bid on a summary written to leave out your name and contact details. The winning firm receives them; if it declines or does not answer, up to two more firms chosen at random may.'));
   assert.ok(!about.includes('only the winning firm'));
   assert.ok(!about.includes('has no name or contact details'));
+});
+
+test('every requirement names real sources, files and tests', () => {
+  const law = JSON.parse(readFileSync(new URL('../rubrics/ny_malpractice_current_law.json', import.meta.url), 'utf8'));
+  const sourceIds = new Set(law.sources.map(source => source.id));
+  const written = readdirSync(new URL('./', import.meta.url)).filter(name => name.endsWith('.test.mjs')).map(name => readFileSync(new URL(name, import.meta.url), 'utf8')).join('\n');
+  assert.ok(law.requirements.length >= 9);
+  for (const item of law.requirements) {
+    assert.ok(item.sources.length && item.files.length && item.tests.length, item.id);
+    for (const id of item.sources) assert.ok(sourceIds.has(id), `${item.id} source ${id}`);
+    for (const file of item.files) assert.ok(existsSync(new URL(`../${file}`, import.meta.url)), `${item.id} file ${file}`);
+    for (const name of item.tests) assert.ok(written.includes(`test('${name}'`) || written.includes(`test("${name}"`), `${item.id} test ${name}`);
+  }
 });

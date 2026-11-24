@@ -7092,7 +7092,7 @@ test('sendOperatorNotice says whether the notice went out, and notifyOperator st
 // small in-memory stand-in over Neon's HTTP endpoint. Nothing reaches the network or a database.
 
 const WATCHED_LAW = JSON.parse(readFileSync(new URL('../rubrics/ny_malpractice_current_law.json', import.meta.url), 'utf8'));
-const WATCHED_SOURCES = WATCHED_LAW.sources.filter(source => source.kind === 'section' || source.kind === 'bill');
+const WATCHED_SOURCES = WATCHED_LAW.sources.filter(source => source.kind === 'section' || source.kind === 'bill' || source.kind === 'listing');
 
 // The world of one or more nights: the Senate answers each section with its approved text unless `changes` gives another, and
 // the table keeps its rows from night to night.
@@ -7117,6 +7117,13 @@ function statuteWatchWorld({ changes = {}, gone = [] } = {}) {
       const text = world.changes[source.id] ?? readFileSync(new URL(`../rubrics/statutes/${source.id}.txt`, import.meta.url), 'utf8');
       // The live API writes a line break in `text` as a backslash and an n.
       return jsonResponse({ success: true, message: '', responseType: 'single', result: { lawId, locationId, title: source.name, text: text.replace(/\n/g, '\\n'), activeDate: '2026-02-20' } });
+    }
+    // The State Bar's list page, with exactly the opinions the notes file marks as seen, so it has nothing new.
+    if (url.startsWith('https://nysba.org/news-center/')) {
+      world.requests.push(url);
+      const listing = WATCHED_LAW.sources.find(source => source.kind === 'listing');
+      const links = listing.seen.map(number => `<a href="https://nysba.org/ethics-opinion-${number}-an-opinion/">Opinion ${number}</a>`).join('\n');
+      return new Response(`<html><body>${links}</body></html>`, { status: 200, headers: { 'content-type': 'text/html' } });
     }
     if (!url.endsWith('/sql')) throw new Error(`Unexpected outbound request in test: ${url}`);
     const { query, params } = JSON.parse(init.body);

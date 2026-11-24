@@ -344,6 +344,153 @@
       "name": "Grieving Families Act (S10171 / A11340, 2025-2026 session; vetoed as S4423 on December 5, 2025)",
       "url": "https://www.nysenate.gov/legislation/bills/2025/S10171",
       "reviewed_on": "2026-11-14"
+    },
+    {
+      "id": "JUD-478",
+      "kind": "section",
+      "name": "Judiciary Law § 478",
+      "lawId": "JUD",
+      "locationId": "478",
+      "url": "https://www.nysenate.gov/legislation/laws/JUD/478",
+      "fingerprint": "sha256:8e9e6c825be796e0e58a829175e0f147faf60b530a4e533b4de30e5494a30bea",
+      "approved_on": "2026-11-24",
+      "active_date": "2014-09-22"
+    },
+    {
+      "id": "JUD-479",
+      "kind": "section",
+      "name": "Judiciary Law § 479",
+      "lawId": "JUD",
+      "locationId": "479",
+      "url": "https://www.nysenate.gov/legislation/laws/JUD/479",
+      "fingerprint": "sha256:9b254b86db1a7e4db24a3518787d42b90dc0331d8717dade8d35893f501f7eda",
+      "approved_on": "2026-11-24",
+      "active_date": "2014-09-22"
+    },
+    {
+      "id": "JUD-482",
+      "kind": "section",
+      "name": "Judiciary Law § 482",
+      "lawId": "JUD",
+      "locationId": "482",
+      "url": "https://www.nysenate.gov/legislation/laws/JUD/482",
+      "fingerprint": "sha256:fcfbb5d3c4fcf2679caa17e2575ccb4e4039fcb7c38143b69ae93517c4b3e4bd",
+      "approved_on": "2026-11-24",
+      "active_date": "2014-09-22"
+    },
+    {
+      "id": "JUD-484",
+      "kind": "section",
+      "name": "Judiciary Law § 484",
+      "lawId": "JUD",
+      "locationId": "484",
+      "url": "https://www.nysenate.gov/legislation/laws/JUD/484",
+      "fingerprint": "sha256:9cfdab1abc64515251158ffd0faba2fdbd00ea7239f2dfe0924887da366d6a32",
+      "approved_on": "2026-11-24",
+      "active_date": "2014-09-22"
+    },
+    {
+      "id": "JUD-485",
+      "kind": "section",
+      "name": "Judiciary Law § 485",
+      "lawId": "JUD",
+      "locationId": "485",
+      "url": "https://www.nysenate.gov/legislation/laws/JUD/485",
+      "fingerprint": "sha256:1b5e0db252adb9bc963de27fd7dd16647325a06c1739a00b70eaf03dee1250af",
+      "approved_on": "2026-11-24",
+      "active_date": "2014-09-22"
+    },
+    {
+      "id": "JUD-495",
+      "kind": "section",
+      "name": "Judiciary Law § 495",
+      "lawId": "JUD",
+      "locationId": "495",
+      "url": "https://www.nysenate.gov/legislation/laws/JUD/495",
+      "fingerprint": "sha256:7c17b12334de81456f34d696dcd47e135faea05d41296db5aa48692ce5ddbc62",
+      "approved_on": "2026-11-24",
+      "active_date": "2014-09-22"
+    },
+    {
+      "id": "NYSBA-OPINIONS",
+      "kind": "listing",
+      "name": "NYSBA ethics opinions",
+      "url": "https://nysba.org/news-center/?show_category=ethics-opinions",
+      "watch_from": 1295,
+      "seen": [
+        1295,
+        1296,
+        1298,
+        1299,
+        1300,
+        1301,
+        1302,
+        1303,
+        1304,
+        1305,
+        1306,
+        1307,
+        1308,
+        1309
+      ],
+      "fingerprint": "sha256:209f21998161258bcb05940e446baa0a0f7fad84f29c0116b65c223854da3aa5",
+      "reviewed_on": "2026-11-24"
+    },
+    {
+      "id": "NYSBA-OP-1131",
+      "kind": "by_hand",
+      "name": "NYSBA Ethics Opinion 1131",
+      "url": "https://nysba.org/ethics-opinion-1131/",
+      "reviewed_on": "2026-11-24"
+    },
+    {
+      "id": "NYSBA-OP-1132",
+      "kind": "by_hand",
+      "name": "NYSBA Ethics Opinion 1132",
+      "url": "https://nysba.org/ethics-opinion-1132/",
+      "reviewed_on": "2026-11-24"
+    },
+    {
+      "id": "NYSBA-OP-1213",
+      "kind": "by_hand",
+      "name": "NYSBA Ethics Opinion 1213",
+      "url": "https://nysba.org/ethics-opinion-1213/",
+      "reviewed_on": "2026-11-24"
+    },
+    {
+      "id": "NYSBA-OP-1267",
+      "kind": "by_hand",
+      "name": "NYSBA Ethics Opinion 1267",
+      "url": "https://nysba.org/ethics-opinion-1267-paying-for-a-recommendation-or-referral/",
+      "reviewed_on": "2026-11-24"
+    },
+    {
+      "id": "NYSBA-OP-1271",
+      "kind": "by_hand",
+      "name": "NYSBA Ethics Opinion 1271",
+      "url": "https://nysba.org/ethics-opinion-1271-sharing-of-legal-fees-with-non-lawyer/",
+      "reviewed_on": "2026-11-24"
+    },
+    {
+      "id": "NYSBA-OP-1294",
+      "kind": "by_hand",
+      "name": "NYSBA Ethics Opinion 1294",
+      "url": "https://nysba.org/ethics-opinion-1294-solicitation-advertisement-lead-generators/",
+      "reviewed_on": "2026-11-24"
+    },
+    {
+      "id": "NY-RPC",
+      "kind": "by_hand",
+      "name": "New York Rules of Professional Conduct (NYSBA compilation, 10 August 2026)",
+      "url": "https://nysba.org/wp-content/uploads/2026/08/NYSBA-NY-Rules-of-Professional-Conduct-August-10-2026.pdf",
+      "reviewed_on": "2026-11-24"
+    },
+    {
+      "id": "NY-RPC-2026-AMENDMENT",
+      "kind": "by_hand",
+      "name": "The 2026 amendments to the advertising rules (NYSBA article)",
+      "url": "https://nysba.org/wp-content/uploads/2026/08/The-Amendments-to-the-Advertising-Rules.pdf",
+      "reviewed_on": "2026-11-24"
     }
   ],
   "register_files": [
@@ -1387,6 +1534,159 @@
         "CPLR-208"
       ],
       "about": "the limit on the infancy extension in malpractice cases"
+    }
+  ],
+  "requirements": [
+    {
+      "id": "CMP-NOTICE",
+      "does": "Shows the notice before the visitor types, in the message card above the box.",
+      "sources": [
+        "NYSBA-OP-1294"
+      ],
+      "files": [
+        "public/index.html"
+      ],
+      "tests": [
+        "the notice sits in the message card above the box"
+      ]
+    },
+    {
+      "id": "CMP-CONSENT",
+      "does": "States the summary, the payment and the sharing of contact details in the consent box.",
+      "sources": [
+        "NYSBA-OP-1294"
+      ],
+      "files": [
+        "site.js",
+        "public/index.html"
+      ],
+      "tests": [
+        "the consent box states the summary, the payment and the contact sharing"
+      ]
+    },
+    {
+      "id": "CMP-DISCLOSE",
+      "does": "Says that firms pay to take part, that the only check is registration in New York, and that being chosen does not make a firm the best or right one.",
+      "sources": [
+        "NYSBA-OP-1131",
+        "NY-RPC-2026-AMENDMENT"
+      ],
+      "files": [
+        "public/index.html",
+        "public/about.html"
+      ],
+      "tests": [
+        "the notice and the About page say firms pay, what is checked and what being chosen means"
+      ]
+    },
+    {
+      "id": "CMP-SELECTION",
+      "does": "Describes how a firm is chosen, and the description matches the code: up to three firms, by highest bid or at random.",
+      "sources": [
+        "NYSBA-OP-1131",
+        "NYSBA-OP-1294"
+      ],
+      "files": [
+        "public/index.html",
+        "site.js",
+        "auction.js"
+      ],
+      "tests": [
+        "the words on how a firm is chosen match the code"
+      ]
+    },
+    {
+      "id": "CMP-SUMMARY",
+      "does": "Sends firms a summary that carries no name, phone number or email address the visitor gave.",
+      "sources": [
+        "NYSBA-OP-1294"
+      ],
+      "files": [
+        "lead-preview.js",
+        "summary.js"
+      ],
+      "tests": [
+        "firms are sent only the case type when the summary holds the visitor details"
+      ]
+    },
+    {
+      "id": "CMP-NO-VOUCHING",
+      "does": "No page or reply recommends or vouches for a lawyer.",
+      "sources": [
+        "NY-RPC",
+        "NYSBA-OP-1131",
+        "NYSBA-OP-1132",
+        "NYSBA-OP-1213",
+        "NYSBA-OP-1267",
+        "NYSBA-OP-1271"
+      ],
+      "files": [
+        "gatekeeper.js",
+        "ask.js",
+        "rubrics/malpractice_personal.json",
+        "rubrics/malpractice_estate.json",
+        "public/index.html",
+        "public/about.html"
+      ],
+      "tests": [
+        "no visitor page uses the retired wording",
+        "the reply check blocks vouching and passes ordinary advice"
+      ]
+    },
+    {
+      "id": "CMP-PAYMENT",
+      "does": "Charges a firm its subscription and its bid, the flat price or, on a hand delivery, the price the operator sets. A refund depends only on the firm's recent declines and the kind of lead.",
+      "sources": [
+        "NY-RPC",
+        "NYSBA-OP-1131",
+        "NYSBA-OP-1271",
+        "NYSBA-OP-1294"
+      ],
+      "files": [
+        "auction.js"
+      ],
+      "tests": [
+        "a refund depends only on recent declines and the kind of lead"
+      ]
+    },
+    {
+      "id": "CMP-NOT-A-FIRM",
+      "does": "Says on its home, About, Disclaimer, Privacy and Terms pages that it is not a law firm and gives no legal advice.",
+      "sources": [
+        "JUD-478",
+        "JUD-484",
+        "JUD-485",
+        "JUD-495"
+      ],
+      "files": [
+        "public/index.html",
+        "public/about.html",
+        "public/disclaimer.html",
+        "public/privacy.html",
+        "public/terms.html"
+      ],
+      "tests": [
+        "the visitor pages say the site is not a law firm and gives no legal advice"
+      ]
+    },
+    {
+      "id": "CMP-NO-SOLICIT",
+      "does": "Contacts no one first. A firm receives a visitor's details only after the visitor asks and agrees.",
+      "sources": [
+        "JUD-479",
+        "JUD-482",
+        "JUD-485",
+        "NY-RPC",
+        "NY-RPC-2026-AMENDMENT"
+      ],
+      "files": [
+        "server.js",
+        "auction.js",
+        "site.js"
+      ],
+      "tests": [
+        "no lead is recorded without a stored consent"
+      ]
     }
   ]
 }

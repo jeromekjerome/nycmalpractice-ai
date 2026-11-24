@@ -115,7 +115,8 @@ test('the notes file comes back from formatLawFile byte for byte', () => {
 });
 
 test('every statute the app cites is a source of the notes', () => {
-  const ids = new Set(readLawFile(CURRENT_LAW_FILE).sources.map(source => source.id));
+  const law = readLawFile(CURRENT_LAW_FILE);
+  const ids = new Set(law.sources.map(source => source.id));
   const missing = [];
   const found = new Set();
   for (const path of scanList()) {
@@ -129,7 +130,11 @@ test('every statute the app cites is a source of the notes', () => {
   assert.deepEqual(missing, [], `statutes cited with no source in the notes file:\n${missing.join('\n')}`);
   // Every source is cited somewhere the scan reaches, but the Grieving Families Act, a bill the citation finder has no form
   // for; a note rests on it by name.
-  assert.deepEqual([...ids].filter(id => !found.has(id)), ['BILL-GRIEVING-FAMILIES-ACT']);
+  // A source that only a requirement rests on is not expected in the app's copy; the requirements test covers it. Neither is a
+  // listing, which is a list of new opinions and not a statute.
+  const kindOf = new Map(law.sources.map(source => [source.id, source.kind]));
+  const onlyRequirements = id => law.requirements.some(item => item.sources.includes(id)) && !law.notes.some(note => note.sources.includes(id));
+  assert.deepEqual([...ids].filter(id => !found.has(id) && !onlyRequirements(id) && kindOf.get(id) !== 'listing'), ['BILL-GRIEVING-FAMILIES-ACT']);
 });
 
 test('no scan list ever names .env, .env.demo or PROJECT_INSTRUCTIONS.md', () => {

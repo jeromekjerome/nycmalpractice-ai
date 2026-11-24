@@ -46,6 +46,25 @@ const summaryEmail  = document.getElementById('summaryEmail');
 const summarySubmit = document.getElementById('summarySubmit');
 const summaryStatus = document.getElementById('summaryStatus');
 
+// Once a conversation has begun the notice above the box gives way to a link that shows it again.
+const visitorNotice = document.getElementById('visitorNotice');
+const noticeLink = document.getElementById('noticeLink');
+function expandNotice() {
+  visitorNotice.hidden = false;
+  noticeLink.hidden = true;
+  noticeLink.setAttribute('aria-expanded', 'false');
+}
+function collapseNotice() {
+  visitorNotice.hidden = true;
+  noticeLink.hidden = false;
+  noticeLink.setAttribute('aria-expanded', 'false');
+}
+noticeLink.addEventListener('click', () => {
+  const open = visitorNotice.hidden;
+  visitorNotice.hidden = !open;
+  noticeLink.setAttribute('aria-expanded', String(open));
+});
+
 // ─── Mode Toggle ─────────────────────────────────────────────────────────────
 const modeToggle  = document.getElementById('modeToggle');
 const personalLbl = document.getElementById('personalLabel');
@@ -63,6 +82,7 @@ modeToggle.addEventListener('change', () => {
   const conv = document.getElementById('conversation');
   conv.innerHTML = '';
   appendMessage('ai', getModeWelcome());
+  expandNotice();
   document.getElementById('analysisCard').style.display = 'none';
   document.getElementById('casesCard').style.display    = 'none';
   restoreConversation();
@@ -114,6 +134,7 @@ async function submitQuestion() {
     turn_number: conversationHistory.filter(m => m.role === 'user').length + 1,
   });
   const userMsg = appendMessage('user', escHtml(q));
+  collapseNotice();
   input.value = '';
 
   const thinking = appendThinking();
@@ -422,6 +443,7 @@ async function restoreConversation() {
     if (!data.history?.length) return;
 
     conversationHistory = data.history;
+    collapseNotice();
     currentMode = data.mode || currentMode;
     updateModeUI();
 

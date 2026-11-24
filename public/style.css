@@ -150,6 +150,19 @@ body.estate-mode .topics-list li::before { color: var(--estate-accent); }
 .summary-note, .summary-status { margin-top: 0.45rem; color: var(--text); font-size: 0.7rem; line-height: 1.45; }
 
 .interaction-card { position: sticky; bottom: 1.5rem; }
+.visitor-notice {
+  font-size: .82rem; line-height: 1.45; padding: .6rem .7rem; margin-bottom: .6rem;
+  border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text);
+}
+.visitor-notice p { margin: 0 0 .4rem; }
+.visitor-notice p:last-child { margin-bottom: 0; }
+.visitor-notice[hidden], .notice-link[hidden] { display: none; }
+.notice-link {
+  display: block; margin: 0 0 .5rem; padding: 0;
+  background: none; border: none; cursor: pointer;
+  color: var(--accent); font: inherit; font-size: .82rem; text-decoration: underline;
+}
 .input-label { display: block; font-size: 0.78rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 0.6rem; }
 .textarea-wrapper { position: relative; margin-bottom: 0.75rem; }
 textarea { width: 100%; resize: none; background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 10px; color: var(--text); font-family: 'Inter', sans-serif; font-size: 0.92rem; line-height: 1.6; padding: 0.75rem 1rem; outline: none; transition: border-color var(--transition); }
@@ -211,6 +224,7 @@ body.estate-mode .contact-input:focus { border-color: var(--estate-accent); }
 
 @media (max-width: 600px) {
   .interaction-card { bottom: 0.75rem; padding: 0.75rem; }
+  .interaction-card:has(textarea:focus) .visitor-notice { display: none; }
   .interaction-card .input-label { margin-bottom: 0.4rem; }
   .interaction-card .textarea-wrapper { margin-bottom: 0.5rem; }
   .interaction-card textarea { max-height: 4.5rem; padding: 0.5rem 0.75rem; line-height: 1.4; }

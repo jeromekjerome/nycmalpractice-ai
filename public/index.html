@@ -150,6 +150,12 @@
 
     <!-- Input -->
     <div class="glass-panel interaction-card">
+      <div class="visitor-notice" id="visitorNotice">
+        <p><strong>Before you type:</strong> Nothing goes to a law firm unless you ask and agree.</p>
+        <p>If you do, participating New York firms, which pay to take part, may see an AI summary and rating of your situation, without your name or contact details. Up to three of them, by highest bid or at random, then get your details and this conversation and may contact you.</p>
+        <p>We check only that a firm's supervising attorney is registered in New York. We do not recommend any lawyer, and being chosen does not mean a firm is the best or right one for you.</p>
+      </div>
+      <button type="button" class="notice-link" id="noticeLink" hidden aria-controls="visitorNotice" aria-expanded="false">How your information is shared</button>
       <label class="input-label" for="userInput" id="inputLabel">Describe your situation</label>
       <div class="textarea-wrapper">
         <textarea id="userInput" rows="3" maxlength="4000" placeholder="What happened, and when? What provider or facility was involved?"></textarea>
@@ -203,7 +209,7 @@
       <label class="contact-label">Phone number<input class="contact-input" name="phone" type="tel" autocomplete="tel" maxlength="20"></label>
       <label class="contact-label">Email (optional: we will tell you when an attorney accepts)<input class="contact-input" name="email" type="email" autocomplete="email" maxlength="254"></label>
       <label class="contact-label">Best time to call (optional)<input class="contact-input" name="bestTime" maxlength="100" placeholder="for example, weekday mornings"></label>
-      <label class="contact-consent"><input type="checkbox" name="consent"><span>I agree that NYCMalpractice.ai may share my name, phone number, email address (if I give one), preferred time to call and this conversation with up to three licensed New York attorneys, who may contact me by phone, text message or email about my possible claim. Message and data rates may apply. If I give my email address, NYCMalpractice.ai may also email me when an attorney accepts my request. I can withdraw this consent at any time by emailing privacy@nycmalpractice.ai.</span></label>
+      <label class="contact-consent"><input type="checkbox" name="consent"><span>I agree that NYCMalpractice.ai may show an AI-written summary and rating of my situation, without my name or contact details, to participating New York law firms, which pay to take part and may bid for the chance to contact me. I also agree that it may share my name, phone number, email address (if I give one), preferred time to call and this conversation with up to three licensed New York attorneys, who may contact me by phone, text message or email about my possible claim. Message and data rates may apply. If I give my email address, NYCMalpractice.ai may also email me when an attorney accepts my request. I can withdraw this consent at any time by emailing privacy@nycmalpractice.ai.</span></label>
       <div class="contact-error" role="alert"></div>
       <button class="submit-btn contact-submit" type="submit">Send my request</button>
     </form>

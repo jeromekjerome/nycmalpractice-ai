@@ -478,3 +478,94 @@ test('a returning visitor reopens the estate conversation they used last', async
   await expect(page.locator('#conversation')).toContainText('My father died after a surgical error.');
   await expect(page.locator('#modeToggle')).toBeChecked();
 });
+
+async function mockAsk(page) {
+  await page.route('**/api/ask', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ answer: 'Thank you. When did this happen?', cases: [] }),
+  }));
+}
+
+test.describe('the notice before typing, on a phone', () => {
+  test.use({ viewport: { width: 375, height: 553 } });
+
+  test('the notice and the send button both fit on the first screen', async ({ page }) => {
+    await mockSession(page);
+    await mockCaseTypes(page);
+    await page.goto('/');
+    const notice = await page.locator('#visitorNotice').boundingBox();
+    const send = await page.locator('#submitBtn').boundingBox();
+    expect(notice.y).toBeGreaterThanOrEqual(0);
+    expect(send.y + send.height).toBeLessThanOrEqual(553);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  });
+
+  test('focusing the box hides the notice and leaving it shows the notice again', async ({ page }) => {
+    await mockSession(page);
+    await mockCaseTypes(page);
+    await page.goto('/');
+    await expect(page.locator('#visitorNotice')).toBeVisible();
+    await page.locator('#userInput').focus();
+    await expect(page.locator('#visitorNotice')).toBeHidden();
+    await page.locator('#userInput').blur();
+    await expect(page.locator('#visitorNotice')).toBeVisible();
+  });
+
+  test('after the first message the notice gives way to a link that opens it again', async ({ page }) => {
+    await mockSession(page);
+    await mockCaseTypes(page);
+    await mockAsk(page);
+    await page.goto('/');
+    await expect(page.locator('#noticeLink')).toBeHidden();
+    await page.locator('#userInput').fill('My symptoms were ignored in the emergency room.');
+    await page.locator('#submitBtn').click();
+    await expect(page.locator('#conversation .msg-ai').last()).toContainText('When did this happen?');
+    await expect(page.locator('#visitorNotice')).toBeHidden();
+    await expect(page.locator('#noticeLink')).toBeVisible();
+    await page.locator('#noticeLink').click();
+    await expect(page.locator('#noticeLink')).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.locator('#visitorNotice')).toBeVisible();
+    await expect(page.locator('#visitorNotice')).toContainText('Nothing goes to a law firm unless you ask and agree.');
+  });
+
+  test('a reload with a saved conversation shows the link, not the notice', async ({ page, baseURL }) => {
+    await page.route(/^https:\/\/fonts\.(googleapis|gstatic)\.com\//, route => route.abort());
+    await page.route(/^https?:\/\/([a-z0-9-]+\.)*(mxpnl|mixpanel)\.com\//, route => route.abort());
+    await page.context().addCookies([
+      { name: 'malpractice_session', value: 'notice-returning', url: baseURL },
+      { name: 'malpractice_personal_session', value: 'notice-returning', url: baseURL },
+    ]);
+    await page.route('**/api/conversations/**', route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        mode: 'personal',
+        history: [
+          { role: 'user', content: 'My symptoms were ignored in the emergency room.' },
+          { role: 'assistant', content: 'I am sorry to hear that. When did it happen?' },
+        ],
+      }),
+    }));
+    await mockCaseTypes(page);
+    await page.goto('/');
+    await expect(page.locator('#conversation')).toContainText('My symptoms were ignored in the emergency room.');
+    await expect(page.locator('#noticeLink')).toBeVisible();
+    await expect(page.locator('#visitorNotice')).toBeHidden();
+  });
+});
+
+test('switching to a claimant mode with no saved conversation shows the notice again', async ({ page }) => {
+  await mockSession(page);
+  await mockCaseTypes(page);
+  await mockAsk(page);
+  await page.goto('/');
+  await page.locator('#userInput').fill('My symptoms were ignored in the emergency room.');
+  await page.locator('#submitBtn').click();
+  await expect(page.locator('#conversation .msg-ai').last()).toContainText('When did this happen?');
+  await expect(page.locator('#noticeLink')).toBeVisible();
+  await page.locator('#modeToggle').evaluate(el => { el.checked = true; el.dispatchEvent(new Event('change', { bubbles: true })); });
+  await expect(page.locator('body')).toHaveClass(/estate-mode/);
+  await expect(page.locator('#visitorNotice')).toBeVisible();
+  await expect(page.locator('#noticeLink')).toBeHidden();
+});

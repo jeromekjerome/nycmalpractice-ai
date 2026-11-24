@@ -383,7 +383,7 @@ function negatedBefore(sentence, index) {
  * Sentences that match a rubric's forbidden patterns, as [{ quote, start, end }]. Each pattern is
  * applied to one sentence at a time, with Markdown emphasis ignored, so a match can neither span
  * two sentences nor be hidden by "**guaranteed**". With `negation_guard`, a sentence that negates
- * the match or merely asks about it is not a hit.
+ * the match or merely asks about it is not a hit (unless the check sets skip_questions to false).
  */
 function findForbiddenMatches(text, check) {
   const sources = Array.isArray(check?.patterns) ? check.patterns : (typeof check?.patterns === 'string' ? [check.patterns] : []);
@@ -396,6 +396,8 @@ function findForbiddenMatches(text, check) {
     }
   }
   if (!patterns.length) return [];
+  // A question is skipped under negation_guard unless the check sets skip_questions to false.
+  const skipQuestions = check.skip_questions !== false;
 
   // One character for one character, so offsets into `plain` are offsets into `text`.
   const plain = text.replace(/[*_`]/g, ' ');
@@ -408,7 +410,7 @@ function findForbiddenMatches(text, check) {
       let m;
       while ((m = re.exec(sentence)) !== null) {
         if (m[0] === '') { re.lastIndex++; continue; }
-        if (!check.negation_guard || !(isQuestion || negatedBefore(sentence, m.index))) return true;
+        if (!check.negation_guard || !((isQuestion && skipQuestions) || negatedBefore(sentence, m.index))) return true;
       }
       return false;
     });

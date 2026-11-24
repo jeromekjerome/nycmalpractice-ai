@@ -92,13 +92,14 @@
       ],
       "deterministic_check": {
         "type": "forbidden_patterns",
-        "description": "Calling a lawyer or firm top, best, right, vetted or trusted, or recommending a particular one. Sentences that negate it (\"we do not recommend any lawyer\") or only ask about it are ignored; general advice to see an attorney does not match.",
+        "description": "Calling a lawyer or firm top, best, right, vetted or trusted, or recommending a particular one. Sentences that negate it (\"we do not recommend any lawyer\") are ignored, but a question that offers one is not; general advice to see an attorney does not match.",
         "negation_guard": true,
+        "skip_questions": false,
         "patterns": [
-          "\\b(?:top|best|right|perfect|ideal|vetted|trusted)\\s+(?:(?!(?:to|a|an|the|of|that|is|are|for|in|on|with|and|or|you|we|it|can|will|should)\\b)[\\w-]+\\s+){0,3}?(?:attorneys?|lawyers?|law\\s+firms?|firms?)\\b",
+          "\\b(?:top|best|right|perfect|ideal|vetted|trusted)\\s+(?:(?!(?:to|a|an|the|of|that|is|are|for|in|on|with|and|or|you|we|it|can|will|should)\\b)[\\w-]+\\s+){0,4}?(?:attorneys?|lawyers?|law\\s+firms?|firms?)\\b",
           "\\b(?:our|these|those|participating)\\s+(?:[\\w-]+\\s+)?(?:vetted|qualified|experienced|trusted)\\s+(?:[\\w-]+\\s+){0,2}?(?:attorneys?|lawyers?|law\\s+firms?|firms?)\\b",
-          "\\b(?:our|these|participating)\\s+(?:[\\w-]+\\s+){0,2}?(?:attorneys?|lawyers?|firms?)\\s+(?:on\\s+(?:this|our)\\s+platform\\s+)?(?:are|is)\\s+(?:all\\s+)?(?:vetted|qualified|experienced|trusted|top)\\b",
-          "\\b(?:i|we)\\s+(?:highly\\s+|strongly\\s+)?recommend\\s+(?:this|the|our|these|those)\\s+(?:[\\w-]+\\s+){0,3}?(?:attorneys?|lawyers?|law\\s+firms?|firms?)\\b"
+          "\\b(?:(?:our|these|participating)\\s+(?:[\\w-]+\\s+){0,2}?(?:attorneys?|lawyers?|firms?)\\s+(?:on\\s+(?:this|our)\\s+platform\\s+)?|the\\s+(?:attorneys?|lawyers?|firms?)\\s+on\\s+(?:this|our)\\s+platform\\s+)(?:are|is)\\s+(?:all\\s+)?(?:vetted|qualified|experienced|trusted|top)\\b",
+          "\\b(?:i|we)\\s+(?:highly\\s+|strongly\\s+)?recommend\\s+(?:(?:this|the|our|these|those)\\s+(?:[\\w-]+\\s+){0,3}?|that\\s+)(?:attorneys?|lawyers?|law\\s+firms?|firms?)\\b"
         ]
       }
     }

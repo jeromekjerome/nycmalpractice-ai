@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Jerome W. Dewald. All rights reserved.
+// Source available for evaluation only; see LICENSE.
+
 import './test-settings.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -65,8 +68,8 @@ test('the visitor pages say the site is not a law firm and gives no legal advice
   for (const name of ['index', 'privacy', 'terms']) assert.ok(pageText(name).includes('NYCMalpractice.ai. Not a law firm. Not legal advice.'), name);
 });
 
-const BLOCK = ['I can connect you with a top New York malpractice attorney.', 'Our vetted firms can help.', 'This is the best lawyer for your case.', "We'll match you with the right firm."];
-const PASS = ['We do not recommend any lawyer.', 'You should speak with an attorney.', 'Consult a qualified attorney.', 'A qualified expert must review the case.', 'Being chosen does not mean a firm is the best or right one for you.', 'The best next step is to speak with an attorney soon.', 'On top of that, an attorney can check the deadline.', 'Have an attorney check this deadline soon.', 'It is best to call an attorney soon.', 'You have the right to an attorney.', 'It is best to see a lawyer.', 'I recommend that you see an attorney.', 'We recommend that you call a lawyer today.', 'Only a licensed attorney is qualified to give legal advice.', 'Speak with the experienced attorney you choose.'];
+const BLOCK = ['I can connect you with a top New York malpractice attorney.', 'Our vetted firms can help.', 'This is the best lawyer for your case.', "We'll match you with the right firm.", 'Would you like me to connect you with a top New York personal injury attorney?', 'Would you like to be connected with one of our vetted firms?', 'Shall I send your request to the best lawyer for your case?', 'Can I connect you with a trusted malpractice firm?', 'The attorneys on our platform are vetted.', 'I recommend that attorney.', 'I highly recommend that firm.'];
+const PASS = ['We do not recommend any lawyer.', 'You should speak with an attorney.', 'Consult a qualified attorney.', 'A qualified expert must review the case.', 'Being chosen does not mean a firm is the best or right one for you.', 'The best next step is to speak with an attorney soon.', 'On top of that, an attorney can check the deadline.', 'Have an attorney check this deadline soon.', 'It is best to call an attorney soon.', 'You have the right to an attorney.', 'It is best to see a lawyer.', 'I recommend that you see an attorney.', 'We recommend that you call a lawyer today.', 'Only a licensed attorney is qualified to give legal advice.', 'Speak with the experienced attorney you choose.', 'Would you like to speak with an attorney?', 'Would you like me to send your request to a participating New York law firm?'];
 
 async function violated(text, mode, id) {
   const report = await enforceDeterministicGate({ required_checks: [], prohibited_checks: [] }, text, 5, mode, []);
@@ -78,4 +81,11 @@ test('the reply check blocks vouching and passes ordinary advice', async () => {
     for (const text of BLOCK) assert.equal(await violated(text, mode, id), true, `${mode}: ${text}`);
     for (const text of PASS) assert.equal(await violated(text, mode, id), false, `${mode}: ${text}`);
   }
+});
+
+test('the About page says who receives the details', () => {
+  const about = pageText('about');
+  assert.ok(about.includes('firms bid on a summary written to leave out your name and contact details. The winning firm receives them; if it declines or does not answer, up to two more firms chosen at random may.'));
+  assert.ok(!about.includes('only the winning firm'));
+  assert.ok(!about.includes('has no name or contact details'));
 });

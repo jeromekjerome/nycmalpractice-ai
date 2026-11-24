@@ -228,7 +228,7 @@ function changedBlock({ source, read, fingerprint }, { law, snapshotOf }) {
   const times = count => (Number(count) === 1 ? 'once' : `${escapeHtml(count)} times`);
   parts.push(places.length
     ? `<p>The places that state it:</p><ul>${places.map(place => `<li>${escapeHtml(place.file)}: "${escapeHtml(place.states)}", ${times(place.count)}</li>`).join('')}</ul>`
-    : '<p>No registered place states it.</p>');
+    : '<p>The register lists only places that state a period or an amount, and none states one from this section. The copy may still state its rule in words, so search the pages, prompts and blog for this section or its article.</p>');
   parts.push(officialPage(source));
   // law approve refuses a repealed text, which no saved text can match, so a repeal is not offered a command that would fail.
   parts.push(read.repealed
@@ -252,7 +252,7 @@ const LETTERS = {
     one: name => `${name} has changed`,
     many: count => `${count} watched statutes have changed`,
     block: changedBlock,
-    closing: '<p>Until you approve, replies keep using the approved notes. If the rule changed, edit the note and every place listed in the same commit, then push.</p>',
+    closing: '<p>Until you approve the new text (or, for a repealed section, edit the source and the notes by hand), replies keep using the approved notes. If the rule changed, edit the note and every place listed in the same commit, then push.</p>',
   },
   back: {
     one: name => `${name} is back to the approved text`,

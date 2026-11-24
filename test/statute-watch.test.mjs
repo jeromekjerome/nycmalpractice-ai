@@ -266,7 +266,7 @@ test('a changed section sends one email with its notes, its places, the marked c
     assert.match(html, /<ins>two<\/ins>/);
     assert.ok(html.includes('https://www.nysenate.gov/legislation/laws/CVP/214'));
     assert.ok(html.includes(`npm run law:approve -- CPLR-214 ${fingerprintOf(CHANGED_214)}`));
-    assert.ok(html.includes('Until you approve, replies keep using the approved notes. If the rule changed, edit the note and every place listed in the same commit, then push.'));
+    assert.ok(html.includes('Until you approve the new text (or, for a repealed section, edit the source and the notes by hand), replies keep using the approved notes. If the rule changed, edit the note and every place listed in the same commit, then push.'));
     assert.ok(keyless(html));
     const row = table.row('CPLR-214');
     assert.equal(row.seen_fingerprint, fingerprintOf(CHANGED_214));
@@ -276,6 +276,16 @@ test('a changed section sends one email with its notes, its places, the marked c
     assert.equal(row.emailed_fingerprint, fingerprintOf(CHANGED_214));
     assert.equal(row.email_claimed_at, null);
     assert.ok(keyless(JSON.stringify([...table.rows.values()])));
+  });
+});
+
+test('a change email for a section no registered place states says the copy may still state its rule in words', async () => {
+  await withKey(async () => {
+    const { mail, watch } = world({ ids: ['CPLR-215'], answers: { 'CPLR-215': amended('CPLR-215') } });
+    await watch(night(0));
+    assert.equal(mail.sent.length, 1);
+    assert.ok(mail.sent[0].html.includes('The copy may still state its rule in words'));
+    assert.ok(!mail.sent[0].html.includes('No registered place states it.'));
   });
 });
 
@@ -356,7 +366,7 @@ test('four new differences in one night go in one combined email, and each is ma
     assert.equal(table.row(id).email_claimed_at, null, id);
   }
   assert.ok(html.includes('The deadline of CPLR § 215'));
-  assert.ok(html.includes('Until you approve, replies keep using the approved notes.'));
+  assert.ok(html.includes('Until you approve the new text (or, for a repealed section, edit the source and the notes by hand), replies keep using the approved notes.'));
   assert.deepEqual((await watch(night(1))).emails, []);
 
   // Three are still one email each.

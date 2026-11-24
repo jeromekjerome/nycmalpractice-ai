@@ -46,7 +46,7 @@
     "test/law-citations.test.mjs": "4d91bfdadd23582070a4d7ac22648a43f12f85926436ec1dd47b40f8160e8e37",
     "law-file.js": "8333ef58eaf1ede0c4d841da9b3f43363df1c7c3498f17848a4412a2033c3363",
     "test/law-file.test.mjs": "7428ce78c60fe47dedbfda4f46c7bdfb69bfb2cae64cc6b059d71916187fe5af",
-    "statute-watch.js": "9e444e7d75f4bda531bb421cb0b365caef39cd7cb5d38e9f029b0ec857db2d45",
-    "test/statute-watch.test.mjs": "360d82de4ca4f265a342271304d09efe237d34c6607f43b8b08f5d83dd1e5f10"
+    "statute-watch.js": "55f4306a4850d7f611a187b8063a397f720580eebe023bc593a9b66597d442b4",
+    "test/statute-watch.test.mjs": "5226bc9406558da0746a562eb1f592456fac980d74d6abe879b5e178fff9e387"
   }
 }

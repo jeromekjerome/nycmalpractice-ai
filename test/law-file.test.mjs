@@ -11,8 +11,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
-  readLawFile, formatLawFile, writeLawFile, checkLawFile, earliestSourceDate, notesResting, registeredPlaces, snapshotReader,
+  readLawFile, formatLawFile, writeLawFile, checkLawFile, earliestSourceDate, notesResting, registeredPlaces, requirementsResting, snapshotReader,
 } from '../law-file.js';
+import { NO_NEW_OPINIONS } from '../opinion-list.js';
+import { renderCurrentLawForPrompt } from '../gatekeeper.js';
 import { statuteFingerprint } from '../statute-text.js';
 
 const TEXT = 'S 214. Actions to be commenced within three years.';
@@ -65,7 +67,7 @@ test('checkLawFile names each defect', () => {
     ['a by-hand source without the key reviewed_on', law => { delete law.sources[2].reviewed_on; }, /NYCRR-1.*no reviewed_on/],
     ['a note on a by-hand source not yet reviewed', law => { law.sources[2].reviewed_on = null; }, /N1.*NYCRR-1.*not been reviewed/],
     ['an as_of left in the file', law => { law.as_of = '2026-11-14'; }, /as_of/],
-    ['a kind that is none of the three', law => { law.sources[2].kind = 'rumor'; }, /NYCRR-1.*rumor/],
+    ['a kind that is none of the three', law => { law.sources[2].kind = 'rumor'; }, /NYCRR-1.*rumor.*not section, bill, listing or by_hand\./],
     ['a register entry naming an unknown source', law => { law.register[0].sources = ['NOPE-2']; }, /3 years.*NOPE-2/],
     ['a note with no sources key', law => { delete law.notes[1].sources; }, /N2.*no sources/],
     ['a note with an empty list of sources', law => { law.notes[1].sources = []; }, /N2.*no sources/],
@@ -138,4 +140,72 @@ test('snapshotReader reads id.txt from a folder, null when it is missing, and th
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+const listing = () => ({ id: 'OPS-1', kind: 'listing', name: 'Opinions', url: 'https://example.test/opinions', watch_from: 100, seen: [101, 102], fingerprint: statuteFingerprint({ text: NO_NEW_OPINIONS }), reviewed_on: '2026-11-20' });
+const requirement = () => ({ id: 'R1', does: 'Shows the limit.', sources: ['CPLR-214'], files: ['ask.js'], tests: ['test/ask.test.mjs'] });
+const withListing = (change = () => {}) => problemsOf((law) => { law.sources.push(listing()); change(law, law.sources.at(-1)); });
+
+test('checkLawFile accepts a sound listing, which needs no saved text', () => {
+  assert.deepEqual(withListing(), []);
+});
+
+test('checkLawFile finds each defect of a listing', () => {
+  const cases = [
+    ['no url', (law, source) => { delete source.url; }, /OPS-1.*no url/],
+    ['a watch_from that is not an integer', (law, source) => { source.watch_from = '100'; }, /OPS-1.*watch_from/],
+    ['seen that is not a list of integers', (law, source) => { source.seen = [101, 'x']; }, /OPS-1.*seen/],
+    ['a wrong fingerprint', (law, source) => { source.fingerprint = statuteFingerprint({ text: 'other' }); }, /OPS-1.*fingerprint/],
+  ];
+  for (const [name, change, expected] of cases) {
+    const problems = withListing(change);
+    assert.equal(problems.length, 1, `${name}: ${problems.join(' | ')}`);
+    assert.match(problems[0], expected, name);
+  }
+});
+
+test('checkLawFile finds each defect of a requirement', () => {
+  const cases = [
+    ['a repeated id', law => { law.requirements = [requirement(), requirement()]; }, /R1.*more than once/],
+    ['an empty does', law => { law.requirements = [{ ...requirement(), does: '' }]; }, /R1.*does/],
+    ['an unknown source', law => { law.requirements = [{ ...requirement(), sources: ['NOPE-3'] }]; }, /R1.*NOPE-3/],
+    ['empty files', law => { law.requirements = [{ ...requirement(), files: [] }]; }, /R1.*files/],
+    ['empty tests', law => { law.requirements = [{ ...requirement(), tests: [] }]; }, /R1.*tests/],
+  ];
+  for (const [name, change, expected] of cases) {
+    const problems = problemsOf(change);
+    assert.equal(problems.length, 1, `${name}: ${problems.join(' | ')}`);
+    assert.match(problems[0], expected, name);
+  }
+  assert.deepEqual(problemsOf((law) => { law.requirements = [requirement()]; }), []);
+});
+
+test('requirementsResting returns the requirements naming a source', () => {
+  const law = sound();
+  law.requirements = [requirement(), { ...requirement(), id: 'R2', sources: ['NYCRR-1'] }];
+  assert.deepEqual(requirementsResting(law, 'CPLR-214').map(item => item.id), ['R1']);
+  assert.deepEqual(requirementsResting(law, 'GML-50-I'), []);
+  assert.deepEqual(requirementsResting({}, 'CPLR-214'), []);
+});
+
+test('requirements never reach the prompt text', () => {
+  const law = sound();
+  law.requirements = [{ ...requirement(), does: 'ZZ-UNIQUE-REQUIREMENT' }];
+  assert.ok(!renderCurrentLawForPrompt(law).includes('ZZ-UNIQUE-REQUIREMENT'));
+});
+
+test('checkLawFile flags a note that rests on a listing, once', () => {
+  const problems = withListing((law) => { law.notes[1].sources.push('OPS-1'); });
+  assert.equal(problems.length, 1, problems.join(' | '));
+  assert.equal(problems[0], 'The note N2 rests on OPS-1, which is a listing; a note rests only on a section, a bill or a source kept by hand.');
+});
+
+test('checkLawFile wants the key reviewed_on on a listing, null allowed', () => {
+  const problems = withListing((law, source) => { delete source.reviewed_on; });
+  assert.deepEqual(problems, ['OPS-1 is a listing with no reviewed_on (null says it has not been reviewed).']);
+  assert.deepEqual(withListing((law, source) => { source.reviewed_on = null; }), []);
+});
+
+test('checkLawFile accepts a register entry that names a listing', () => {
+  assert.deepEqual(withListing((law) => { law.register.push({ file: 'ask.js', states: '90 days', count: 1, sources: ['OPS-1'], about: 'a listing' }); }), []);
 });

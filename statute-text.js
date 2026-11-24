@@ -4,7 +4,7 @@
 // statute-text.js — the official text of a New York statute: read from the Senate's Open Legislation API, tidied, fingerprinted
 // and compared. The same file in every app. The statute watch (law.mjs and the nightly job) is built on these functions.
 //
-// It imports only node:crypto and without-keys.js, because law.mjs imports it, and law.mjs must not reach db.js (which loads
+// It imports only node:crypto, without-keys.js and opinion-list.js (which imports only without-keys.js), because law.mjs imports it, and law.mjs must not reach db.js (which loads
 // the local .env, with its live keys, as soon as it is imported).
 //
 // Every read answers { ok: true, ... } or { ok: false, reason }. A failure is never a text: an answer that cannot be read is
@@ -13,6 +13,7 @@
 // through withoutKeys all the same.
 import { createHash } from 'node:crypto';
 import { withoutKeys } from './without-keys.js';
+import { readOpinionListing } from './opinion-list.js';
 
 export const SENATE_API = 'https://legislation.nysenate.gov/api/3';
 const DEFAULT_TIMEOUT_MS = 8000;
@@ -154,6 +155,7 @@ export function sourceReader(key, { fetchImpl } = {}) {
     return trees.get(name);
   };
   return async function readSource(source, { signal } = {}) {
+    if (source.kind === 'listing') return readOpinionListing(source, { fetchImpl, signal });
     if (source.kind === 'bill') return fetchBillStatus({ session: source.session, printNo: source.printNo, key, fetchImpl, signal });
     const read = await fetchLawSection({ lawId: source.lawId, locationId: source.locationId, key, fetchImpl, signal });
     if (!read.ok || read.repealed) return read;

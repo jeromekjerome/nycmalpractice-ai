@@ -2,15 +2,17 @@
 // Source available for evaluation only; see LICENSE.
 
 // law-file.js — the notes file (rubrics/ny_pi_current_law.json): reading it, checking it, dating it and writing it back.
-// The same file in every app. It imports only node builtins and statute-text.js, never gatekeeper.js or anything that reaches
+// The same file in every app. It imports only node builtins, statute-text.js and opinion-list.js (which reaches only without-keys.js), never gatekeeper.js or anything that reaches
 // db.js, because db.js loads the local .env as soon as it is imported.
 //
-// A source is a statute section or a bill (each with the fingerprint of its approved official text) or one reviewed by hand.
-// A note names the sources it rests on, and the file's register names the ones the app's pages and code cite.
+// A source is a statute section or a bill (each with the fingerprint of its approved official text) or one reviewed by hand. A listing is a page of published opinions watched from a number on, with no saved text.
+// A note names the sources it rests on, and the file's register names the ones the app's pages and code cite. A requirement names the
+// sources it follows, the files that carry it and the tests that hold it; it is never read into a prompt.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { statuteFingerprint } from './statute-text.js';
+import { NO_NEW_OPINIONS } from './opinion-list.js';
 
-const KINDS = ['section', 'bill', 'by_hand'];
+const KINDS = ['section', 'bill', 'listing', 'by_hand'];
 
 export function readLawFile(url) {
   return JSON.parse(readFileSync(url, 'utf8'));
@@ -36,6 +38,11 @@ export function registeredPlaces(law, id) {
   return listOf(law?.register).filter(entry => listOf(entry?.sources).includes(id));
 }
 
+export function requirementsResting(law, id) {
+  return listOf(law?.requirements).filter(item => listOf(item?.sources).includes(id));
+}
+
+// Listings are outside the date because no note may rest on one.
 // The earliest approval or review among the sources the notes rest on. A source only the register names does not count: the
 // date is how old the oldest thing a prompt rests on is. A source not yet reviewed has no date to give.
 export function earliestSourceDate(law) {
@@ -75,7 +82,7 @@ export function checkLawFile(law, { snapshotOf } = {}) {
     }
     known.set(id, source);
     if (!KINDS.includes(source.kind)) {
-      problems.push(`${id} has the kind "${source.kind}", which is not section, bill or by_hand.`);
+      problems.push(`${id} has the kind "${source.kind}", which is not section, bill, listing or by_hand.`);
       continue;
     }
     // A date that is not a real YYYY-MM-DD drops a source out of the 90-day reminder and can be taken for the earliest date.
@@ -86,6 +93,14 @@ export function checkLawFile(law, { snapshotOf } = {}) {
       if (!present(source.url)) problems.push(`${id} is a by-hand source with no url.`);
       // null means "not yet reviewed" and is allowed; leaving the key out is not.
       if (!Object.hasOwn(source, 'reviewed_on')) problems.push(`${id} is a by-hand source with no reviewed_on (null says it has not been reviewed).`);
+      continue;
+    }
+    if (source.kind === 'listing') {
+      if (!present(source.url)) problems.push(`${id} is a listing with no url.`);
+      if (!Object.hasOwn(source, 'reviewed_on')) problems.push(`${id} is a listing with no reviewed_on (null says it has not been reviewed).`);
+      if (!Number.isInteger(source.watch_from)) problems.push(`${id} is a listing whose watch_from is not an integer.`);
+      if (!Array.isArray(source.seen) || !source.seen.every(Number.isInteger)) problems.push(`${id} is a listing whose seen is not a list of integers.`);
+      if (source.fingerprint !== statuteFingerprint({ text: NO_NEW_OPINIONS })) problems.push(`${id} is a listing whose fingerprint is not the one for "${NO_NEW_OPINIONS}".`);
       continue;
     }
     const identity = source.kind === 'section' ? ['lawId', 'locationId'] : ['session', 'printNo'];
@@ -105,6 +120,7 @@ export function checkLawFile(law, { snapshotOf } = {}) {
     for (const id of listOf(note?.sources)) {
       const source = known.get(id);
       if (!source) problems.push(`The note ${note.id} rests on ${id}, which no source defines.`);
+      else if (source.kind === 'listing') problems.push(`The note ${note.id} rests on ${id}, which is a listing; a note rests only on a section, a bill or a source kept by hand.`);
       else if (source.kind === 'by_hand' && source.reviewed_on === null) problems.push(`The note ${note.id} rests on ${id}, which has not been reviewed.`);
     }
   }
@@ -114,6 +130,27 @@ export function checkLawFile(law, { snapshotOf } = {}) {
     const named = listOf(entry?.sources);
     for (const id of named) if (!known.has(id)) problems.push(`${where} names ${id}, which no source defines.`);
     if (!named.length && entry?.rule !== false) problems.push(`${where} names no source and is not marked rule: false.`);
+  }
+
+  const seenRequirements = new Set();
+  for (const item of listOf(law?.requirements)) {
+    const id = item?.id;
+    if (!present(id)) {
+      problems.push('A requirement has no id.');
+      continue;
+    }
+    if (seenRequirements.has(id)) {
+      problems.push(`The requirement id ${id} is used more than once.`);
+      continue;
+    }
+    seenRequirements.add(id);
+    if (typeof item.does !== 'string' || !item.does.trim()) problems.push(`The requirement ${id} says nothing in does.`);
+    for (const key of ['sources', 'files', 'tests']) {
+      if (!listOf(item[key]).length) problems.push(`The requirement ${id} has an empty ${key} list.`);
+    }
+    for (const sourceId of listOf(item.sources)) {
+      if (!known.has(sourceId)) problems.push(`The requirement ${id} names ${sourceId}, which no source defines.`);
+    }
   }
   return problems;
 }

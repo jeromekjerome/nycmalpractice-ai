@@ -2,11 +2,12 @@
 // Source available for evaluation only; see LICENSE.
 
 // statute-watch.js: the nightly statute watch, the one step of its own job at 01:00 UTC. It reads every section and bill the
-// notes file rests on from the Senate's Open Legislation API and compares each official text with the one the owner approved:
+// notes file rests on from the Senate's Open Legislation API, and the State Bar's list of opinions, and compares each official text with the one the owner approved:
 // its fingerprint is in the notes file, and the text is kept beside it in rubrics/statutes/. What it finds is kept in the
 // table statute_watch (setup-db.js), one row per source, and the owner is emailed:
 // - when a text differs from the approved one: once for each new text, with the notes that rest on the source, the places
 //   that state its rule, the changed words marked, the official page and the command that approves it;
+// - when the State Bar's list has opinions the owner has not marked reviewed (a listing: never "back", and it names every requirement);
 // - when a text the owner was told had changed reads as the approved one again;
 // - when a source could not be read on three New York days running.
 //
@@ -29,7 +30,7 @@
 //   the table into this code, where a DATE could arrive as a Date at midnight UTC, which is the evening before in New York:
 //   the third day of a streak is tested in the claim's own WHERE.
 // - The run throws, so that its step fails and is reported that same night, when it has no reader (the key is not set), when
-//   the notes file has nothing to watch, when the table cannot be read or written, and when no source could be read at all.
+//   the notes file has nothing to watch, when the table cannot be read or written, and when no section or bill could be read at all (the State Bar's list is judged only when no section or bill is watched).
 //   The last is found only after every source has been recorded and every notice due has been sent.
 // - A reason that is stored or emailed leaves out any address, since the key travels in the address's query, and passes
 //   through withoutKeys. A reader that throws gets a fixed phrase: its error is never quoted.
@@ -37,7 +38,7 @@
 // This file is shared with the sister app (shared-code.json), so it knows nothing of either app: the caller hands over the
 // notes file, the reader (with the key bound), the approved texts, the email and the site's name.
 import { statuteFingerprint, diffStatuteText, diffToHtml } from './statute-text.js';
-import { notesResting, registeredPlaces } from './law-file.js';
+import { notesResting, registeredPlaces, requirementsResting } from './law-file.js';
 import { withoutKeys } from './without-keys.js';
 
 const TIME_ZONE = 'America/New_York';
@@ -80,11 +81,11 @@ function tableFailure(error) {
     + 'Run npm run setup-db against the production database.');
 }
 
-// The sections and bills of the notes file, each once. A source kept by hand has nothing to read it from.
-function sectionsAndBills(law) {
+// The sections, bills and listings of the notes file, each once. A source kept by hand has nothing to read it from.
+function watchedSources(law) {
   const seen = new Set();
   return (Array.isArray(law?.sources) ? law.sources : []).filter(source => {
-    if (source?.kind !== 'section' && source?.kind !== 'bill') return false;
+    if (source?.kind !== 'section' && source?.kind !== 'bill' && source?.kind !== 'listing') return false;
     if (typeof source.id !== 'string' || !source.id || seen.has(source.id)) return false;
     seen.add(source.id);
     return true;
@@ -207,7 +208,37 @@ function approvedText(snapshotOf, id) {
   }
 }
 
-function changedBlock({ source, read, fingerprint }, { law, snapshotOf }) {
+const isListing = source => source?.kind === 'listing';
+
+// A list of what the site does, each with its id, all of it escaped.
+const requirementItems = requirements => `<ul>${requirements.map(item => `<li>${escapeHtml(item.id)}: ${escapeHtml(item.does)}</li>`).join('')}</ul>`;
+
+// One opinion: its number, title and link. Only an https address is a link.
+function opinionItem({ number, title, url }) {
+  const address = String(url ?? '');
+  const shown = escapeHtml(address);
+  return `<li>${escapeHtml(number)}: ${escapeHtml(title)} (${address.startsWith('https://') ? `<a href="${shown}">${shown}</a>` : shown})</li>`;
+}
+
+function listingBlock({ source, read }, { law }) {
+  const opinions = (Array.isArray(read.opinions) ? read.opinions : []).filter(opinion => Number.isSafeInteger(opinion?.number));
+  const numbers = opinions.map(opinion => opinion.number).sort((a, b) => a - b);
+  const parts = [`<h3>${escapeHtml(nameOf(source))}</h3>`];
+  parts.push(opinions.length
+    ? `<p>These opinions on the State Bar's list are not yet marked reviewed:</p><ul>${opinions.map(opinionItem).join('')}</ul>`
+    : `<p>These opinions on the State Bar's list are not yet marked reviewed:</p><pre style="white-space:pre-wrap">${escapeHtml(read.text)}</pre>`);
+  const requirements = Array.isArray(law?.requirements) ? law.requirements : [];
+  if (requirements.length) parts.push(`<p>What the site does:</p>${requirementItems(requirements)}`);
+  parts.push(`<p>If an opinion concerns lead services, paid recommendations, advertising, solicitation or AI intake, compare it with ${requirements.length ? 'the list above' : 'what the site does'} and take it to a lawyer. Otherwise mark it reviewed. Mark each one reviewed once you have read it, including any you take to a lawyer.</p>`);
+  parts.push(officialPage(source));
+  parts.push(`<p>To mark them reviewed: <code>npm run law:reviewed -- ${[source.id, ...numbers].map(escapeHtml).join(' ')}</code></p>`);
+  return parts.join('');
+}
+
+function changedBlock(notice, context) {
+  if (isListing(notice.source)) return listingBlock(notice, context);
+  const { source, read, fingerprint } = notice;
+  const { law, snapshotOf } = context;
   const parts = [`<h3>${escapeHtml(nameOf(source))}</h3>`];
   if (read.repealed) {
     parts.push(read.repealedDate
@@ -221,14 +252,16 @@ function changedBlock({ source, read, fingerprint }, { law, snapshotOf }) {
   }
   if (read.activeDate) parts.push(`<p>The Senate's date for this text: ${escapeHtml(read.activeDate)}.</p>`);
   const notes = notesResting(law, source.id);
-  parts.push(notes.length
-    ? `<p>The notes that rest on it:</p><ul>${notes.map(note => `<li>${escapeHtml(note.topic)}: ${escapeHtml(note.rule)}</li>`).join('')}</ul>`
-    : '<p>No note rests on it.</p>');
+  const requirements = requirementsResting(law, source.id);
+  // A section that only a requirement rests on has no note to edit and no places to search.
+  const requirementsOnly = !notes.length && requirements.length > 0;
+  if (notes.length) parts.push(`<p>The notes that rest on it:</p><ul>${notes.map(note => `<li>${escapeHtml(note.topic)}: ${escapeHtml(note.rule)}</li>`).join('')}</ul>`);
+  else if (!requirementsOnly) parts.push('<p>No note rests on it.</p>');
+  if (requirements.length) parts.push(`<p>The requirements that rest on it:</p>${requirementItems(requirements)}<p>Read the change, and if it affects one, take it to a lawyer.</p>`);
   const places = registeredPlaces(law, source.id);
   const times = count => (Number(count) === 1 ? 'once' : `${escapeHtml(count)} times`);
-  parts.push(places.length
-    ? `<p>The places that state it:</p><ul>${places.map(place => `<li>${escapeHtml(place.file)}: "${escapeHtml(place.states)}", ${times(place.count)}</li>`).join('')}</ul>`
-    : '<p>The register lists only places that state a period or an amount, and none states one from this section. The copy may still state its rule in words, so search the pages, prompts and blog for this section or its article.</p>');
+  if (places.length) parts.push(`<p>The places that state it:</p><ul>${places.map(place => `<li>${escapeHtml(place.file)}: "${escapeHtml(place.states)}", ${times(place.count)}</li>`).join('')}</ul>`);
+  else if (!requirementsOnly) parts.push('<p>The register lists only places that state a period or an amount, and none states one from this section. The copy may still state its rule in words, so search the pages, prompts and blog for this section or its article.</p>');
   parts.push(officialPage(source));
   // law approve refuses a repealed text, which no saved text can match, so a repeal is not offered a command that would fail.
   parts.push(read.repealed
@@ -243,38 +276,50 @@ function backBlock({ source }) {
 }
 
 function unreadBlock({ source, reason, since }) {
-  return `<h3>${escapeHtml(nameOf(source))}</h3><p>It could not be read from the Senate's Open Legislation API on three New York days running,`
+  const from = isListing(source) ? "the State Bar's page" : "the Senate's Open Legislation API";
+  return `<h3>${escapeHtml(nameOf(source))}</h3><p>It could not be read from ${from} on three New York days running,`
     + ` since ${escapeHtml(since)}. The last reason: ${escapeHtml(reason)}.</p>${officialPage(source)}`;
 }
 
+// What a batch is called in a subject: statutes, or sources once a listing is among them.
+const noun = batch => (batch.some(notice => isListing(notice.source)) ? 'sources' : 'statutes');
+// A change only requirements rest on has no note to edit, so it is closed like a listing.
+const nothingToEdit = (batch, law) => batch.every(notice => isListing(notice.source)
+  || (!notesResting(law, notice.source.id).length && requirementsResting(law, notice.source.id).length > 0));
+const allListings = batch => batch.every(notice => isListing(notice.source));
+
 const LETTERS = {
   changed: {
-    one: name => `${name} has changed`,
-    many: count => `${count} watched statutes have changed`,
+    one: (name, notice) => (isListing(notice.source) ? 'NYSBA ethics opinions to read' : `${name} has changed`),
+    many: (count, batch) => `${count} watched ${noun(batch)} have changed`,
     block: changedBlock,
-    closing: '<p>Until you approve the new text (or, for a repealed section, edit the source and the notes by hand), replies keep using the approved notes. If the rule changed, edit the note and every place listed in the same commit, then push.</p>',
+    closing: (batch, law) => (nothingToEdit(batch, law)
+      ? '<p>Nothing on the site changes until you act.</p>'
+      : '<p>Until you approve the new text (or, for a repealed section, edit the source and the notes by hand), replies keep using the approved notes. If the rule changed, edit the note and every place listed in the same commit, then push.</p>'),
   },
   back: {
     one: name => `${name} is back to the approved text`,
     many: count => `${count} watched statutes are back to the approved text`,
     block: backBlock,
-    closing: '<p>Replies kept using the approved notes all along, so nothing needs doing.</p>',
+    closing: () => '<p>Replies kept using the approved notes all along, so nothing needs doing.</p>',
   },
   unread: {
     one: name => `${name} could not be read for three days`,
-    many: count => `${count} watched statutes could not be read for three days`,
+    many: (count, batch) => `${count} watched ${noun(batch)} could not be read for three days`,
     block: unreadBlock,
-    closing: '<p>While a statute cannot be read, a change to it goes unnoticed. The watch tries again every night and sends nothing more about a statute'
-      + ' until it has been read. If every watched statute fails for the same reason, look first at NYSENATE_API_KEY in the deployment\'s settings.</p>',
+    closing: batch => (allListings(batch)
+      ? '<p>While the list cannot be read, a new opinion goes unnoticed. The watch tries again every night and sends nothing more about it until it has been read.</p>'
+      : '<p>While a statute cannot be read, a change to it goes unnoticed. The watch tries again every night and sends nothing more about a statute'
+        + ' until it has been read. If every watched statute fails for the same reason, look first at NYSENATE_API_KEY in the deployment\'s settings.</p>'),
   },
 };
 
 // One email for a batch of notices of one kind. A batch of one is about its source; a larger one opens with the count.
 function emailOf(kind, batch, context) {
   const letter = LETTERS[kind];
-  const headline = batch.length === 1 ? letter.one(nameOf(batch[0].source)) : letter.many(batch.length);
+  const headline = batch.length === 1 ? letter.one(nameOf(batch[0].source), batch[0]) : letter.many(batch.length, batch);
   const opening = batch.length === 1 ? '' : `<p>${escapeHtml(headline)}. Each is set out below.</p>`;
-  return { subject: `${context.prefix}${headline}`, html: opening + batch.map(notice => letter.block(notice, context)).join('<hr>') + letter.closing };
+  return { subject: `${context.prefix}${headline}`, html: opening + batch.map(notice => letter.block(notice, context)).join('<hr>') + letter.closing(batch, context.law) };
 }
 
 /**
@@ -283,14 +328,14 @@ function emailOf(kind, batch, context) {
  * @param {Function} options.sqlClient        a tagged-template SQL client (neon)
  * @param {object} options.law                the notes file as read (readLawFile); it is never changed
  * @param {Function} options.snapshotOf       id => the approved text of a section or bill, or null when none is saved
- * @param {Function} options.readSource       (source, { signal }) => a read of a section or bill (sourceReader, with the key)
+ * @param {Function} options.readSource       (source, { signal }) => a read of a section, bill or listing (sourceReader, with the key)
  * @param {Function} options.notify           notify(subject, html) => { sent: true } | { sent: false, reason } (sendOperatorNotice)
  * @param {string} [options.site]             the site's name, for the subject of each email
  * @param {number} [options.budgetMs]         the time the reads and the sends may take together; its last quarter (at most
  *                                            10 s) is the notices' alone
  * @param {number} [options.concurrency]      the most reads at once
  * @returns {Promise<{ checked: number, same: string[], differing: string[], unread: string[], emails: string[] }>}
- *   checked: the sections and bills watched, each in exactly one of same, differing and unread, in the notes file's order;
+ *   checked: the sections, bills and listings watched, each in exactly one of same, differing and unread, in the notes file's order;
  *   emails: the subjects of the emails that went out
  */
 export async function statuteWatch({ today, sqlClient, law, snapshotOf, readSource, notify, site = '', budgetMs = 40000, concurrency = 4 }) {
@@ -298,8 +343,8 @@ export async function statuteWatch({ today, sqlClient, law, snapshotOf, readSour
   if (typeof notify !== 'function') throw new Error('the statute watch was given no way to email the owner');
   const moment = new Date(today);
   if (Number.isNaN(moment.getTime())) throw new Error('the statute watch was given no moment for its run (today)');
-  const watched = sectionsAndBills(law);
-  if (!watched.length) throw new Error('no sections or bills to watch in the notes file');
+  const watched = watchedSources(law);
+  if (!watched.length) throw new Error('no sections, bills or lists to watch in the notes file');
 
   const db = (strings, ...values) => Promise.resolve().then(() => sqlClient(strings, ...values)).catch(error => { throw tableFailure(error); });
   const run = { db, at: moment.toISOString(), day: newYorkDay(moment) };
@@ -357,8 +402,8 @@ export async function statuteWatch({ today, sqlClient, law, snapshotOf, readSour
         // the owner is told. A difference that was never emailed, or that the owner approved, clears without a word.
         const reported = Boolean(row) && row.seen_fingerprint !== source.fingerprint
           && row.emailed_fingerprint != null && row.emailed_fingerprint !== source.fingerprint;
-        await recordSame(run, source.id, reported);
-        return { source, state: 'same', tell: reported ? 'back' : null };
+        await recordSame(run, source.id, reported && !isListing(source));
+        return { source, state: 'same', tell: reported && !isListing(source) ? 'back' : null };
       }
       await recordDiffering(run, source.id, read, fingerprint);
       return { source, state: 'differing', read, fingerprint, tell: row?.emailed_fingerprint === fingerprint ? null : 'changed' };
@@ -412,8 +457,11 @@ export async function statuteWatch({ today, sqlClient, law, snapshotOf, readSour
       }
     }
 
-    if (!outcomes.some(outcome => outcome.state !== 'unread')) {
-      throw new Error(`no watched section or bill could be read (${[...new Set(outcomes.map(outcome => outcome.reason))].join('; ')})`);
+    // The State Bar's list is judged only when nothing else is watched: one good read of it must not hide a revoked Senate key.
+    const judged = outcomes.filter(outcome => !isListing(outcome.source));
+    const pool = judged.length ? judged : outcomes;
+    if (!pool.some(outcome => outcome.state !== 'unread')) {
+      throw new Error(`no watched section or bill could be read (${[...new Set(pool.map(outcome => outcome.reason))].join('; ')})`);
     }
     const idsOf = state => outcomes.filter(outcome => outcome.state === state).map(outcome => outcome.source.id);
     return { checked: watched.length, same: idsOf('same'), differing: idsOf('differing'), unread: idsOf('unread'), emails };
@@ -461,19 +509,21 @@ function reviewLines(law, today) {
     if (source?.kind !== 'by_hand') continue;
     // Each line is HTML already, escaped piece by piece, so that the command can be set in <code>.
     const command = `Review it, then run <code>npm run law:reviewed -- ${escapeHtml(source.id)}</code>.`;
+    const requirements = requirementsResting(law, source.id);
+    const resting = requirements.length ? `<p>The requirements that rest on it:</p>${requirementItems(requirements)}` : '';
     if (source.reviewed_on == null) {
-      lines.push(`<p>${escapeHtml(`${nameOf(source)} has not been reviewed by hand yet.`)} ${command}</p>`);
+      lines.push(`<p>${escapeHtml(`${nameOf(source)} has not been reviewed by hand yet.`)} ${command}</p>${resting}`);
       continue;
     }
     const days = daysBetween(String(source.reviewed_on), today);
-    if (days >= REVIEW_DUE_DAYS) lines.push(`<p>${escapeHtml(`${nameOf(source)} was last reviewed by hand on ${dayLabel(String(source.reviewed_on))}, ${days} days ago.`)} ${command}</p>`);
+    if (days >= REVIEW_DUE_DAYS) lines.push(`<p>${escapeHtml(`${nameOf(source)} was last reviewed by hand on ${dayLabel(String(source.reviewed_on))}, ${days} days ago.`)} ${command}</p>${resting}`);
   }
   return lines;
 }
 
 /**
  * The statute watch's part of the daily summary, as HTML: when it last ran, each watched section that differs from the
- * approved text, each that could not be read, and each source kept by hand that is due for a review. A difference is listed
+ * approved text, each list with opinions waiting, each that could not be read, and each source kept by hand that is due for a review. A difference is listed
  * here whether or not its email went out, so that this summary is the backstop for one that did not. Only the table is read,
  * and never written.
  * @param {object} options
@@ -486,7 +536,7 @@ function reviewLines(law, today) {
 export async function statuteWatchSummary({ sqlClient, law, today, lastRun }) {
   const moment = new Date(today);
   const day = newYorkDay(moment);
-  const watched = sectionsAndBills(law);
+  const watched = watchedSources(law);
   const names = new Map(watched.map(source => [source.id, nameOf(source)]));
 
   // A table that cannot be read must not hide the differences it holds, and must not stop the rest of the summary.
@@ -505,19 +555,25 @@ export async function statuteWatchSummary({ sqlClient, law, today, lastRun }) {
     lines.push(p(runLine(lastRun, moment, '')));
     lines.push(p("The statute watch's records could not be read for this summary."));
   } else {
+    const sectionIds = new Set(watched.filter(source => !isListing(source)).map(source => source.id));
     const readSince = moment.getTime() - LATE_AFTER_MS;
-    const read = rows.filter(row => names.has(row.source_id) && row.last_read_at != null
+    const read = rows.filter(row => sectionIds.has(row.source_id) && row.last_read_at != null
       && new Date(row.last_read_at).getTime() >= readSince && new Date(row.last_read_at).getTime() <= moment.getTime()).length;
-    lines.push(p(runLine(lastRun, moment, `It read ${read} of the ${watched.length} watched sections.`)));
+    lines.push(p(runLine(lastRun, moment, `It read ${read} of the ${sectionIds.size} watched sections.`)));
     // The law's order, and only sources the law still holds: a row left by a source since removed says nothing to act on.
     const byId = new Map(rows.map(row => [row.source_id, row]));
-    const differing = watched.map(source => ({ source, row: byId.get(source.id) })).filter(({ row }) => row?.differs_since != null);
+    const differingAll = watched.map(source => ({ source, row: byId.get(source.id) })).filter(({ row }) => row?.differs_since != null);
+    const differing = differingAll.filter(({ source }) => !isListing(source));
     if (differing.length) {
       const items = differing.map(({ source, row }) => {
         const since = newYorkDay(new Date(row.differs_since));
         return `<li>${escapeHtml(names.get(source.id))} since ${escapeHtml(dayLabel(since))} (${daysIn(daysBetween(since, day))})</li>`;
       });
       lines.push(p(`${differing.length} watched ${differing.length === 1 ? 'section differs' : 'sections differ'} from the approved text:`), `<ul>${items.join('')}</ul>`);
+    }
+    for (const { source, row } of differingAll.filter(({ source }) => isListing(source))) {
+      const since = newYorkDay(new Date(row.differs_since));
+      lines.push(p(`New opinions have waited on ${names.get(source.id)} since ${dayLabel(since)} (${daysIn(daysBetween(since, day))}).`));
     }
     const unread = watched.map(source => ({ source, row: byId.get(source.id) })).filter(({ row }) => row?.unread_since != null);
     if (unread.length) {

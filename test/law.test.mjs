@@ -535,3 +535,133 @@ test('law approve prints the notes and places to edit if the rule changed', asyn
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// A notes file with the State Bar's list of opinions and a requirement resting on it.
+function listingWorld(dir) {
+  const { law, file, statutesDir, deps } = approvalWorld(dir);
+  law.sources.push({ id: 'NYSBA-OPINIONS', kind: 'listing', name: 'State Bar opinions', url: 'https://example.test/opinions', watch_from: 1300, seen: [1301, 1305], fingerprint: 'sha256:abc', reviewed_on: '2026-11-01' });
+  law.requirements = [
+    { id: 'REQ-1', does: 'Tells visitors who is answering', sources: ['NYSBA-OPINIONS', 'CPLR-214'], files: ['public/index.html'], tests: ['test/law.test.mjs'] },
+  ];
+  writeFileSync(file, formatLawFile(law));
+  return { law, file, statutesDir, deps };
+}
+
+test('law reviewed adds opinion numbers to a listing in numeric order, once each, and sets the date', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'law-listing-'));
+  try {
+    const { law, file, deps } = listingWorld(dir);
+    const io = collecting();
+    assert.equal(await main(['reviewed', 'NYSBA-OPINIONS', '1311', '1310'], { ...io, ...deps }), 0);
+    const expected = structuredClone(law);
+    const listing = expected.sources.find(source => source.id === 'NYSBA-OPINIONS');
+    listing.seen = [1301, 1305, 1310, 1311];
+    listing.reviewed_on = '2026-11-22';
+    assert.equal(readFileSync(file, 'utf8'), formatLawFile(expected));
+    assert.match(io.lines.join('\n'), /1310, 1311/);
+    assert.match(io.lines.join('\n'), /2026-11-22/);
+    const after = readFileSync(file, 'utf8');
+    const again = collecting();
+    assert.equal(await main(['reviewed', 'NYSBA-OPINIONS', '1310', '1310', '1305'], { ...again, ...deps }), 0);
+    assert.equal(readFileSync(file, 'utf8'), after);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('law reviewed refuses bad numbers, no numbers, and numbers for a by-hand source, writing nothing', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'law-listing-'));
+  try {
+    const { file, deps } = listingWorld(dir);
+    const before = readFileSync(file, 'utf8');
+    const cases = [
+      ['reviewed', 'NYSBA-OPINIONS'], ['reviewed', 'NYSBA-OPINIONS', '13x0'], ['reviewed', 'NYSBA-OPINIONS', '1310', '13x0'],
+      ['reviewed', 'NYSBA-OPINIONS', '0'], ['reviewed', 'NYSBA-OPINIONS', '-5'], ['reviewed', 'NYSBA-OPINIONS', '12.5'],
+      ['reviewed', 'NYSBA-OPINIONS', '1e3'], ['reviewed', 'NYSBA-OPINIONS', ''],
+      ['reviewed', 'NYCRR-1', '1310'],
+    ];
+    for (const argv of cases) {
+      const io = collecting();
+      assert.equal(await main(argv, { ...io, ...deps }), 2, JSON.stringify(argv));
+      assert.match(io.lines.join('\n'), /Usage|number/);
+      assert.equal(readFileSync(file, 'utf8'), before, JSON.stringify(argv));
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('law approve on a listing exits 1 and points to law:reviewed', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'law-listing-'));
+  try {
+    const { file, deps } = listingWorld(dir);
+    const before = readFileSync(file, 'utf8');
+    const io = collecting();
+    const readSource = async () => { throw new Error('nothing is read for a listing'); };
+    assert.equal(await main(['approve', 'NYSBA-OPINIONS', statuteFingerprint(NEW_READ)], { ...io, ...deps, readSource }), 1);
+    assert.match(io.lines.join('\n'), /law:reviewed -- NYSBA-OPINIONS <numbers>/);
+    assert.equal(readFileSync(file, 'utf8'), before);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('law check reads a listing and prints same or differs, and a file with only a listing is not empty', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'law-listing-'));
+  try {
+    const file = join(dir, 'law.json');
+    const FP = 'sha256:' + 'a'.repeat(64);
+    const law = { notes: [], sources: [{ id: 'NYSBA-OPINIONS', kind: 'listing', url: 'https://example.test/opinions', watch_from: 1300, seen: [], fingerprint: FP }] };
+    writeFileSync(file, formatLawFile(law));
+    const asked = [];
+    const run = async (text) => {
+      const io = collecting();
+      const code = await main(['check'], { ...io, lawUrl: pathToFileURL(file), readSource: async (source) => { asked.push(source.kind); return { ok: true, text, repealed: false, repealedDate: null, activeDate: '2026-11-23' }; } });
+      return { code, text: io.lines.join('\n') };
+    };
+    const same = await run('x');
+    law.sources[0].fingerprint = statuteFingerprint({ text: 'x', repealed: false, repealedDate: null });
+    writeFileSync(file, formatLawFile(law));
+    const equal = await run('x');
+    assert.equal(equal.code, 0);
+    assert.match(equal.text, /^NYSBA-OPINIONS\s+same/m);
+    assert.equal(same.code, 1);
+    assert.match(same.text, /^NYSBA-OPINIONS\s+differs sha256:[0-9a-f]{64}/m);
+    assert.doesNotMatch(same.text, /no sections or bills/);
+    assert.deepEqual(asked, ['listing', 'listing']);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('law report shows a listing status, the requirements resting on each source, and a closing Requirements list', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'law-listing-'));
+  try {
+    const { file, statutesDir } = listingWorld(dir);
+    writeFileSync(join(statutesDir, 'NYSBA-OPINIONS.txt'), 'SHOULD NOT APPEAR\n');
+    const before = readFileSync(file, 'utf8');
+    const run = async (...flags) => {
+      const io = collecting();
+      const code = await main(['report', ...flags], { ...io, lawUrl: pathToFileURL(file), statutesDir: pathToFileURL(`${statutesDir}/`) });
+      return { code, text: io.lines.join('\n') };
+    };
+    const plain = await run();
+    assert.equal(plain.code, 0);
+    assert.match(plain.text, /read nightly from the State Bar's list; opinions marked reviewed through 1305, last on 2026-11-01/);
+    assert.match(plain.text, /Requirements resting on it:\n- REQ-1: Tells visitors who is answering/);
+    assert.equal((plain.text.match(/Requirements resting on it:/g) ?? []).length, 4);
+    assert.match(plain.text, /Requirements resting on it:\n- none/);
+    const closing = plain.text.slice(plain.text.indexOf('## Requirements'));
+    assert.match(closing, /REQ-1/);
+    assert.match(closing, /Tells visitors who is answering/);
+    assert.match(closing, /NYSBA-OPINIONS, CPLR-214/);
+    assert.match(closing, /public\/index\.html/);
+    assert.match(closing, /test\/law\.test\.mjs/);
+    const texts = await run('--texts');
+    assert.equal(texts.code, 0);
+    assert.doesNotMatch(texts.text, /SHOULD NOT APPEAR/);
+    assert.equal(readFileSync(file, 'utf8'), before);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -13,7 +13,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { SITE_NAME, STATUTE_TEXTS_DIR, CURRENT_LAW_FILE } from './gate-config.js';
-import { readLawFile, writeLawFile, notesResting, registeredPlaces, earliestSourceDate, snapshotReader } from './law-file.js';
+import { readLawFile, writeLawFile, notesResting, registeredPlaces, requirementsResting, earliestSourceDate, snapshotReader } from './law-file.js';
 import { fetchLawIndex, fetchLawTree, sourceReader, tidyStatuteText, statuteFingerprint } from './statute-text.js';
 
 // The ids a saved text may have, the same shape as the plan's source ids (CPLR-214-A, EPTL-5-4.1, INS-5102, BILL-2025-S1234).
@@ -151,7 +151,7 @@ async function check({ readSource, lawUrl, out, err }) {
   let allSame = true;
   let read = 0;
   for (const source of (Array.isArray(law.sources) ? law.sources : [])) {
-    if (source?.kind !== 'section' && source?.kind !== 'bill') continue;
+    if (source?.kind !== 'section' && source?.kind !== 'bill' && source?.kind !== 'listing') continue;
     const got = await readSource(source);
     read += 1;
     if (!got.ok) {
@@ -182,6 +182,8 @@ const cell = value => String(value ?? '').replace(/\|/g, '\\|').replace(/\s*\n\s
 // Markdown made to be read as one page: each source with the notes and places that rest on it, then the places that state a
 // period or amount and are not a rule. With --texts each section's approved text follows it, so the owner can read the law
 // beside the notes. It reads the notes file and the saved texts only; it holds no key, makes no request and writes nothing.
+const highest = value => (Array.isArray(value) && value.length ? Math.max(...value) : null);
+
 function report(args, { lawUrl, statutesDir, out, err }) {
   const unknown = args.filter(arg => arg !== '--texts');
   if (unknown.length) {
@@ -211,6 +213,7 @@ function report(args, { lawUrl, statutesDir, out, err }) {
     out('- Kind: ' + source.kind);
     if (source.url) out('- Address: ' + source.url);
     if (source.kind === 'by_hand') out('- Status: ' + (source.reviewed_on ? 'reviewed by hand on ' + source.reviewed_on : 'not yet reviewed by hand'));
+    else if (source.kind === 'listing') out('- Status: read nightly from the State Bar\'s list; opinions marked reviewed through ' + (highest(source.seen) ?? 'none') + ', last on ' + (source.reviewed_on ?? 'no date'));
     else out('- Status: approved on ' + (source.approved_on ?? 'no date'));
     if (source.active_date) out('- Active date: ' + source.active_date);
     const notes = notesResting(law, source.id);
@@ -218,6 +221,11 @@ function report(args, { lawUrl, statutesDir, out, err }) {
     out('Notes resting on it:');
     if (!notes.length) out('- none');
     for (const note of notes) out('- ' + note.topic + ': ' + note.rule);
+    const resting = requirementsResting(law, source.id);
+    out('');
+    out('Requirements resting on it:');
+    if (!resting.length) out('- none');
+    for (const item of resting) out('- ' + item.id + ': ' + item.does);
     const places = registeredPlaces(law, source.id);
     out('');
     if (!places.length) {
@@ -229,7 +237,7 @@ function report(args, { lawUrl, statutesDir, out, err }) {
       out('| --- | --- | --- | --- |');
       for (const place of places) out('| ' + [place.file, place.states, place.count, place.about].map(cell).join(' | ') + ' |');
     }
-    if (withTexts && source.kind !== 'by_hand') {
+    if (withTexts && (source.kind === 'section' || source.kind === 'bill')) {
       const text = snapshotOf(source.id);
       out('');
       if (text === null) {
@@ -253,6 +261,17 @@ function report(args, { lawUrl, statutesDir, out, err }) {
     out('| File | Phrase | Count | Why it is not a rule |');
     out('| --- | --- | --- | --- |');
     for (const place of apart) out('| ' + [place.file, place.states, place.count, place.about].map(cell).join(' | ') + ' |');
+  }
+  out('');
+  out('## Requirements');
+  out('');
+  const requirements = list(law.requirements);
+  if (!requirements.length) out('none');
+  for (const item of requirements) {
+    out('- ' + item.id + ': ' + item.does);
+    out('  - Sources: ' + (list(item.sources).join(', ') || 'none'));
+    out('  - Files: ' + (list(item.files).join(', ') || 'none'));
+    out('  - Tests: ' + (list(item.tests).join(', ') || 'none'));
   }
   return 0;
 }
@@ -309,6 +328,10 @@ async function approve(args, { readSource, lawUrl, statutesDir, now, out, err })
     err(`${id} is kept by hand, so there is no text to approve. Record a review with: npm run law:reviewed -- ${id}`);
     return 1;
   }
+  if (source.kind === 'listing') {
+    err(`${id} is the State Bar's list, so it is reviewed, not approved. Use: npm run law:reviewed -- ${id} <numbers>`);
+    return 1;
+  }
   if (source.kind !== 'section' && source.kind !== 'bill') {
     err(`${id} is a source of an unknown kind; nothing was written.`);
     return 1;
@@ -350,16 +373,37 @@ async function approve(args, { readSource, lawUrl, statutesDir, now, out, err })
   return 0;
 }
 
-// Renews the review date of a source the API cannot serve, which the owner reads by hand. Nothing else about it changes.
+// Renews the review date of a source the API cannot serve, which the owner reads by hand; or, for the State Bar's list, marks
+// the opinions the owner has read. Nothing is written until every argument has been checked.
 function reviewed(args, { lawUrl, now, out, err }) {
-  const [id, ...extra] = args;
-  if (!id || extra.length) {
-    err('Usage: node law.mjs reviewed <id>');
+  const [id, ...numbers] = args;
+  const usage = 'Usage: node law.mjs reviewed <id> [numbers...]   (numbers are required for the State Bar\'s list, e.g. 1310 1311)';
+  if (!id) {
+    err(usage);
     return 2;
   }
   const found = findSource(id, { lawUrl, err });
   if (!found) return 1;
   const { law, source } = found;
+  if (source.kind === 'listing') {
+    const valid = numbers.length > 0 && numbers.every(value => /^[1-9][0-9]*$/.test(value) && Number.isSafeInteger(Number(value)));
+    if (!valid) {
+      err(usage);
+      err('Each number must be a positive whole number written in digits.');
+      return 2;
+    }
+    const merged = [...new Set([...listOf(source.seen), ...numbers.map(Number)])].sort((a, b) => a - b);
+    source.seen = merged;
+    source.reviewed_on = todayInNewYork(now);
+    writeLawFile(lawUrl, law);
+    out(`Marked opinions ${[...new Set(numbers.map(Number))].sort((a, b) => a - b).join(', ')} of ${id} as reviewed; reviewed_on is ${source.reviewed_on}.`);
+    return 0;
+  }
+  if (numbers.length) {
+    err(usage);
+    err(`${id} takes no numbers.`);
+    return 2;
+  }
   if (source.kind !== 'by_hand') {
     err(`${id} is read from the Senate, so it is approved, not reviewed. Use: npm run law:approve -- ${id} <fingerprint>`);
     return 1;

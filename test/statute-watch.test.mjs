@@ -655,8 +655,8 @@ test('the law object is unchanged after any run', async () => {
 test('a run with no reader, or with no section or bill to watch, fails before anything is read or written', async () => {
   const { table, senate, watch } = world();
   await assert.rejects(watch(night(0), { readSource: undefined }), /NYSENATE_API_KEY/);
-  await assert.rejects(watch(night(0), { law: deepFreeze({ sources: [BY_HAND], notes: [], register: [] }) }), /no sections or bills to watch in the notes file/);
-  await assert.rejects(watch(night(0), { law: deepFreeze({}) }), /no sections or bills to watch in the notes file/);
+  await assert.rejects(watch(night(0), { law: deepFreeze({ sources: [BY_HAND], notes: [], register: [] }) }), /no sections, bills or lists to watch in the notes file/);
+  await assert.rejects(watch(night(0), { law: deepFreeze({}) }), /no sections, bills or lists to watch in the notes file/);
   assert.deepEqual(table.sent, []);
   assert.deepEqual(senate.asked, []);
 });
@@ -863,4 +863,162 @@ test('a run time the summary cannot read is said so, and one given as an ISO str
   const asDate = await summaryOf(w, { ranAt: moment, ok: true });
   assert.equal(await summaryOf(w, { ranAt: moment.toISOString(), ok: true }), asDate);
   assert.ok(asDate.includes(`The statute watch ran at ${newYorkTime(moment)}, `));
+});
+
+// The State Bar's list of opinions, and the requirements the notes file names.
+const NO_NEW = 'No new opinions.';
+const LISTING = {
+  id: 'NYSBA-OPINIONS', kind: 'listing', name: 'NYSBA ethics opinions list', url: 'https://nysba.org/ethics-opinions/', watch_from: 1310, seen: [],
+  fingerprint: fingerprintOf(NO_NEW), reviewed_on: '2026-11-23',
+};
+const REQUIREMENTS = [
+  { id: 'REQ-ONE', does: 'Shows the notice <before> typing & more', sources: ['NYSBA-OPINIONS', 'CPLR-214'], files: ['public/index.html'], tests: ['t'] },
+  { id: 'REQ-TWO', does: 'Describes how a firm is chosen', sources: ['NYSBA-OPINIONS'], files: ['site.js'], tests: ['t'] },
+  { id: 'REQ-THREE', does: 'Charges a firm its subscription', sources: ['BY-HAND-ONE'], files: ['billing.js'], tests: ['t'] },
+];
+const OPINIONS = [
+  { number: 1311, title: 'a <b>second</b> opinion', url: 'https://nysba.org/ethics-opinion-1311-second/' },
+  { number: 1310, title: 'first opinion', url: 'https://nysba.org/ethics-opinion-1310-first/' },
+];
+const listingRead = opinions => (opinions.length
+  ? { ok: true, text: opinions.map(o => `${o.number} ${o.title} ${o.url}`).join('\n'), opinions, title: '', activeDate: null, repealed: false, repealedDate: null }
+  : { ok: true, text: NO_NEW, opinions: [], title: '', activeDate: null, repealed: false, repealedDate: null });
+
+function listingLaw({ notes = true } = {}) {
+  const hand = { id: 'BY-HAND-ONE', kind: 'by_hand', name: 'A rule kept by hand', url: 'https://example.test/', reviewed_on: '2026-01-01' };
+  return {
+    sources: [section('CPLR-214'), LISTING, hand],
+    notes: notes ? [{ id: 'note-214', topic: 'The deadline of CPLR § 214', rule: 'Three years', sources: ['CPLR-214'] }] : [],
+    register: [],
+    requirements: REQUIREMENTS,
+  };
+}
+
+test('a listing with new opinions sends one email naming each opinion, every requirement and the command', async () => {
+  const { table, mail, watch } = world({ law: listingLaw(), answers: { 'NYSBA-OPINIONS': listingRead(OPINIONS) } });
+  const result = await watch(night(0));
+  assert.deepEqual(result.differing, ['NYSBA-OPINIONS']);
+  assert.equal(mail.sent.length, 1);
+  const { subject, html } = mail.sent[0];
+  assert.ok(subject.endsWith('NYSBA ethics opinions to read') && !subject.includes('New'), subject);
+  assert.ok(html.includes("These opinions on the State Bar's list are not yet marked reviewed:"));
+  assert.ok(html.includes('If an opinion concerns lead services, paid recommendations, advertising, solicitation or AI intake, compare it with the list above and take it to a lawyer. Otherwise mark it reviewed.'));
+  assert.ok(html.includes('Mark each one reviewed once you have read it, including any you take to a lawyer.'));
+  assert.ok(html.includes('1310') && html.includes('1311'));
+  assert.ok(html.includes('first opinion') && html.includes('a &lt;b&gt;second&lt;/b&gt; opinion'));
+  assert.ok(!html.includes('<b>second</b>'));
+  assert.ok(html.includes('<a href="https://nysba.org/ethics-opinion-1310-first/">'));
+  for (const requirement of REQUIREMENTS) assert.ok(html.includes(requirement.id), requirement.id);
+  assert.ok(html.includes('Shows the notice &lt;before&gt; typing &amp; more'));
+  assert.ok(html.includes('Charges a firm its subscription'), 'every requirement, not only those resting on the listing');
+  assert.ok(html.includes('npm run law:reviewed -- NYSBA-OPINIONS 1310 1311'));
+  assert.ok(html.includes('<p>Nothing on the site changes until you act.</p>'));
+  assert.ok(!html.includes('Senate'));
+  assert.equal(table.row('NYSBA-OPINIONS').emailed_fingerprint, fingerprintOf(listingRead(OPINIONS).text));
+});
+
+test('a listing opinion address that is not https is shown and not linked', async () => {
+  const odd = [{ number: 1312, title: 'odd', url: 'javascript:alert(1)' }];
+  const { mail, watch } = world({ law: listingLaw(), answers: { 'NYSBA-OPINIONS': listingRead(odd) } });
+  await watch(night(0));
+  assert.ok(!mail.sent[0].html.includes('href="javascript'));
+  assert.ok(mail.sent[0].html.includes('javascript:alert(1)'));
+});
+
+test('the same list the next night sends nothing, and an opinion leaving the list sends no back email', async () => {
+  const { senate, mail, watch } = world({ law: listingLaw(), answers: { 'NYSBA-OPINIONS': listingRead(OPINIONS) } });
+  await watch(night(0));
+  assert.deepEqual((await watch(night(1))).emails, []);
+  senate.answers['NYSBA-OPINIONS'] = listingRead([]);
+  const result = await watch(night(2));
+  assert.ok(result.same.includes('NYSBA-OPINIONS'));
+  assert.deepEqual(result.emails, []);
+  assert.equal(mail.attempts.length, 1);
+  assert.deepEqual((await watch(night(3))).emails, []);
+});
+
+test('an unread list sends nothing until the third New York day, and then names the State Bar page', async () => {
+  const failing = { ok: false, reason: 'status 503' };
+  const { mail, watch } = world({ law: listingLaw(), answers: { 'NYSBA-OPINIONS': failing } });
+  for (const n of [0, 1]) assert.deepEqual((await watch(night(n))).emails, [], `night ${n}`);
+  const result = await watch(night(2));
+  assert.equal(result.emails.length, 1);
+  const { subject, html } = mail.sent[0];
+  assert.ok(subject.endsWith('NYSBA ethics opinions list could not be read for three days'), subject);
+  assert.ok(html.includes("State Bar's page"));
+  assert.ok(!html.includes('Senate') && !html.includes('NYSENATE_API_KEY'));
+});
+
+test('a section with a requirement and no note lists the requirements that rest on it', async () => {
+  const { mail, watch } = world({ law: listingLaw({ notes: false }), answers: { 'CPLR-214': CHANGED_214 } });
+  await watch(night(0));
+  assert.equal(mail.sent.length, 1);
+  const { html } = mail.sent[0];
+  assert.ok(html.includes('The requirements that rest on it'));
+  assert.ok(html.includes('REQ-ONE') && html.includes('Shows the notice &lt;before&gt; typing &amp; more'));
+  assert.ok(!html.includes('REQ-TWO'));
+  assert.ok(html.includes('take it to a lawyer'));
+  assert.ok(!html.includes('No note rests on it'));
+  assert.ok(!html.includes('The register lists only places'));
+});
+
+test('a section with a note and a requirement lists both', async () => {
+  const { mail, watch } = world({ law: listingLaw(), answers: { 'CPLR-214': CHANGED_214 } });
+  await watch(night(0));
+  assert.ok(mail.sent[0].html.includes('The notes that rest on it'));
+  assert.ok(mail.sent[0].html.includes('The requirements that rest on it'));
+});
+
+test('the summary counts sections and bills only, and says when new opinions have waited', async () => {
+  const w = world({ law: listingLaw() });
+  const run = { ranAt: hoursBefore(6), ok: true };
+  w.table.plant('CPLR-214', { last_read_at: hoursBefore(2).toISOString() });
+  w.table.plant('NYSBA-OPINIONS', { last_read_at: hoursBefore(2).toISOString(), differs_since: '2026-11-18T15:00:00.000Z', seen_fingerprint: 'x' });
+  const html = await summaryOf(w, run);
+  assert.ok(html.includes('It read 1 of the 1 watched sections.'), html);
+  assert.ok(html.includes('NYSBA ethics opinions list') && html.includes('Nov 18, 2026'));
+  assert.doesNotMatch(html, /differs? from the approved text/);
+});
+
+test('a by-hand reminder lists the requirements resting on that source', async () => {
+  const w = world({ law: listingLaw() });
+  const html = await summaryOf(w, { ranAt: hoursBefore(6), ok: true });
+  assert.ok(html.includes('npm run law:reviewed -- BY-HAND-ONE'));
+  assert.ok(html.includes('REQ-THREE') && html.includes('Charges a firm its subscription'));
+  assert.ok(!html.includes('REQ-ONE'));
+});
+
+test('a shrinking list of unmarked opinions sends one more email, and the same list the next night sends none', async () => {
+  const { senate, mail, watch } = world({ law: listingLaw(), answers: { 'NYSBA-OPINIONS': listingRead(OPINIONS) } });
+  await watch(night(0));
+  senate.answers['NYSBA-OPINIONS'] = listingRead([OPINIONS[0]]);
+  assert.equal((await watch(night(1))).emails.length, 1);
+  assert.equal(mail.sent.length, 2);
+  assert.ok(mail.sent[1].html.includes('npm run law:reviewed -- NYSBA-OPINIONS 1311'));
+  assert.ok(!mail.sent[1].html.includes('npm run law:reviewed -- NYSBA-OPINIONS 1310'));
+  assert.deepEqual((await watch(night(2))).emails, []);
+  assert.equal(mail.sent.length, 2);
+});
+
+test('when every section fails and the list reads, the run still fails, after every source is recorded and every notice sent', async () => {
+  const failing = { ok: false, reason: 'status 403' };
+  const { table, mail, watch } = world({ law: listingLaw(), answers: { 'CPLR-214': failing, 'NYSBA-OPINIONS': listingRead(OPINIONS) } });
+  await assert.rejects(watch(night(0)), /no watched section or bill could be read \(status 403\)/);
+  assert.ok(table.row('CPLR-214').unread_since && table.row('NYSBA-OPINIONS').differs_since);
+  assert.equal(mail.sent.length, 1, 'the notice due still went');
+});
+
+test('a change email for a section only a requirement rests on closes without edit-the-note advice', async () => {
+  const { mail, watch } = world({ law: listingLaw({ notes: false }), answers: { 'CPLR-214': CHANGED_214 } });
+  await watch(night(0));
+  assert.ok(mail.sent[0].html.includes('<p>Nothing on the site changes until you act.</p>'));
+  assert.ok(!mail.sent[0].html.includes('edit the note and every place listed'));
+});
+
+test('a listing email with no requirements does not point at a list', async () => {
+  const law = { ...listingLaw(), requirements: [] };
+  const { mail, watch } = world({ law, answers: { 'NYSBA-OPINIONS': listingRead(OPINIONS) } });
+  await watch(night(0));
+  assert.ok(!mail.sent[0].html.includes('the list above'));
+  assert.ok(mail.sent[0].html.includes('take it to a lawyer'));
 });

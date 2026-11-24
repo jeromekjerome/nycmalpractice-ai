@@ -2,6 +2,7 @@ import './test-settings.mjs';
 import './app.test.mjs';
 import './requirements.test.mjs';
 import './statute-watch.test.mjs';
+import './opinion-list.test.mjs';
 import './law-file.test.mjs';
 import './lead-preview.test.mjs';
 import './law-register.test.mjs';

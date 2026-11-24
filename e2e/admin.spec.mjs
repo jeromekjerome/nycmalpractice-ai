@@ -74,7 +74,7 @@ test('the operator reads a contact request, delivers it by hand and cancels a st
   })));
   await mockOperations(page, {
     requests: [
-      { session_id: session, case_type: 'misdiagnosis', mode: 'estate', name: XSS, phone: '5551234567', email: null, contact_consent_at: '2026-11-14T10:00:00Z', tier: 'hot', score: '84', leads: [], auctions: [{ id: 4, status: 'cancelled' }] },
+      { session_id: session, case_type: 'misdiagnosis', mode: 'estate', name: XSS, phone: '5551234567', email: null, contact_consent_at: '2026-11-14T10:00:00Z', tier: 'hot', score: '84', leads: [], auctions: [{ id: 4, status: 'cancelled' }], unconfirmed_firms: [{ id: 12, name: 'Roe & Partners' }] },
       // Its auction is still closing: not delivered by hand meanwhile.
       { session_id: 'sess-running', case_type: 'dental', mode: 'personal', name: 'Sam Doe', phone: '5559876543', email: null, contact_consent_at: '2026-11-14T09:00:00Z', tier: 'hot', score: '81', leads: [], auctions: [{ id: 5, status: 'closing' }] },
     ],
@@ -84,7 +84,7 @@ test('the operator reads a contact request, delivers it by hand and cancels a st
   await page.route(url => url.pathname.startsWith('/api/admin/requests/') && !url.pathname.endsWith('/deliver'), route => route.fulfill(json({
     request: { session_id: session, name: 'Jane Roe', phone: '5551234567', contact_consent_at: '2026-11-14T10:00:00Z', history: [{ role: 'user', content: XSS + ' My mother was misdiagnosed.' }] },
   })));
-  await page.route(url => url.pathname.endsWith('/deliver'), async route => { delivered.push({ url: route.request().url(), body: route.request().postDataJSON() }); await route.fulfill(json({ ok: true, leadId: 900, emailed: true })); });
+  await page.route(url => url.pathname.endsWith('/deliver'), async route => { delivered.push({ url: route.request().url(), body: route.request().postDataJSON() }); await route.fulfill(json({ ok: true, leadId: 900, emailed: true, firmId: 31, firmName: 'Pat & Sons' })); });
   await page.route('**/api/admin/auctions/5/cancel', async route => { cancelled = route.request().method(); await route.fulfill(json({ ok: true })); });
   page.on('dialog', dialog => dialog.accept());
 
@@ -108,13 +108,22 @@ test('the operator reads a contact request, delivers it by hand and cancels a st
   await page.locator('#transcriptModal').getByRole('button', { name: 'Close' }).click();
 
   await hostile.getByRole('button', { name: 'Deliver to a firm…' }).click();
+  await expect(hostile.locator('.deliver-form select')).toHaveCount(0);
   await hostile.locator('.deliver-form input').fill('40');
-  await hostile.getByRole('button', { name: 'Deliver', exact: true }).click();
+  await hostile.getByRole('button', { name: 'Deliver to a firm drawn at random' }).click();
   await expect.poll(() => delivered.length).toBe(1);
-  expect(delivered[0].body).toEqual({ firmId: 12, price: 40 });
+  expect(delivered[0].body).toEqual({ price: 40 });
   expect(decodeURIComponent(new URL(delivered[0].url).pathname)).toBe(`/api/admin/requests/${session}/deliver`);
   // A delivery reloads the tables; the next click waits for that.
-  await expect(page.locator('#adminMsg')).toContainText('Lead #900 delivered');
+  await expect(page.locator('#adminMsg')).toContainText('Lead #900 delivered to Pat & Sons');
+  await page.waitForLoadState('networkidle');
+
+  // A firm whose charge could not be confirmed is finished by name, at $0.
+  await hostile.getByRole('button', { name: 'Deliver to a firm…' }).click();
+  await hostile.locator('.deliver-form input').fill('40');
+  await hostile.getByRole('button', { name: 'Finish delivery to Roe & Partners' }).click();
+  await expect.poll(() => delivered.length).toBe(2);
+  expect(delivered[1].body).toEqual({ firmId: 12, price: 0 });
   await page.waitForLoadState('networkidle');
 
   await page.locator('#auctionsBody').getByRole('button', { name: 'Cancel' }).click();

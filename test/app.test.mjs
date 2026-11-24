@@ -2978,22 +2978,35 @@ test('the decline reasons on the lead page are the ones the server accepts', asy
   assert.deepEqual(offered.sort(), Object.keys(DECLINE_REASONS).sort());
 });
 
-test('the operator sees every contact request, auction and lead, and can deliver a request by hand', async () => {
+test('the operator sees every contact request, auction and lead, and a request sent by hand goes to a firm the app draws', async () => {
   const admin = { 'content-type': 'application/json', 'x-admin-secret': process.env.ADMIN_SECRET };
-  let had = [];   // the firms that have had the lead so far
+  let had = [];                    // the firms that have had the lead so far
+  let eligible = [21, 22];         // the firms an auction would notify
+  const unconfirmed = new Set();   // "session:firm" rows of charges Stripe could not confirm
+  const declinedCustomers = new Set();
+  let declineNext = 0;             // how many of the next charges decline, whichever firm they are for
+  const unknownCustomers = new Set();
   const sql = [];
   const charged = [];
   const handler = async (url, init) => {
+    if (url.startsWith('https://api.stripe.com/v1/customers/')) return jsonResponse({ id: url.split('/').pop(), object: 'customer', invoice_settings: { default_payment_method: null } });
     if (url.startsWith('https://api.stripe.com/')) {
-      charged.push(new URLSearchParams(String(init.body)).get('amount'));
+      const body = new URLSearchParams(String(init.body));
+      const customer = body.get('customer');
+      charged.push({ customer, amount: body.get('amount') });
+      if (declineNext > 0 || declinedCustomers.has(customer)) {
+        declineNext = Math.max(0, declineNext - 1);
+        return jsonResponse({ error: { type: 'card_error', code: 'card_declined', message: 'Your card was declined.' } }, 402);
+      }
+      if (unknownCustomers.has(customer)) return jsonResponse({ error: { type: 'api_error', message: 'Something went wrong on our end.' } }, 500);
       return jsonResponse({ id: 'pi_hand', object: 'payment_intent', status: 'succeeded' });
     }
     const { query, params } = JSON.parse(init.body);
     const q = query.replace(/\s+/g, ' ').trim();
     sql.push({ query: q, params });
     if (/FROM conversations c WHERE c\.contact_consent_at IS NOT NULL/.test(q)) {
-      return rowsResponse([['session_id', TEXT], [REVIEW_APP.typeColumn, TEXT], ['name', TEXT], ['phone', TEXT], ['tier', TEXT], ['score', TEXT], ['leads', JSONB], ['auctions', JSONB]],
-        [['sess-hand', REVIEW_APP.caseType, 'Jane Roe', '5551234567', 'hot', '84', '[]', '[]']]);
+      return rowsResponse([['session_id', TEXT], [REVIEW_APP.typeColumn, TEXT], ['name', TEXT], ['phone', TEXT], ['tier', TEXT], ['score', TEXT], ['leads', JSONB], ['auctions', JSONB], ['unconfirmed_firms', JSONB]],
+        [['sess-hand', REVIEW_APP.caseType, 'Jane Roe', '5551234567', 'hot', '84', '[]', '[]', JSON.stringify([{ id: 13, name: 'Firm 13' }])]]);
     }
     if (/FROM conversations WHERE session_id = \$1 AND contact_consent_at IS NOT NULL/.test(q)) {
       return params[0] === 'sess-hand'
@@ -3001,20 +3014,34 @@ test('the operator sees every contact request, auction and lead, and can deliver
           [['sess-hand', REVIEW_APP.mode, REVIEW_APP.caseType, JSON.stringify([{ role: 'user', content: 'I was hurt.' }]), JSON.stringify({ score: 84, tier: 'hot', preview: 'A preview.' }), 'Jane Roe', '5551234567', '2026-11-14 10:00:00+00', 'I agree.']])
         : rowsResponse([], []);
     }
+    if (/FROM firms WHERE active/.test(q)) {
+      return rowsResponse([['id', INT], ['name', TEXT], ['email', TEXT], ['stripe_customer_id', TEXT], ['stripe_payment_method_id', TEXT]],
+        eligible.map(id => [String(id), 'Firm ' + id, 'f' + id + '@example.test', 'cus_' + id, 'pm_' + id]));
+    }
     if (/^SELECT \* FROM firms WHERE id/.test(q)) {
       return rowsResponse([['id', INT], ['name', TEXT], ['email', TEXT], ['active', BOOL], ['approved_at', TIMESTAMPTZ], ['stripe_customer_id', TEXT], ['stripe_payment_method_id', TEXT]],
-        [[String(params[0]), 'Firm ' + params[0], 'f@example.test', 't', String(params[0]) === '99' ? null : '2026-11-01 00:00:00+00', 'cus_x', 'pm_x']]);
+        [[String(params[0]), 'Firm ' + params[0], 'f@example.test', 't', String(params[0]) === '99' ? null : '2026-11-01 00:00:00+00', 'cus_' + params[0], 'pm_' + params[0]]]);
     }
-    if (/^SELECT DISTINCT firm_id FROM leads WHERE session_id/.test(q)) return rowsResponse([['firm_id', INT]], had.map(id => [id]));
+    if (/^SELECT DISTINCT firm_id FROM leads WHERE session_id/.test(q)) return rowsResponse([['firm_id', INT]], had.map(id => [String(id)]));
+    if (/FROM unconfirmed_charges WHERE session_id = \$1 AND firm_id = \$2/.test(q) && /^SELECT/.test(q)) {
+      return unconfirmed.has(`${params[0]}:${params[1]}`) ? rowsResponse([['found', INT]], [['1']]) : rowsResponse([], []);
+    }
+    if (/^SELECT firm_id FROM unconfirmed_charges WHERE session_id = \$1$/.test(q)) {
+      return rowsResponse([['firm_id', INT]], [...unconfirmed].filter(key => key.startsWith(params[0] + ':')).map(key => [key.split(':')[1]]));
+    }
+    if (/^INSERT INTO unconfirmed_charges/.test(q)) { unconfirmed.add(`${params[0]}:${params[1]}`); return rowsResponse([], [], 'INSERT'); }
+    if (/^DELETE FROM unconfirmed_charges/.test(q)) { unconfirmed.delete(`${params[0]}:${params[1]}`); return rowsResponse([], [], 'DELETE'); }
     if (/^INSERT INTO leads/.test(q)) return rowsResponse([['id', INT]], [['900']], 'INSERT');
     if (/^UPDATE auctions SET status = 'cancelled' WHERE id = \$1 AND status IN/.test(q)) return params[0] === '5' ? rowsResponse([['id', INT]], [['5']], 'UPDATE') : rowsResponse([], []);
     return jsonResponse(EMPTY_ROWS);
   };
+  const leadsInserted = () => sql.filter(entry => /^INSERT INTO leads/.test(entry.query));
   const server = await startServer(app);
   try {
     await withoutMail(() => withOutboundHttp(handler, async () => {
       const call = (method, path, body) => fetch(server.baseUrl + path, { method, headers: admin, ...(body ? { body: JSON.stringify(body) } : {}) })
         .then(async response => ({ status: response.status, body: await response.json() }));
+      const deliver = body => call('POST', '/api/admin/requests/sess-hand/deliver', body);
       // Closed without the secret.
       for (const [method, path] of [['GET', '/api/admin/requests'], ['GET', '/api/admin/requests/sess-hand'], ['POST', '/api/admin/requests/sess-hand/deliver'], ['GET', '/api/admin/auctions'], ['POST', '/api/admin/auctions/5/cancel'], ['GET', '/api/admin/leads']]) {
         assert.equal((await fetch(server.baseUrl + path, { method })).status, 401, path);
@@ -3023,27 +3050,123 @@ test('the operator sees every contact request, auction and lead, and can deliver
       const list = await call('GET', '/api/admin/requests');
       assert.equal(list.status, 200);
       assert.equal(list.body.requests[0].name, 'Jane Roe');
+      assert.deepEqual(list.body.requests[0].unconfirmed_firms, [{ id: 13, name: 'Firm 13' }]);
       assert.ok(list.body.declineReasons.unreachable);
+      assert.ok(sql.some(entry => /FROM unconfirmed_charges/.test(entry.query) && /AS unconfirmed_firms/.test(entry.query)), 'the list does not carry the firms whose charge is unconfirmed');
       assert.equal((await call('GET', '/api/admin/requests/sess-hand')).body.request.history[0].content, 'I was hurt.');
       assert.equal((await call('GET', '/api/admin/requests/sess-unknown')).status, 404);
 
-      // Delivered free to an approved firm: no charge, and the lead carries the client's details and consent.
-      const free = await call('POST', '/api/admin/requests/sess-hand/deliver', { firmId: 12, price: 0 });
-      assert.deepEqual(free.body, { ok: true, leadId: 900, emailed: true });
+      // Free, with no firm named: one of the subscribed, approved firms taking the case type gets it, and no card is charged.
+      const free = await deliver({ price: 0 });
+      assert.equal(free.status, 200);
+      assert.ok([21, 22].includes(free.body.firmId), JSON.stringify(free.body));
+      assert.equal(free.body.firmName, 'Firm ' + free.body.firmId);
+      assert.deepEqual({ ok: free.body.ok, leadId: free.body.leadId, emailed: free.body.emailed }, { ok: true, leadId: 900, emailed: true });
       assert.deepEqual(charged, []);
-      const insert = sql.find(call => /^INSERT INTO leads/.test(call.query));
-      assert.deepEqual(insert.params.slice(0, 2).map(String), ['12', 'sess-hand']);
+      const drawQuery = sql.find(entry => /FROM firms WHERE active/.test(entry.query));
+      assert.match(drawQuery.query, /subscription_active\s*=\s*TRUE/);
+      assert.match(drawQuery.query, /approved_at IS NOT NULL/);
+      const insert = leadsInserted()[0];
+      assert.deepEqual(insert.params.slice(0, 2).map(String), [String(free.body.firmId), 'sess-hand']);
       assert.equal(JSON.parse(insert.params.find(param => typeof param === 'string' && param.startsWith('{'))).contact.name, 'Jane Roe');
 
-      // Charged when priced; refused for a firm not approved, one that has had it, and past three firms.
-      assert.equal((await call('POST', '/api/admin/requests/sess-hand/deliver', { firmId: 13, price: 40 })).status, 200);
-      assert.deepEqual(charged, ['4000']);
-      assert.equal((await call('POST', '/api/admin/requests/sess-hand/deliver', { firmId: 99, price: 0 })).status, 400);
-      had = ['12'];
-      assert.equal((await call('POST', '/api/admin/requests/sess-hand/deliver', { firmId: 12, price: 0 })).status, 409);
+      // Priced: the drawn firm is charged.
+      const priced = await deliver({ price: 40 });
+      assert.equal(priced.status, 200);
+      assert.deepEqual(charged.map(entry => entry.amount), ['4000']);
+      assert.equal(charged[0].customer, 'cus_' + priced.body.firmId);
+
+      // A firm cannot be named unless its charge could not be confirmed.
+      const refused = await deliver({ firmId: 13, price: 0 });
+      assert.equal(refused.status, 400);
+      assert.equal(refused.body.error, 'Only a firm whose charge could not be confirmed can be named.');
+      assert.equal((await deliver({ firmId: 'x', price: 0 })).status, 400);
+      assert.equal((await deliver({ firmId: -3, price: 0 })).status, 400);
+
+      // With its row, the firm gets the lead, and the row is deleted.
+      unconfirmed.add('sess-hand:13');
+      const finished = await deliver({ firmId: 13, price: 0 });
+      assert.equal(finished.status, 200);
+      assert.equal(finished.body.firmId, 13);
+      assert.equal(finished.body.firmName, 'Firm 13');
+      assert.ok(!unconfirmed.has('sess-hand:13'), 'the row stayed after the lead was recorded');
+      assert.equal(String(leadsInserted().at(-1).params[0]), '13');
+
+      // A named firm that has had the lead, or one not approved, is refused and keeps its row.
+      unconfirmed.add('sess-hand:13');
+      had = ['13'];
+      assert.equal((await deliver({ firmId: 13, price: 0 })).status, 409);
+      had = [];
+      unconfirmed.add('sess-hand:99');
+      assert.equal((await deliver({ firmId: 99, price: 0 })).status, 400);
+      assert.ok(unconfirmed.has('sess-hand:13') && unconfirmed.has('sess-hand:99'), 'a refused firm lost its row');
+      unconfirmed.clear();
+
+      // No eligible firm, or every eligible firm has had it.
+      eligible = [];
+      const none = await deliver({ price: 0 });
+      assert.deepEqual([none.status, none.body.error], [409, 'No subscribed, approved firm that takes this case type is available.']);
+      eligible = [21, 22];
+      had = ['21', '22'];
+      assert.equal((await deliver({ price: 0 })).status, 409);
+      had = [];
+
+      // The first drawn firm's card declines: the next one is charged and gets the lead.
+      const leadsBefore = leadsInserted().length;
+      charged.length = 0;
+      declineNext = 1;
+      const next = await deliver({ price: 40 });
+      assert.equal(next.status, 200);
+      assert.equal(charged.length, 2, 'the next firm was not tried after the decline');
+      assert.notEqual(charged[0].customer, charged[1].customer);
+      assert.equal(next.body.firmId, Number(charged[1].customer.replace('cus_', '')), 'the lead did not go to the firm charged after the decline');
+      assert.equal(leadsInserted().length, leadsBefore + 1);
+      // Every card declines: nothing is delivered.
+      declinedCustomers.add('cus_21');
+      declinedCustomers.add('cus_22');
+      const allDeclined = await deliver({ price: 40 });
+      assert.deepEqual([allDeclined.status, allDeclined.body.error], [402, 'No eligible firm could be charged.']);
+      assert.equal(leadsInserted().length, leadsBefore + 1);
+      declinedCustomers.clear();
+
+      // A charge with an unknown outcome: no lead, a row for that firm, and no further firm is tried.
+      charged.length = 0;
+      unknownCustomers.add('cus_21');
+      unknownCustomers.add('cus_22');
+      const unknown = await deliver({ price: 40 });
+      assert.equal(unknown.status, 502);
+      assert.equal(leadsInserted().length, leadsBefore + 1);
+      assert.equal(new Set(charged.map(entry => entry.customer)).size, 1, 'a second firm was charged after an unknown outcome');
+      const recorded = sql.filter(entry => /^INSERT INTO unconfirmed_charges/.test(entry.query));
+      assert.equal(recorded.length, 1);
+      assert.deepEqual(recorded[0].params.map(String), ['sess-hand', charged[0].customer.replace('cus_', '')]);
+      unknownCustomers.clear();
+      unconfirmed.clear();
+
+      // A firm with a row for this request is never drawn, and its row survives a draw.
+      unconfirmed.add('sess-hand:21');
+      charged.length = 0;
+      for (let i = 0; i < 6; i += 1) {
+        const drawn = await deliver({ price: 0 });
+        assert.equal(drawn.body.firmId, 22, JSON.stringify(drawn.body));
+      }
+      assert.ok(unconfirmed.has('sess-hand:21'), 'a draw erased the record of an unconfirmed charge');
+      // A row counts toward the three: two holders and one row leave no room, and nobody is charged.
+      had = ['30', '31'];
+      const full = await deliver({ price: 40 });
+      assert.deepEqual([full.status, full.body.error], [409, 'This lead has already gone to the 3 firms the client agreed to.']);
+      assert.deepEqual(charged, []);
+      had = [];
+      // Finishing a delivery is at $0 only: it never charges again.
+      const dear = await deliver({ firmId: 21, price: 40 });
+      assert.deepEqual([dear.status, dear.body.error], [400, 'A delivery to a firm whose charge could not be confirmed is finished at $0: check that charge in Stripe first.']);
+      assert.deepEqual(charged, []);
+      unconfirmed.clear();
+
+      // Past three firms, or a price below zero.
       had = ['12', '13', '14'];
-      assert.equal((await call('POST', '/api/admin/requests/sess-hand/deliver', { firmId: 15, price: 0 })).status, 409);
-      assert.equal((await call('POST', '/api/admin/requests/sess-hand/deliver', { firmId: 15, price: -5 })).status, 400);
+      assert.equal((await deliver({ price: 0 })).status, 409);
+      assert.equal((await deliver({ price: -5 })).status, 400);
 
       // A stuck auction is cancelled; one already finished is not.
       assert.equal((await call('POST', '/api/admin/auctions/5/cancel')).status, 200);
@@ -3057,6 +3180,85 @@ test('the operator sees every contact request, auction and lead, and can deliver
   }
   // The firms list carries each firm's leads, net spend and recent declines.
   assert.ok(sql.some(call => /AS leads_bought/.test(call.query) && /AS net_spend/.test(call.query) && /AS declines_30d/.test(call.query)), 'the firms list has no activity');
+});
+
+test('a charge Stripe cannot confirm is recorded for the firm, and a failure to record it does not stop the operator being told', async () => {
+  const { closeAuction, deliverColdLead } = await import('../auction.js');
+  for (const insertFails of [false, true]) {
+    // An auction whose winner's charge is unknown.
+    const world = auctionWorld({ bids: [[11, '300.00']], firms: { 11: { customer: 'cus_11', card: 'pm_11' } } });
+    const closing = async (url, init) => {
+      if (url.startsWith('https://api.stripe.com/v1/payment_intents')) return jsonResponse({ error: { type: 'api_error', message: 'Something went wrong on our end.' } }, 500);
+      if (url.startsWith('https://api.stripe.com/')) return world.handler(url, init);
+      const q = JSON.parse(init.body).query.replace(/\s+/g, ' ').trim();
+      if (/^INSERT INTO unconfirmed_charges/.test(q)) {
+        world.sql.push({ query: q, params: JSON.parse(init.body).params });
+        return insertFails ? jsonResponse({ message: 'database unavailable' }, 500) : rowsResponse([], [], 'INSERT');
+      }
+      return world.handler(url, init);
+    };
+    const auction = await capturingLogs(() => withoutMail(() => withOutboundHttp(closing, () => closeAuction(9))));
+    assert.deepEqual(auction.result, { pending: true });
+    const auctionRow = world.sql.find(entry => /^INSERT INTO unconfirmed_charges/.test(entry.query));
+    assert.ok(auctionRow, 'no row was recorded for the auction winner');
+    assert.deepEqual(auctionRow.params.map(String), ['sess-auction', '11']);
+    assert.ok(auction.logs.some(line => /charge to firm 11 has an unknown outcome/.test(line)), 'the operator was not told');
+
+    // A cold lead whose charge is unknown.
+    const recorded = [];
+    const cold = async (url, init) => {
+      if (url.includes('/v1/payment_intents')) return jsonResponse({ error: { type: 'api_error', message: 'Something went wrong on our end.' } }, 500);
+      const { query, params } = JSON.parse(init.body);
+      const q = query.replace(/\s+/g, ' ').trim();
+      if (/FROM firms WHERE active/.test(q)) return rowsResponse(ACTIVE_FIRM_FIELDS, [activeFirm(1)]);
+      if (/^INSERT INTO unconfirmed_charges/.test(q)) {
+        recorded.push(params);
+        return insertFails ? jsonResponse({ message: 'database unavailable' }, 500) : rowsResponse([], [], 'INSERT');
+      }
+      return jsonResponse(EMPTY_ROWS);
+    };
+    const lead = await capturingLogs(() => withoutMail(() => withOutboundHttp(cold,
+      () => deliverColdLead('sess-cold-unknown', REVIEW_APP.caseType, { score: 60, tier: 'cold' }, { preview: 'A preview.' }))));
+    assert.equal(lead.result, 0);
+    assert.deepEqual(recorded.map(params => params.map(String)), [['sess-cold-unknown', '1']]);
+    assert.ok(lead.logs.some(line => /charge to firm 1 has an unknown outcome/.test(line)), 'the operator was not told');
+  }
+});
+
+test('no lead is recorded without a stored consent', async () => {
+  // The contact form without the agreement stores nothing and creates no auction or lead.
+  const world = contactWorld({ leadScore: leadScoreOf(84), firms: [{ id: 1, name: 'Firm 1', email: 'f1@example.test', customer: 'cus_1', card: 'pm_1' }] });
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(world.handler, async () => {
+      const { response } = await postJson(server.baseUrl, '/api/contact', { sessionId: 'sess-no-consent', ...CONTACT, consent: false });
+      assert.equal(response.status, 400);
+    });
+    assert.ok(!world.calls.sql.some(call => /^INSERT INTO (auctions|leads)/.test(call.query)), 'a lead or auction was created without consent');
+  } finally {
+    await server.close();
+  }
+
+  // The operator's delivery finds no request for a session whose conversation has no consent on file.
+  const queries = [];
+  const handler = async (url, init) => {
+    const { query } = JSON.parse(init.body);
+    queries.push(query.replace(/\s+/g, ' ').trim());
+    return jsonResponse(EMPTY_ROWS);
+  };
+  const admin = await startServer(app);
+  try {
+    await withOutboundHttp(handler, async () => {
+      const response = await fetch(`${admin.baseUrl}/api/admin/requests/sess-no-consent/deliver`, {
+        method: 'POST', headers: { 'content-type': 'application/json', 'x-admin-secret': process.env.ADMIN_SECRET }, body: JSON.stringify({ price: 0 }),
+      });
+      assert.equal(response.status, 404);
+    });
+    assert.ok(queries.some(q => /FROM conversations WHERE session_id = \$1 AND contact_consent_at IS NOT NULL/.test(q)));
+    assert.ok(!queries.some(q => /^INSERT INTO (auctions|leads)/.test(q)), 'a lead was created for a request with no consent');
+  } finally {
+    await admin.close();
+  }
 });
 
 test('a later rejection clears an earlier qualifying score, so the contact form sends no lead', async () => {
@@ -5046,7 +5248,7 @@ test('/health/deep reports the database, its columns and the nightly job, for an
   const previous = process.env.HEALTH_DEEP_CACHE_MS;
   process.env.HEALTH_DEEP_CACHE_MS = '0';
   const columns = ['firms.card_declined_at', 'leads.decline_reason', 'user_interactions.outcome', 'job_runs.ran_at', 'ai_usage.created_at', 'auctions.reminder_sent_at',
-    'ai_provider_state.failed_replies', 'app_settings.value', 'model_measurements.bar_ok', 'provider_model_lists.models', 'statute_watch.unread_emailed_at'];
+    'ai_provider_state.failed_replies', 'app_settings.value', 'model_measurements.bar_ok', 'provider_model_lists.models', 'statute_watch.unread_emailed_at', 'unconfirmed_charges.firm_id'];
   const pgTime = ms => new Date(ms).toISOString().replace('T', ' ').replace('Z', '+00');
   let world = {};
   const handler = async (url, init) => {
@@ -5104,8 +5306,8 @@ test("/health/deep fails a database that lacks the provider state's table, the m
   try {
     const { result, logs } = await capturingLogs(() => withOutboundHttp(handler, async () => (await fetch(`${server.baseUrl}/health/deep`)).json()));
     assert.deepEqual(result, { ok: false, database: 'ok', schema: 'missing columns', nightlyJob: 'ok', statuteWatch: 'not run yet', statuteWatchLastOk: null });
-    for (const table of ['ai_provider_state', 'app_settings', 'model_measurements', 'provider_model_lists', 'statute_watch']) assert.ok(asked.includes(table), `${table} was not looked for`);
-    assert.ok(logs.includes('[health] the database is missing columns the code uses: ai_provider_state.failed_replies, app_settings.value, model_measurements.bar_ok, provider_model_lists.models, statute_watch.unread_emailed_at'), logs.join('\n'));
+    for (const table of ['ai_provider_state', 'app_settings', 'model_measurements', 'provider_model_lists', 'statute_watch', 'unconfirmed_charges']) assert.ok(asked.includes(table), `${table} was not looked for`);
+    assert.ok(logs.includes('[health] the database is missing columns the code uses: ai_provider_state.failed_replies, app_settings.value, model_measurements.bar_ok, provider_model_lists.models, statute_watch.unread_emailed_at, unconfirmed_charges.firm_id'), logs.join('\n'));
   } finally {
     if (previous === undefined) delete process.env.HEALTH_DEEP_CACHE_MS; else process.env.HEALTH_DEEP_CACHE_MS = previous;
     await server.close();
@@ -5547,6 +5749,7 @@ test('a request is not delivered by hand while its auction runs, and a charge fo
           [['12', 'Firm 12', 'f12@example.test', 't', '2026-11-01 00:00:00+00', 'cus_12', 'pm_12']]);
       }
       if (/FROM firms WHERE active/.test(q)) return rowsResponse(ACTIVE_FIRM_FIELDS, [activeFirm(1), activeFirm(2)]);
+      if (/^SELECT 1 AS found FROM unconfirmed_charges/.test(q)) return rowsResponse([['found', INT]], [['1']]);
       if (/FROM auctions WHERE session_id = \$1 AND status IN/.test(q)) return running ? rowsResponse([['id', INT], ['status', TEXT]], [['5', running]]) : rowsResponse([], []);
       if (/^INSERT INTO leads/.test(q)) return insertRefused ? rowsResponse([['id', INT]], [], 'INSERT') : rowsResponse([['id', INT]], [['900']], 'INSERT');
       return jsonResponse(EMPTY_ROWS);
@@ -7079,7 +7282,7 @@ test('/health/deep reports the statute watch: not run yet is healthy, failed and
   const previous = process.env.HEALTH_DEEP_CACHE_MS;
   process.env.HEALTH_DEEP_CACHE_MS = '0';
   const columns = ['firms.card_declined_at', 'leads.decline_reason', 'user_interactions.outcome', 'job_runs.ran_at', 'ai_usage.created_at', 'auctions.reminder_sent_at',
-    'ai_provider_state.failed_replies', 'app_settings.value', 'model_measurements.bar_ok', 'provider_model_lists.models', 'statute_watch.unread_emailed_at'];
+    'ai_provider_state.failed_replies', 'app_settings.value', 'model_measurements.bar_ok', 'provider_model_lists.models', 'statute_watch.unread_emailed_at', 'unconfirmed_charges.firm_id'];
   const pgTime = ms => new Date(ms).toISOString().replace('T', ' ').replace('Z', '+00');
   const now = Math.floor(Date.now() / 1000) * 1000;
   const lastGood = now - 3 * 3600_000;

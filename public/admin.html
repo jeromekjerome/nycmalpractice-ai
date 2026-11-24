@@ -89,7 +89,7 @@
     <!-- Contact requests: every client who asked to be contacted, and what became of the request -->
     <div class="section-title">Contact Requests</div>
     <div class="glass-panel" style="padding:1.25rem;overflow-x:auto">
-      <p class="muted-note" style="margin-bottom:0.75rem">A request a firm has not taken can be delivered by hand to an approved firm, at any price (0 for a free sample), up to the three firms the client agreed to. <button class="action-btn" onclick="loadOperations()">↻ Refresh</button></p>
+      <p class="muted-note" style="margin-bottom:0.75rem">A request a firm has not taken can be delivered by hand, at any price (0 for a free sample), to a subscribed firm drawn at random, up to the three firms the client agreed to. <button class="action-btn" onclick="loadOperations()">↻ Refresh</button></p>
       <table>
         <thead><tr><th>Received</th><th>Case</th><th>Client</th><th>Score</th><th>What happened</th><th>Actions</th></tr></thead>
         <tbody id="requestsBody"></tbody>
@@ -267,8 +267,6 @@
     function renderRequests(requests) {
       const tbody = document.getElementById('requestsBody');
       if (!requests.length) { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:1.5rem">No contact requests yet.</td></tr>'; return; }
-      const firmOptions = allFirms.filter(f => f.approved_at && f.active)
-        .map(f => `<option value="${Number(f.id)}">${esc(f.name)}</option>`).join('');
       tbody.innerHTML = requests.map(r => `
         <tr>
           <td style="white-space:nowrap;color:var(--muted)">${esc(when(r.contact_consent_at))}</td>
@@ -286,9 +284,9 @@
               ${runningAuction(r) ? `<span class="muted-note">Auction #${esc(runningAuction(r).id)} is ${esc(runningAuction(r).status)}: cancel it below to deliver by hand.</span>` : `
               <button class="action-btn primary" data-action="deliver-form" data-session="${esc(r.session_id)}">Deliver to a firm…</button>`}
               <div class="deliver-form" data-form="${esc(r.session_id)}" style="display:none">
-                ${firmOptions ? `<select aria-label="Firm">${firmOptions}</select>
                 <input type="number" min="0" max="5000" step="1" value="0" aria-label="Price in dollars">
-                <button class="action-btn primary" data-action="deliver" data-session="${esc(r.session_id)}">Deliver</button>` : '<span class="muted-note">No approved, active firm yet.</span>'}
+                <button class="action-btn primary" data-action="deliver" data-session="${esc(r.session_id)}">Deliver to a firm drawn at random</button>
+                ${(r.unconfirmed_firms || []).map(f => `<button class="action-btn" data-action="deliver" data-session="${esc(r.session_id)}" data-firm="${Number(f.id)}">Finish delivery to ${esc(f.name)}</button>`).join('')}
               </div>
             </div>
           </td>
@@ -338,19 +336,19 @@
       if (btn.dataset.action === 'transcript') return viewTranscript(session);
       if (btn.dataset.action === 'deliver-form') { if (form) form.style.display = form.style.display === 'none' ? 'flex' : 'none'; return; }
       if (btn.dataset.action === 'deliver' && form) {
-        const firmId = Number(form.querySelector('select').value);
-        const price = Number(form.querySelector('input').value || 0);
-        const firmName = allFirms.find(f => Number(f.id) === firmId)?.name || 'the firm';
-        if (!confirm(`Deliver this request to ${firmName}${price > 0 ? ` and charge $${price.toFixed(2)}` : ' as a free lead'}?`)) return;
+        const firmId = btn.dataset.firm ? Number(btn.dataset.firm) : null;
+        const price = firmId ? 0 : Number(form.querySelector('input').value || 0);
+        const target = firmId ? btn.textContent.replace('Finish delivery to ', '') : 'a subscribed firm drawn at random';
+        if (!confirm(`Deliver this request to ${target}${firmId ? ' at $0, with no new charge' : price > 0 ? ` and charge $${price.toFixed(2)}` : ' as a free lead'}?`)) return;
         btn.disabled = true;
         try {
           const res = await fetch(`/api/admin/requests/${encodeURIComponent(session)}/deliver`, {
             method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-secret': adminSecret },
-            body: JSON.stringify({ firmId, price }),
+            body: JSON.stringify(firmId ? { firmId, price } : { price }),
           });
           const data = await res.json().catch(() => ({}));
           if (!res.ok) throw new Error(data.error || 'Delivery failed');
-          showMessage(data.warning || `Lead #${data.leadId} delivered to ${firmName}`, !!data.warning);
+          showMessage(data.warning || `Lead #${data.leadId} delivered to ${data.firmName || 'the firm'}`, !!data.warning);
           loadOperations();
         } catch (e) {
           showMessage('Failed: ' + e.message, true);

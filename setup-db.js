@@ -256,6 +256,17 @@ async function setup() {
     )
   `;
 
+  // Charges Stripe could not confirm: the firm a hand delivery may be finished to, one row to a request and firm.
+  await sql`
+    CREATE TABLE IF NOT EXISTS unconfirmed_charges (
+      session_id TEXT NOT NULL,
+      firm_id    INTEGER NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY (session_id, firm_id)
+    )
+  `;
+  console.log('✅ unconfirmed_charges');
+
   // The last decisions found for each case type, used when CourtListener cannot be searched (case-memory.js).
   await sql`
     CREATE TABLE IF NOT EXISTS search_cache (

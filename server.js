@@ -899,7 +899,9 @@ app.get('/api/admin/requests', async (req, res) => {
                        'price_paid', l.price_paid, 'decline_reason', l.decline_reason) ORDER BY l.created_at), '[]'::json)
                 FROM leads l LEFT JOIN firms f ON f.id = l.firm_id WHERE l.session_id = c.session_id) AS leads,
              (SELECT COALESCE(json_agg(json_build_object('id', a.id, 'status', a.status, 'tier', a.tier, 'current_bid', a.current_bid) ORDER BY a.created_at), '[]'::json)
-                FROM auctions a WHERE a.session_id = c.session_id) AS auctions
+                FROM auctions a WHERE a.session_id = c.session_id) AS auctions,
+             (SELECT COALESCE(json_agg(json_build_object('id', f.id, 'name', f.name) ORDER BY u.created_at), '[]'::json)
+                FROM unconfirmed_charges u JOIN firms f ON f.id = u.firm_id WHERE u.session_id = c.session_id) AS unconfirmed_firms
       FROM conversations c
       WHERE c.contact_consent_at IS NOT NULL
       ORDER BY c.contact_consent_at DESC LIMIT 100`;
@@ -919,13 +921,16 @@ app.get('/api/admin/requests/:sessionId', async (req, res) => {
   } catch (err) { serverError(req, res, err); }
 });
 
-// Delivers a consented request to a chosen approved firm by hand, at a price (0 for a free sample lead), within the
-// three firms the client agreed to. This is how leads go out while no firm subscribes, and how a stuck one is finished.
+// Delivers a consented request by hand, at a price (0 for a free sample lead), to a subscribed firm the app draws,
+// within the three firms the client agreed to. A firm can be named only to finish a delivery whose charge Stripe
+// could not confirm.
 app.post('/api/admin/requests/:sessionId/deliver', async (req, res) => {
   if (!requireAdmin(req, res)) return;
-  const firmId = Number(req.body?.firmId);
+  const named = req.body?.firmId !== undefined && req.body?.firmId !== null;
+  const firmId = named ? Number(req.body.firmId) : null;
   const price = Math.round(Number(req.body?.price ?? 0) * 100) / 100;
-  if (!Number.isInteger(firmId) || firmId <= 0) return res.status(400).json({ error: 'Choose a firm.' });
+  if (named && (!Number.isInteger(firmId) || firmId <= 0)) return res.status(400).json({ error: 'Choose a firm.' });
+  if (named && price !== 0) return res.status(400).json({ error: 'A delivery to a firm whose charge could not be confirmed is finished at $0: check that charge in Stripe first.' });
   if (!Number.isFinite(price) || price < 0 || price > 5000) return res.status(400).json({ error: 'Enter a price from $0 to $5,000.' });
   try {
     const [conv] = await sql`
@@ -938,7 +943,7 @@ app.post('/api/admin/requests/:sessionId/deliver', async (req, res) => {
       sessionId: conv.session_id, firmId, price, type: conv.case_type, leadData,
       scoreData: { score: score.score, preview: score.preview, tier: score.tier || 'cold' },
     });
-    res.status(result.ok ? 200 : result.status || 500).json(result.ok ? { ok: true, leadId: result.leadId, emailed: result.emailed, ...(result.error ? { warning: result.error } : {}) } : { error: result.error });
+    res.status(result.ok ? 200 : result.status || 500).json(result.ok ? { ok: true, leadId: result.leadId, emailed: result.emailed, firmId: result.firmId, firmName: result.firmName, ...(result.error ? { warning: result.error } : {}) } : { error: result.error });
   } catch (err) { serverError(req, res, err); }
 });
 

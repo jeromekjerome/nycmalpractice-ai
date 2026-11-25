@@ -70,6 +70,7 @@
     "test/fixtures/cl-screen-licari-q1.json": "8d7c4f184c4a49b5b9d169c8f299386990a07bd9164c821023b9c440895e3916",
     "test/fixtures/cl-screen-bello-q1.json": "b377da24417e8016da52d0755ee561ed7240c8353fddc4feefbc8794001a1eb6",
     "test/fixtures/cl-screen-bello-q2.json": "e12c38f16ac60e65b61cbe3e399b2f4c3209d2d0e9896b834c6f18655e0489d4",
-    "test/fixtures/cl-screen-rodriguez-q1.json": "cdf08c55e4ef064dbb54ff0b2c38e5dd433f666918590396ed76077bb70fb585"
+    "test/fixtures/cl-screen-rodriguez-q1.json": "cdf08c55e4ef064dbb54ff0b2c38e5dd433f666918590396ed76077bb70fb585",
+    "gatekeeper.js": "6fb2ee88cf0b36c8efbd22464324b9274cfbf5bd5fa66ef978345292eb6866d5"
   }
 }

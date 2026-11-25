@@ -33,6 +33,7 @@ export const DEFAULT_HUMAN_VERIFICATION_CHECKLIST = Object.freeze([
   "Verify the filing deadline against the treatment dates: CPLR §214-a (2 years 6 months; continuous treatment; foreign object; Lavern's Law for cancer), CPLR §208 infancy (10-year cap), and any 90-day notice of claim for a public hospital (GML §50-e)",
   'Confirm conflict-of-interest check completed before contacting prospective claimant',
   'Confirm physician review for the CPLR §3012-a certificate of merit is feasible, and review the anchored CourtListener citations',
+  'Shepardize or KeyCite every decision relied on; the automatic screen shown beside each decision is not a citator',
 ]);
 
 // Criterion ids the deterministic gate targets when a rubric does not declare a deterministic_check.

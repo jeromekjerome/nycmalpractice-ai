@@ -749,10 +749,10 @@ app.get('/api/leads/:id', async (req, res) => {
 
 app.post('/api/leads/:id/accept', async (req, res) => {
   const { token, hitlVerification } = req.body || {};
-  // A lead is accepted only after the supervising attorney confirms the three checks on lead.html.
+  // A lead is accepted only after the supervising attorney confirms the four checks on lead.html.
   // The page enforces this too; this is the same rule where calling the endpoint directly cannot skip it.
   if (!isHitlVerificationComplete(hitlVerification)) {
-    return res.status(400).json({ error: 'Confirm all three supervising-attorney checks before accepting this lead.' });
+    return res.status(400).json({ error: 'Confirm all four supervising-attorney checks before accepting this lead.' });
   }
   const tokenData = await validateToken(token);
   if (!tokenData) return res.status(401).json({ error: 'Invalid token' });
@@ -769,7 +769,7 @@ app.post('/api/leads/:id/accept', async (req, res) => {
   };
   const result = await acceptLead(req.params.id, tokenData.firm_id, attestation);
   if (result.ok) {
-    console.log(`[HITL] Lead ${req.params.id} accepted by firm ${tokenData.firm_id} with the supervising attorney's three checks`);
+    console.log(`[HITL] Lead ${req.params.id} accepted by firm ${tokenData.firm_id} with the supervising attorney's four checks`);
   }
   res.json(result);
 });

@@ -89,7 +89,7 @@
     .check-id { font-size: 0.74rem; font-weight: 600; letter-spacing: 0.02em; color: var(--muted); margin-right: 0.35rem; }
     .check-detail { display: block; font-size: 0.76rem; color: var(--muted); overflow-wrap: anywhere; }
 
-    /* Supervising attorney checks: all three unlock Accept */
+    /* Supervising attorney checks: all four unlock Accept */
     .hitl-panel { margin-bottom: 1rem; padding: 0.9rem 1rem 0.6rem; border: 1px solid var(--border); border-radius: 10px; background: rgba(255,255,255,0.02); }
     .hitl-title { font-size: 0.9rem; font-weight: 700; margin-bottom: 0.25rem; }
     .hitl-intro { font-size: 0.78rem; color: var(--muted); margin-bottom: 0.35rem; }
@@ -169,7 +169,7 @@
           <!-- Static on purpose: the checks exist before any data loads and always start unchecked. -->
           <div class="hitl-panel" id="hitlChecklist" role="group" aria-labelledby="hitlHeading">
             <h3 class="hitl-title" id="hitlHeading">Supervising attorney checks</h3>
-            <p class="hitl-intro">Confirm all three to accept this lead. They start unchecked each time this page opens; when you accept, they are recorded with the lead under your firm's supervising attorney on file.</p>
+            <p class="hitl-intro">Confirm all four to accept this lead. They start unchecked each time this page opens; when you accept, they are recorded with the lead under your firm's supervising attorney on file.</p>
             <div class="hitl-item">
               <label class="hitl-label"><input type="checkbox" class="hitl-check" id="hitlSol" autocomplete="off" aria-describedby="hitlSolHelp"> I verified the filing deadline myself (CPLR §214-a, or EPTL §5-4.1 for a death) and any 90-day notice deadline for a public hospital.</label>
               <p class="hitl-help" id="hitlSolHelp" hidden></p>
@@ -182,9 +182,13 @@
               <label class="hitl-label"><input type="checkbox" class="hitl-check" id="hitlQuality" autocomplete="off" aria-describedby="hitlQualityHelp"> I reviewed the case quality, the prospects for physician review (CPLR §3012-a) and the cases the AI cited.</label>
               <p class="hitl-help" id="hitlQualityHelp" hidden></p>
             </div>
+            <div class="hitl-item">
+              <label class="hitl-label"><input type="checkbox" class="hitl-check" id="hitlCitator" autocomplete="off" aria-describedby="hitlCitatorHelp"> Before relying on any decision, I will Shepardize or KeyCite it myself. Each decision shows whether and when it passed this site's automatic screen, which is not a citator.</label>
+              <p class="hitl-help" id="hitlCitatorHelp" hidden></p>
+            </div>
           </div>
           <div class="actions">
-            <button class="action-btn primary" id="acceptButton" type="button" disabled>Complete the three checks to accept</button>
+            <button class="action-btn primary" id="acceptButton" type="button" disabled>Complete the four checks to accept</button>
             <button class="action-btn secondary" id="declineButton" type="button">Decline lead</button>
           </div>
           <div id="declineConfirm" style="display:none;margin-top:0.75rem">
@@ -245,7 +249,7 @@
     const $ = id => document.getElementById(id);
     let lead;
     let acceptInFlight = false;
-    const ACCEPT_LOCKED_LABEL = 'Complete the three checks to accept';
+    const ACCEPT_LOCKED_LABEL = 'Complete the four checks to accept';
     const ACCEPT_READY_LABEL  = 'Accept lead';
     // Audit links may only ever point at CourtListener over HTTPS.
     const SAFE_LINK_PREFIX = 'https://www.courtlistener.com/';
@@ -361,7 +365,7 @@
     }
 
     async function respond(action) {
-      // Accept is sent only with all three checks confirmed right now, even if the button was re-enabled by hand.
+      // Accept is sent only with all four checks confirmed right now, even if the button was re-enabled by hand.
       if (action === 'accept' && (acceptInFlight || !hitlComplete())) { updateAcceptGate(); return; }
       const reason = $('declineReason').value;
       if (action === 'decline' && !reason) { notice('Choose why you are declining this lead.', 'error'); return; }
@@ -407,11 +411,12 @@
         sol_and_notice_verified:  checked('hitlSol'),
         conflict_check_completed: checked('hitlConflict'),
         case_quality_reviewed:    checked('hitlQuality'),
+        decisions_citator_checked: checked('hitlCitator'),
       };
     }
 
     function hitlComplete() {
-      return hitlChecks().length === 3 && Object.values(hitlVerification()).every(value => value === true);
+      return hitlChecks().length === 4 && Object.values(hitlVerification()).every(value => value === true);
     }
 
     // The only place the accept button is enabled, disabled or relabelled.
@@ -430,7 +435,7 @@
     // The gate's own prompts for the reviewer, under the matching check.
     function renderHitlHelp(evaluation) {
       const prompts = isObj(evaluation) && Array.isArray(evaluation.human_verification_checklist) ? evaluation.human_verification_checklist : [];
-      ['hitlSolHelp', 'hitlConflictHelp', 'hitlQualityHelp'].forEach((id, i) => {
+      ['hitlSolHelp', 'hitlConflictHelp', 'hitlQualityHelp', 'hitlCitatorHelp'].forEach((id, i) => {
         $(id).textContent = plain(prompts[i]);
         $(id).hidden = !$(id).textContent;
       });

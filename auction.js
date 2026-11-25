@@ -624,7 +624,7 @@ export async function reportStuckAuctions() {
   return stuck.length;
 }
 
-// `attestation` is the supervising attorney's three checks (lead.html), stored with the lead as the record of them.
+// `attestation` is the supervising attorney's four checks (lead.html), stored with the lead as the record of them.
 export async function acceptLead(leadId, firmId, attestation = null) {
   const [lead] = await sql`SELECT * FROM leads WHERE id = ${leadId} AND firm_id = ${firmId} LIMIT 1`;
   if (!lead) return { ok: false, error: 'Lead not found' };

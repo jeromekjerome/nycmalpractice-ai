@@ -107,6 +107,7 @@
   "human_verification_checklist": [
     "Verify the 2-year wrongful death deadline from the date of death (EPTL §5-4.1), the survival claim's deadline (CPLR §214-a, with CPLR §210(a)'s one year after death where it applies), and any public-hospital notice of claim (GML §50-e: 90 days from the representative's appointment)",
     "Confirm conflict-of-interest check completed before contacting the family",
-    "Confirm who holds or will seek letters from the Surrogate's Court, that physician review for the CPLR §3012-a certificate of merit is feasible, and review the anchored CourtListener citations"
+    "Confirm who holds or will seek letters from the Surrogate's Court, that physician review for the CPLR §3012-a certificate of merit is feasible, and review the anchored CourtListener citations",
+    "Shepardize or KeyCite every decision relied on; the automatic screen shown beside each decision is not a citator"
   ]
 }

@@ -85,7 +85,7 @@ const LEAD = {
       ],
       required_checks: [{ id: 'REQ-MM-03', name: 'Mandatory Non-Advice Disclaimer', passed: true, evidence_or_gap: 'Required phrase present' }],
       prohibited_checks: [{ id: 'PROH-MM-01', name: 'Unanchored Case Citations (Hallucination Gate)', violated: false, offending_quote: 'None' }],
-      human_verification_checklist: ['Verify the filing deadline against the treatment dates', 'Confirm conflict-of-interest check', 'Confirm physician review'],
+      human_verification_checklist: ['Verify the filing deadline against the treatment dates', 'Confirm conflict-of-interest check', 'Confirm physician review', 'Shepardize or KeyCite every decision relied on; the automatic screen shown beside each decision is not a citator'],
     },
   },
   declinePolicy: { refundPct: 50, message: '50% refund' },
@@ -123,20 +123,27 @@ test('the lead page shows the contact details and the conversation, and accepts 
   await expect(audit.locator('b')).toHaveCount(0);
   await expect(page.locator('#hitlSolHelp')).toHaveText('Verify the filing deadline against the treatment dates');
 
-  // Accept stays locked until all three supervising-attorney checks are confirmed.
+  await expect(page.locator('#hitlCitatorHelp')).toHaveText('Shepardize or KeyCite every decision relied on; the automatic screen shown beside each decision is not a citator');
+
+  // Four checkboxes; the fourth carries the approved sentence. Accept stays locked until all four are confirmed.
+  await expect(page.locator('.hitl-check')).toHaveCount(4);
+  await expect(page.locator('label:has(#hitlCitator)')).toHaveText("Before relying on any decision, I will Shepardize or KeyCite it myself. Each decision shows whether and when it passed this site's automatic screen, which is not a citator.");
+  await expect(page.locator('#hitlCitator')).not.toBeChecked();
   const accept = page.locator('#acceptButton');
   await expect(accept).toBeDisabled();
+  await expect(accept).toHaveText('Complete the four checks to accept');
   await page.locator('#hitlSol').check();
   await page.locator('#hitlConflict').check();
-  await expect(accept).toBeDisabled();
   await page.locator('#hitlQuality').check();
+  await expect(accept).toBeDisabled();
+  await page.locator('#hitlCitator').check();
   await expect(accept).toBeEnabled();
   await page.locator('#hitlConflict').uncheck();
   await expect(accept).toBeDisabled();
   await page.locator('#hitlConflict').check();
   await accept.click();
   await expect(page.locator('#actionMessage')).toContainText('Lead accepted');
-  expect(accepted).toEqual({ token: 'abc', hitlVerification: { sol_and_notice_verified: true, conflict_check_completed: true, case_quality_reviewed: true } });
+  expect(accepted).toEqual({ token: 'abc', hitlVerification: { sol_and_notice_verified: true, conflict_check_completed: true, case_quality_reviewed: true, decisions_citator_checked: true } });
 });
 
 // The lead with its stored audit replaced by these rows.

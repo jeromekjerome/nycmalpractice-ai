@@ -135,7 +135,7 @@ async function insertLead({ auctionId = null, firm, sessionId, caseType, tier, p
   const declined = status === 'declined';
   const refundId = declined && refundAmount ? await refund(chargeId, refundAmount) : null;
   const attestation = accepted ? {
-    sol_and_notice_verified: true, conflict_check_completed: true, case_quality_reviewed: true,
+    sol_and_notice_verified: true, conflict_check_completed: true, case_quality_reviewed: true, decisions_citator_checked: true,
     attestedAt: new Date(createdAt.getTime() + 5 * HOUR).toISOString(), attorneyOnFile: firm.attorney_name, attorneyRegistrationOnFile: firm.attorney_registration,
   } : null;
   await sql`

@@ -2847,7 +2847,7 @@ test('the personal and estate rubrics load, each with its disclaimer, citation g
     assert.equal(rubric.required_criteria[2].deterministic_check.phrase, 'This is general information, not legal advice');
     assert.equal(rubric.prohibited_criteria[0].deterministic_check.type, 'citation_anchoring');
     assert.equal(rubric.prohibited_criteria[1].deterministic_check.type, 'forbidden_patterns');
-    assert.equal(rubric.human_verification_checklist.length, 3);
+    assert.equal(rubric.human_verification_checklist.length, 4);
   }
   assert.match(loadRubric('estate').human_verification_checklist[0], /EPTL §5-4\.1/);
   // Any other mode is graded as a patient's own claim.
@@ -3047,7 +3047,21 @@ test('health reports that the gate rubrics load', async () => {
   }
 });
 
-test('a lead is accepted only with all three supervising-attorney checks confirmed', async () => {
+test('the attestation has four keys, the citator check last, and the checklists carry the fourth item', async () => {
+  const { HITL_ATTESTATION_KEYS } = await import('../gatekeeper.js');
+  const { DEFAULT_HUMAN_VERIFICATION_CHECKLIST } = await import('../gate-config.js');
+  assert.deepEqual([...HITL_ATTESTATION_KEYS], ['sol_and_notice_verified', 'conflict_check_completed', 'case_quality_reviewed', 'decisions_citator_checked']);
+  const fourth = 'Shepardize or KeyCite every decision relied on; the automatic screen shown beside each decision is not a citator';
+  assert.equal(DEFAULT_HUMAN_VERIFICATION_CHECKLIST.length, 4);
+  assert.equal(DEFAULT_HUMAN_VERIFICATION_CHECKLIST[3], fourth);
+  for (const name of ['malpractice_personal', 'malpractice_estate']) {
+    const checklist = JSON.parse(readFileSync(new URL(`../rubrics/${name}.json`, import.meta.url), 'utf8')).human_verification_checklist;
+    assert.equal(checklist.length, 4, name);
+    assert.equal(checklist[3], fourth, name);
+  }
+});
+
+test('a lead is accepted only with all four supervising-attorney checks confirmed', async () => {
   const calls = [];
   const handler = async (url, init) => {
     const { query, params } = JSON.parse(init.body);
@@ -3060,14 +3074,16 @@ test('a lead is accepted only with all three supervising-attorney checks confirm
     if (/^UPDATE leads SET status = 'accepted'/.test(q)) return rowsResponse([['id', INT]], [['501']], 'UPDATE');
     return jsonResponse(EMPTY_ROWS);
   };
-  const all = { sol_and_notice_verified: true, conflict_check_completed: true, case_quality_reviewed: true };
+  const all = { sol_and_notice_verified: true, conflict_check_completed: true, case_quality_reviewed: true, decisions_citator_checked: true };
   const server = await startServer(app);
   try {
     await withOutboundHttp(handler, async () => {
-      for (const hitlVerification of [undefined, {}, { ...all, case_quality_reviewed: false }, { ...all, conflict_check_completed: 'true' }]) {
+      const incomplete = [undefined, {}, { ...all, conflict_check_completed: 'true' }];
+      for (const key of Object.keys(all)) incomplete.push({ ...all, [key]: false }, { ...all, [key]: undefined });
+      for (const hitlVerification of incomplete) {
         const { response, body } = await postJson(server.baseUrl, '/api/leads/501/accept', { token: 'firm-token', hitlVerification });
         assert.equal(response.status, 400, JSON.stringify(hitlVerification));
-        assert.match(body.error, /three supervising-attorney checks/);
+        assert.equal(body.error, 'Confirm all four supervising-attorney checks before accepting this lead.');
       }
       assert.ok(!calls.some(q => /UPDATE leads/.test(q)), 'a lead was accepted without the checks');
       assert.equal((await postJson(server.baseUrl, '/api/leads/501/accept', { token: 'wrong', hitlVerification: all })).response.status, 401);
@@ -3990,7 +4006,7 @@ test('a firm link opens only what it was emailed for', async () => {
     }
     return jsonResponse(EMPTY_ROWS);
   };
-  const full = { sol_and_notice_verified: true, conflict_check_completed: true, case_quality_reviewed: true };
+  const full = { sol_and_notice_verified: true, conflict_check_completed: true, case_quality_reviewed: true, decisions_citator_checked: true };
   const server = await startServer(app);
   const status = async (method, route, payload) => (await fetch(server.baseUrl + route, {
     method, headers: { 'content-type': 'application/json' }, ...(payload ? { body: JSON.stringify(payload) } : {}),
@@ -4256,7 +4272,7 @@ test('the nightly job deletes conversations after 90 days and lead records after
   assert.equal(typeof purgeExpiredLeadRecords, 'function');
 });
 
-test("accepting a lead stores the supervising attorney's three checks on it", async () => {
+test("accepting a lead stores the supervising attorney's four checks on it", async () => {
   const calls = [];
   const handler = async (url, init) => {
     const { query, params } = JSON.parse(init.body);
@@ -4270,7 +4286,7 @@ test("accepting a lead stores the supervising attorney's three checks on it", as
     if (/^SELECT \* FROM firms WHERE id = \$1/.test(q)) return rowsResponse([['id', INT], ['name', TEXT], ['attorney_name', TEXT], ['attorney_registration', TEXT]], [['7', 'Test Firm', 'Pat Lee', '1234567']]);
     return jsonResponse(EMPTY_ROWS);
   };
-  const checks = { sol_and_notice_verified: true, conflict_check_completed: true, case_quality_reviewed: true };
+  const checks = { sol_and_notice_verified: true, conflict_check_completed: true, case_quality_reviewed: true, decisions_citator_checked: true };
   const server = await startServer(app);
   try {
     await withOutboundHttp(handler, async () => {
@@ -4286,6 +4302,38 @@ test("accepting a lead stores the supervising attorney's three checks on it", as
   const stored = JSON.parse(accepted.params[0]);
   assert.deepEqual({ ...stored, attestedAt: undefined }, { ...checks, attestedAt: undefined, attorneyOnFile: 'Pat Lee', attorneyRegistrationOnFile: '1234567' });
   assert.ok(!Number.isNaN(Date.parse(stored.attestedAt)));
+  const { HITL_ATTESTATION_KEYS } = await import('../gatekeeper.js');
+  assert.deepEqual(Object.keys(stored).slice(0, 4), [...HITL_ATTESTATION_KEYS]);
+});
+
+test('a lead accepted with the earlier three checks still loads, and is not shown as having the fourth confirmed', async () => {
+  const { isHitlVerificationComplete } = await import('../gatekeeper.js');
+  const threeChecks = { sol_and_notice_verified: true, conflict_check_completed: true, case_quality_reviewed: true, attestedAt: '2026-11-10T12:00:00.000Z', attorneyOnFile: 'Pat Lee', attorneyRegistrationOnFile: '1234567' };
+  assert.equal(isHitlVerificationComplete(threeChecks), false);
+  const leadData = { caseType: 'misdiagnosis', mode: 'personal', history: CONTACT_HISTORY, preview: 'Delayed cancer diagnosis.', score: 60 };
+  const handler = async (url, init) => {
+    const q = JSON.parse(init.body).query.replace(/\s+/g, ' ');
+    if (/FROM firm_tokens/.test(q)) return rowsResponse([['firm_id', INT], ['name', TEXT], ['cold_decline_count', INT], ['auction_decline_count', INT]], [['7', 'Test Firm', '0', '0']]);
+    if (/FROM leads WHERE id/.test(q)) {
+      return rowsResponse(
+        [['id', INT], ['status', TEXT], ['case_type', TEXT], ['tier', TEXT], ['price_paid', 1700], ['accept_deadline', TIMESTAMPTZ], ['auction_id', INT], ['lead_data', JSONB], ['hitl_verification', JSONB]],
+        [['501', 'accepted', 'misdiagnosis', 'cold', '25.00', '2030-01-01 00:00:00+00', null, JSON.stringify(leadData), JSON.stringify(threeChecks)]],
+      );
+    }
+    return jsonResponse(EMPTY_ROWS);
+  };
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(handler, async () => {
+      const response = await fetch(`${server.baseUrl}/api/leads/501?token=firm-token`);
+      assert.equal(response.status, 200);
+      const text = await response.text();
+      assert.equal(JSON.parse(text).status, 'accepted');
+      assert.ok(!text.includes('decisions_citator_checked'), 'a page read claimed the fourth check');
+    });
+  } finally {
+    await server.close();
+  }
 });
 
 // ─── Browser protections, other websites, and what an error reveals ───────────

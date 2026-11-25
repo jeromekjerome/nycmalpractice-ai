@@ -29,11 +29,12 @@ const rubricCache = new Map();
 let currentLawCache = null;
 const DEFAULT_REQUIRED_PHRASE = 'This is general information, not legal advice';
 
-// The three attestations a supervising attorney makes on lead.html before accepting a lead.
+// The four attestations a supervising attorney makes on lead.html before accepting a lead.
 export const HITL_ATTESTATION_KEYS = Object.freeze([
   'sol_and_notice_verified',
   'conflict_check_completed',
   'case_quality_reviewed',
+  'decisions_citator_checked',
 ]);
 
 export function isHitlVerificationComplete(hitlVerification) {

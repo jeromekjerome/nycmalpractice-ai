@@ -8,7 +8,8 @@ import { countRequests } from './courtlistener-usage.js';
 import { scoreLead } from './auction.js';
 import { runJob, withoutKeys } from './providers.js';
 import { chains } from './model-settings.js';
-import { evaluateAndRemediateDraft, renderRubricForPrompt, renderCurrentLawForPrompt } from './gatekeeper.js';
+import { evaluateAndRemediateDraft, renderRubricForPrompt, renderCurrentLawForPrompt, loadCurrentLawNotes } from './gatekeeper.js';
+import { caseNoticeFor } from './law-file.js';
 
 const CASE_TYPE_NAMES = {
   surgical_error:      'Surgical Error / Operating Room Negligence',
@@ -58,7 +59,19 @@ const RECALLED_NOTE =
   'NOTE: The case law search could not be run just now. The cases below were found earlier for this type of ' +
   'claim and were not matched to these facts; use them only as general examples of how New York courts decide such claims.';
 
-function buildCaseContext(cases, { recalled = false } = {}) {
+// The notes file's notice for the reply's case type, only when the reply has a decision to speak of. Reading the notes
+// never stops a reply: a failure is logged and the reply has no notice.
+export function noticeForReply(caseType, cases, load = loadCurrentLawNotes) {
+  if (!Array.isArray(cases) || cases.length === 0) return null;
+  try {
+    return caseNoticeFor(load(), caseType);
+  } catch (err) {
+    console.error('Could not read the case notice:', err.message);
+    return null;
+  }
+}
+
+function buildCaseContext(cases, { recalled = false, caseNotice = null } = {}) {
   if (!cases || cases.length === 0) return NO_CASES_CONTEXT;
 
   const blocks = cases.map(c => {
@@ -73,7 +86,7 @@ function buildCaseContext(cases, { recalled = false } = {}) {
     );
   }).join('\n\n');
 
-  const notes = [recalled && RECALLED_NOTE, cases.some(c => c.scope === 'national') && NATIONAL_FALLBACK_NOTE].filter(Boolean);
+  const notes = [caseNotice && `NOTE ON THESE DECISIONS: ${caseNotice}`, recalled && RECALLED_NOTE, cases.some(c => c.scope === 'national') && NATIONAL_FALLBACK_NOTE].filter(Boolean);
   return [...notes, blocks].join('\n\n');
 }
 
@@ -186,7 +199,7 @@ async function findCases(history, question, clock) {
 // clock is the reply's (replyClock in providers.js), which every model call of the reply is given: the
 // classifier, the draft, the side analyses, and the gate's grades and rewrite. Without one, each call is given
 // the cap for its kind of job.
-export async function answerUserQuestion({ question, mode = 'personal', sessionId, history, allowLeadScoring = true, recorded = null, clock = null }) {
+export async function answerUserQuestion({ question, mode = 'personal', sessionId, history, allowLeadScoring = true, recorded = null, clock = null, loadNotes = loadCurrentLawNotes }) {
   // The conversation step: the number of the visitor's own message. The history also holds the AI's
   // replies, so counting every message ran steps 1, 3, 5 and skipped steps 2 and 4.
   const turn = history.filter(h => h.role === 'user').length + 1;
@@ -196,7 +209,8 @@ export async function answerUserQuestion({ question, mode = 'personal', sessionI
     : await findCases(history, question, clock);
   const recordedDraft = typeof recorded?.draft === 'string' ? recorded.draft : null;
 
-  const caseContext = buildCaseContext(cases, { recalled });
+  const caseNotice = noticeForReply(caseType, cases, loadNotes);
+  const caseContext = buildCaseContext(cases, { recalled, caseNotice });
 
   // The prompt for the mode, then the rules the gate grades the reply on (rubrics/*.json).
   const basePrompt = mode === 'estate'
@@ -252,7 +266,7 @@ export async function answerUserQuestion({ question, mode = 'personal', sessionI
   await remembering;
   await pendingCounts();
 
-  return { answer, cases, caseType, leadScore, caseAnalysis, turn, evaluation };
+  return { answer, cases, caseNotice, caseType, leadScore, caseAnalysis, turn, evaluation };
 }
 
 function rubricPromptBlock(mode, turn) {

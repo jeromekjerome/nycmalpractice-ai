@@ -2163,6 +2163,100 @@ test('a recalled decision that is banned is dropped', async () => {
   }
 });
 
+// ─── A notice on a case type ──────────────────────────────────────────────────
+
+const TEST_NOTICE = 'A sentence the notes file carries about these decisions.';
+const NOTICE_HEAD = 'NOTE ON THESE DECISIONS: ';
+
+// A notes object with one notice, for the reply's `loadNotes` option: the notes file itself has none.
+const noticeFor = (caseType, text = TEST_NOTICE) => () => ({ case_notices: [{ id: 'NOTICE-TEST', case_types: [caseType], text, sources: ['S1'] }] });
+const RECORDED_CASES = [{ caseName: 'Walker v. Hospital', citation: '1 N.Y.3d 1', citations: ['1 N.Y.3d 1'], court: 'ny', dateFiled: '2020-01-01', snippet: 'x', url: '', scope: 'ny' }];
+
+test('the notes file has a case_notices list, empty for now, and is written back exactly as formatLawFile gives it', async () => {
+  const { formatLawFile } = await import('../law-file.js');
+  const { CURRENT_LAW_FILE } = await import('../gate-config.js');
+  const text = readFileSync(CURRENT_LAW_FILE, 'utf8');
+  const law = JSON.parse(text);
+  assert.ok(Array.isArray(law.case_notices), 'the notes file has no case_notices list');
+  assert.deepEqual(law.case_notices, []);
+  assert.equal(text, formatLawFile(law));
+});
+
+test('a reply with decisions and a notice for its type opens its context with the notice, in both modes, and returns it; a type without one gets neither', async () => {
+  const { answerUserQuestion } = await import('../ask.js');
+  const answerOf = world => world.calls.openai.find(call => call.kind === 'answer').request.messages[0].content;
+  for (const mode of ['personal', 'estate']) {
+    const world = fakeWorld({ answer: `The scan should have been reported. ${DISCLAIMER}` });
+    const result = await withOutboundHttp(world.handler, () => answerUserQuestion({
+      question: 'My radiologist missed a tumor.', mode, sessionId: `sess-note-${mode}`, history: [],
+      recorded: { caseType: 'misdiagnosis', cases: RECORDED_CASES }, loadNotes: noticeFor('misdiagnosis'),
+    }));
+    assert.equal(result.caseNotice, TEST_NOTICE, mode);
+    const system = answerOf(world);
+    assert.ok(system.includes(NOTICE_HEAD + TEST_NOTICE), mode);
+    assert.ok(system.indexOf(NOTICE_HEAD) < system.indexOf('Case: Walker v. Hospital'), `${mode}: the notice came after a decision`);
+  }
+
+  const other = fakeWorld({ answer: `The nurse may be at fault. ${DISCLAIMER}` });
+  const result = await withOutboundHttp(other.handler, () => answerUserQuestion({
+    question: 'My mother got bedsores in a nursing home.', mode: 'personal', sessionId: 'sess-note-other', history: [],
+    recorded: { caseType: 'nursing_home', cases: RECORDED_CASES }, loadNotes: noticeFor('misdiagnosis'),
+  }));
+  assert.equal(result.caseNotice, null);
+  assert.ok(!answerOf(other).includes(NOTICE_HEAD));
+});
+
+test('with the notes file as it is, with no notices, a reply carries no notice', async () => {
+  clearSearchCache();
+  const world = fakeWorld({ answer: `The scan should have been reported. ${DISCLAIMER}` });
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(libraryHandler(world, { clear: 5, picks: LIBRARY_FIVE }), async () => {
+      const { body } = await postJson(server.baseUrl, '/api/ask', { question: 'My radiologist missed a tumor.', mode: 'personal', sessionId: 'sess-note-none', history: [] });
+      assert.equal(body.caseNotice, null);
+    });
+    assert.ok(!world.calls.openai.find(call => call.kind === 'answer').request.messages[0].content.includes(NOTICE_HEAD));
+  } finally {
+    await server.close();
+  }
+});
+
+test('a reply with no decisions carries no notice, in the context or the response', async () => {
+  const { answerUserQuestion } = await import('../ask.js');
+  const world = fakeWorld({ answer: `The scan should have been reported. ${DISCLAIMER}` });
+  const result = await withOutboundHttp(world.handler, () => answerUserQuestion({
+    question: 'My radiologist missed a tumor.', mode: 'personal', sessionId: 'sess-note-empty', history: [],
+    recorded: { caseType: 'misdiagnosis', cases: [] }, loadNotes: noticeFor('misdiagnosis'),
+  }));
+  assert.deepEqual(result.cases, []);
+  assert.equal(result.caseNotice, null);
+  assert.ok(!world.calls.openai.find(call => call.kind === 'answer').request.messages[0].content.includes(NOTICE_HEAD));
+
+  clearSearchCache();
+  const live = fakeWorld({ answer: `The scan should have been reported. ${DISCLAIMER}`, nyResults: [] });
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(libraryHandler(live, { clear: 0 }), async () => {
+      const { body } = await postJson(server.baseUrl, '/api/ask', { question: 'My radiologist missed a tumor.', mode: 'personal', sessionId: 'sess-note-empty-2', history: [] });
+      assert.deepEqual(body.cases, []);
+      assert.equal(body.caseNotice, null);
+    });
+  } finally {
+    await server.close();
+  }
+});
+
+test('a notes file that cannot be read gives no notice, logs it, and the reply goes on', async () => {
+  const { noticeForReply } = await import('../ask.js');
+  const cases = [{ caseName: 'Walker v. Hospital' }];
+  const { result, logs } = await capturingLogs(async () => noticeForReply('misdiagnosis', cases, () => { throw new Error('the notes file is unreadable'); }));
+  assert.equal(result, null);
+  assert.ok(logs.some(line => /unreadable/.test(line)), logs.join('\n'));
+  assert.equal(noticeForReply('misdiagnosis', [], noticeFor('misdiagnosis')), null);
+  assert.equal(noticeForReply('misdiagnosis', cases, noticeFor('misdiagnosis')), TEST_NOTICE);
+  assert.equal(noticeForReply('misdiagnosis', cases, () => ({})), null);
+});
+
 // ─── Case law when CourtListener cannot be searched ───────────────────────────
 
 test('found decisions are saved for the case type on the live path, without the visitor words, and used when a later search fails', async () => {

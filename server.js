@@ -292,7 +292,7 @@ app.post('/api/ask', limitChat, async (req, res) => {
 
     await beforeReply();
     res.json({
-      answer: result.answer, cases: result.cases || [], caseType: result.caseType || null,
+      answer: result.answer, cases: result.cases || [], caseNotice: result.caseNotice || null, caseType: result.caseType || null,
       caseAnalysis: result.caseAnalysis || null, leadTier: result.leadScore?.tier || null,
       // The gate's verdict on the reply above. Drafts the gate blocked are not sent to the browser.
       evaluation: toPublicEvaluation(result.evaluation),

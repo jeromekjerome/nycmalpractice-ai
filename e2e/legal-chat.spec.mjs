@@ -166,6 +166,57 @@ test('with no decisions in a reply there is no sentence about them', async ({ pa
   await expect(page.locator('body')).not.toContainText(DECISIONS_SENTENCE);
 });
 
+const NOTICE_SENTENCE = 'A sentence the reply carries about these decisions.';
+const askWithNotice = async (page, caseNotice) => {
+  await mockSession(page);
+  await mockCaseTypes(page);
+  await page.route('**/api/ask', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      answer: 'The timeline and provider records will matter.',
+      cases: [{ caseName: 'Patient v. Hospital', court: 'Appellate Division', dateFiled: '2025-02-20', snippet: 'Delayed diagnosis increased harm.' }],
+      caseNotice,
+    }),
+  }));
+  await page.goto('/');
+  await page.locator('#userInput').fill('My doctor ignored repeated symptoms for months.');
+  await page.locator('#userInput').press('Enter');
+  await expect(page.locator('#casesList .case-item')).toHaveCount(1);
+};
+const cardChildren = page => page.locator('#casesCard').evaluate(card => [...card.children].map(child => child.id || child.className));
+
+test('a notice on the reply shows above the list of decisions, and the sentence under the list stays', async ({ page }) => {
+  await askWithNotice(page, NOTICE_SENTENCE);
+  await expect(page.locator('#casesCard .cases-notice')).toHaveText(NOTICE_SENTENCE);
+  expect(await cardChildren(page)).toEqual(['card-header', 'cases-notice', 'casesList', 'cases-note']);
+  await expect(page.locator('#casesCard .cases-note')).toHaveText(DECISIONS_SENTENCE);
+});
+
+test('a notice with markup in it stays text', async ({ page }) => {
+  await askWithNotice(page, '<img src=x onerror="window.__noticeXss=1"><b>bold</b>');
+  await expect(page.locator('#casesCard .cases-notice')).toHaveText('<img src=x onerror="window.__noticeXss=1"><b>bold</b>');
+  await expect(page.locator('#casesCard img, #casesCard b')).toHaveCount(0);
+  expect(await page.evaluate(() => window.__noticeXss)).toBeUndefined();
+});
+
+test('a reply with no notice adds nothing to the card, and a notice with no decisions shows nothing', async ({ page }) => {
+  await askWithNotice(page, null);
+  await expect(page.locator('#casesCard .cases-notice')).toHaveCount(0);
+  expect(await cardChildren(page)).toEqual(['card-header', 'casesList', 'cases-note']);
+
+  await page.unroute('**/api/ask');
+  await page.route('**/api/ask', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ answer: 'When did it happen?', cases: [], caseNotice: NOTICE_SENTENCE }),
+  }));
+  await page.locator('#userInput').fill('It was last week.');
+  await page.locator('#userInput').press('Enter');
+  await expect(page.locator('#conversation .msg-ai').last()).toContainText('When did it happen?');
+  await expect(page.locator('body')).not.toContainText(NOTICE_SENTENCE);
+});
+
 test('a visitor can email the assessment without putting the session in the return link', async ({ page }) => {
   await mockSession(page);
   await mockCaseTypes(page);

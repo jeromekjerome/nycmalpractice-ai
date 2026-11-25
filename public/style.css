@@ -118,6 +118,7 @@ body.estate-mode .case-name a { color: var(--estate-accent); }
 .case-meta { font-size: 0.72rem; color: var(--muted); }
 .case-screen { font-size: 0.72rem; color: var(--muted); margin-top: 0.15rem; }
 .cases-note { font-size: 0.72rem; color: var(--muted); line-height: 1.4; margin-top: 0.65rem; }
+.cases-notice { font-size: 0.72rem; color: var(--muted); line-height: 1.4; margin-bottom: 0.6rem; }
 .case-snippet { font-size: 0.75rem; color: var(--muted); margin-top: 0.3rem; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 
 .topics-list { list-style: none; display: flex; flex-direction: column; gap: 0.3rem; }

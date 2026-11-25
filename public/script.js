@@ -170,7 +170,7 @@ async function submitQuestion() {
 
     appendMessage('ai', markdownToHtml(data.answer));
 
-    if (data.cases?.length) renderCases(data.cases);
+    if (data.cases?.length) renderCases(data.cases, data.caseNotice);
     if (data.caseAnalysis)  renderCaseAnalysis(data.caseAnalysis, data.caseType, data.leadTier);
     showDeadlineNotices(data);
     if (data.contactForm)   offerContactForm();
@@ -316,7 +316,8 @@ function screenLabel(screen) {
 
 // The cited-decisions card is built whole, heading and list together, and only when a reply brings decisions:
 // index.html carries no cases section, so nothing reads as an empty one. The sentence about the decisions sits under the list.
-function renderCases(cases) {
+function renderCases(cases, caseNotice) {
+  const notice = cases.length && typeof caseNotice === 'string' && caseNotice ? `<p class="cases-notice">${escHtml(caseNotice)}</p>` : '';
   const card = document.getElementById('casesCard');
   const items = cases.map(c => `
     <div class="case-item">
@@ -333,6 +334,7 @@ function renderCases(cases) {
       <span class="card-icon">📋</span>
       <span class="card-title">Relevant NY Cases</span>
     </div>
+    ${notice}
     <div class="cases-list" id="casesList">${items}</div>${cases.length ? `<p class="cases-note">${escHtml(CASES_NOTE)}</p>` : ''}`;
   card.style.display = 'block';
 }

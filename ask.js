@@ -71,6 +71,10 @@ export function noticeForReply(caseType, cases, load = loadCurrentLawNotes) {
   }
 }
 
+const SCREENED_NOTE =
+  'The "Screened:" line on a decision gives the date our nightly screen last looked for later court decisions about it; ' +
+  'never tell the visitor that a decision was checked, confirmed or verified.';
+
 function buildCaseContext(cases, { recalled = false, caseNotice = null } = {}) {
   if (!cases || cases.length === 0) return NO_CASES_CONTEXT;
 
@@ -86,7 +90,7 @@ function buildCaseContext(cases, { recalled = false, caseNotice = null } = {}) {
     );
   }).join('\n\n');
 
-  const notes = [caseNotice && `NOTE ON THESE DECISIONS: ${caseNotice}`, recalled && RECALLED_NOTE, cases.some(c => c.scope === 'national') && NATIONAL_FALLBACK_NOTE].filter(Boolean);
+  const notes = [caseNotice && `NOTE ON THESE DECISIONS: ${caseNotice}`, SCREENED_NOTE, recalled && RECALLED_NOTE, cases.some(c => c.scope === 'national') && NATIONAL_FALLBACK_NOTE].filter(Boolean);
   return [...notes, blocks].join('\n\n');
 }
 

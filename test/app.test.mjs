@@ -2303,6 +2303,30 @@ test('a reply with decisions and a notice for its type opens its context with th
   assert.ok(!answerOf(other).includes(NOTICE_HEAD));
 });
 
+const SCREENED_LINE = 'The "Screened:" line on a decision gives the date our nightly screen last looked for later court decisions about it; never tell the visitor that a decision was checked, confirmed or verified.';
+
+test('a reply with decisions explains the Screened line to the AI, in both modes, and a reply with none has no such line', async () => {
+  const { answerUserQuestion } = await import('../ask.js');
+  const answerOf = world => world.calls.openai.find(call => call.kind === 'answer').request.messages[0].content;
+  for (const mode of ['personal', 'estate']) {
+    const world = fakeWorld({ answer: `The scan should have been reported. ${DISCLAIMER}` });
+    await withOutboundHttp(world.handler, () => answerUserQuestion({
+      question: 'My radiologist missed a tumor.', mode, sessionId: `sess-sline-${mode}`, history: [],
+      recorded: { caseType: 'misdiagnosis', cases: RECORDED_CASES },
+    }));
+    const system = answerOf(world);
+    assert.equal(system.split(SCREENED_LINE).length - 1, 1, mode);
+    assert.ok(system.indexOf(SCREENED_LINE) < system.indexOf('Case: Walker v. Hospital'), `${mode}: the line came after a decision`);
+  }
+
+  const none = fakeWorld({ answer: `The scan should have been reported. ${DISCLAIMER}` });
+  await withOutboundHttp(none.handler, () => answerUserQuestion({
+    question: 'My radiologist missed a tumor.', mode: 'personal', sessionId: 'sess-sline-none', history: [],
+    recorded: { caseType: 'misdiagnosis', cases: [] },
+  }));
+  assert.ok(!answerOf(none).includes('nightly screen'));
+});
+
 test('with the notes file as it is, with no notices, a reply carries no notice', async () => {
   clearSearchCache();
   const world = fakeWorld({ answer: `The scan should have been reported. ${DISCLAIMER}` });

@@ -1425,7 +1425,7 @@ test('the privacy policy describes the analytics and outside services the pages 
   assert.match(policy, /To find court decisions, our server searches CourtListener each night with search words we write, never words from a conversation, and each reply chooses from the decisions found\. While our collection for a type of case is still being built, a reply may instead send CourtListener a few search keywords based on your conversation, which can include words you typed\./);
   assert.doesNotMatch(policy, /To find relevant cases/);
   assert.match(policy, /Case law searches use the CourtListener API \(Free Law Project\)\. To find court decisions/);
-  assert.match(policy, /which can include words you typed\. It does not send your IP address or the conversation itself\./);
+  assert.match(policy, /which can include words you typed\. Before a reply is shown, our server also sends CourtListener the case citations written in that reply, to look each one up\. It does not send your IP address or the conversation itself\./);
 });
 
 // ─── Conversation steps ───────────────────────────────────────────────────────

@@ -122,6 +122,11 @@ function searchLive(caseType, terms) {
   return searchMalpracticeCases({ query: terms, caseType, limit: 5 });
 }
 
+// The gate's CourtListener citation lookup, counted under its own job before it is sent. The count never throws.
+export function countGateLookup() {
+  return countRequests(sql, 'gate-lookup', 1);
+}
+
 // A type with this many clear decisions in the library is answered from it.
 const LIBRARY_MIN_CLEAR = 5;
 
@@ -254,6 +259,7 @@ export async function answerUserQuestion({ question, mode = 'personal', sessionI
       turn,
       mode,
       retrievedCases: cases,
+      countLookup: countGateLookup,
       clock,
     });
     answer = gated.finalText;

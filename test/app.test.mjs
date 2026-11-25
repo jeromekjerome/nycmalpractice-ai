@@ -2920,6 +2920,42 @@ test('citator makes no network call under NODE_ENV=test unless a fetch is inject
   assert.equal(outbound, 0);
 });
 
+test('citator CourtListener lookup: each lookup is counted before it is sent, a failed count never stops it, and nothing is counted when nothing is sent', async () => {
+  const events = [];
+  const countLookup = async () => { events.push('count started'); await new Promise(resolve => setTimeout(resolve, 30)); events.push('count saved'); };
+  const fetchImpl = async () => { events.push('lookup sent'); return jsonResponse([{ citation: '999 N.Y.3d 111', normalized_citations: ['999 N.Y.3d 111'], status: 404, clusters: [] }]); };
+  const unanchored = 'Smith v. FakeCorp, 999 N.Y.3d 111 held otherwise.';
+  await auditDraftCitations(unanchored, RETRIEVED_CASES, { enableCourtListener: true, fetchImpl, countLookup });
+  assert.deepEqual(events, ['count started', 'count saved', 'lookup sent']);
+
+  events.length = 0;
+  await auditDraftCitations('Driver v. Carrier, 210 A.D.3d 456 held it.', RETRIEVED_CASES, { enableCourtListener: true, fetchImpl, countLookup });
+  await auditDraftCitations(unanchored, RETRIEVED_CASES, { enableCourtListener: false, fetchImpl, countLookup });
+  assert.deepEqual(events, [], 'an anchored citation, or a lookup turned off, sends and counts nothing');
+
+  const { result: [item], logs } = await capturingLogs(() => auditDraftCitations(unanchored, RETRIEVED_CASES, { enableCourtListener: true, fetchImpl, countLookup: async () => { throw new Error('the count is down'); } }));
+  assert.equal(item.courtlistener_status, 'NOT_FOUND_404', 'the lookup was still sent');
+  assert.ok(logs.some(line => /count/.test(line)), logs.join('\n'));
+});
+
+test("the gate hands its lookup counter to each lookup of a reply, and a reply's gate counts under gate-lookup", async () => {
+  const { countGateLookup } = await import('../ask.js');
+  let counted = 0;
+  let sent = 0;
+  const fetchImpl = async () => { sent += 1; return jsonResponse([{ citation: '999 N.Y.3d 111', normalized_citations: ['999 N.Y.3d 111'], status: 404, clusters: [] }]); };
+  await evaluateAndRemediateDraft({
+    draftText: `See Smith v. FakeCorp, 999 N.Y.3d 111 ${VERIFY_PLACEHOLDER} for a contrary view. ${DISCLAIMER}`, turn: 3, mode: 'personal',
+    retrievedCases: RETRIEVED_CASES, deterministicOnly: true, fetchImpl, countLookup: async () => { counted += 1; },
+  });
+  assert.ok(sent >= 1, 'no lookup was sent');
+  assert.equal(counted, sent, 'one count for each lookup sent');
+
+  usageInserts.length = 0;
+  await withOutboundHttp(async () => jsonResponse(EMPTY_ROWS), () => countGateLookup());
+  assert.deepEqual(usageInserts.map(params => params.slice(1)), [['gate-lookup', '1']]);
+  assert.match(readFileSync(new URL('../ask.js', import.meta.url), 'utf8'), /countLookup: countGateLookup/, "the reply's gate is not given the counter");
+});
+
 // ─── The Malpractice rubrics and the deterministic gate ─────────────────────────
 
 // The case a turn retrieved, in the shape courtlistener.js returns.
@@ -8433,7 +8469,7 @@ test("the daily summary carries a case library section: counts by type, the type
     }
     if (/FROM courtlistener_usage WHERE day/.test(query)) {
       usageDays.push(JSON.parse(init.body).params[0]);
-      return rowsResponse([['job', TEXT], ['requests', INT]], [['chat-search', '4'], ['library', '10'], ['replies-library', '7'], ['replies-live', '3']]);
+      return rowsResponse([['job', TEXT], ['requests', INT]], [['chat-search', '4'], ['gate-lookup', '2'], ['library', '10'], ['replies-library', '7'], ['replies-live', '3']]);
     }
     return jsonResponse(EMPTY_ROWS);
   };
@@ -8464,7 +8500,7 @@ test("the daily summary carries a case library section: counts by type, the type
   assert.equal((full.match(/<li>[a-z_]+: \d+ clear/g) || []).length, Object.keys(CASE_TOPICS).length, 'every case type has its line');
   const short = Object.keys(CASE_TOPICS).filter(type => type !== 'surgical_error').join(', ');
   assert.ok(full.includes(`<p>Types with fewer than 5 clear decisions: ${short}.</p>`), full);
-  assert.ok(full.includes('<p>CourtListener requests yesterday (New York day): chat-search 4, library 10.</p>'), full);
+  assert.ok(full.includes('<p>CourtListener requests yesterday (New York day): chat-search 4, gate-lookup 2, library 10.</p>'), full);
   assert.ok(full.includes('<p>Replies yesterday: 7 from the library, 3 live.</p>'), full);
   assert.ok(full.includes('<p>CourtListener allowance left: 90 today, 40 this hour.</p>'), full);
   const dayAskedAfter = newYorkDayOf(Date.now() - 24 * 60 * 60 * 1000);

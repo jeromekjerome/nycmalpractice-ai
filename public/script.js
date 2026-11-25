@@ -322,7 +322,7 @@ function renderCases(cases, caseNotice) {
   const items = cases.map(c => `
     <div class="case-item">
       <div class="case-name">
-        ${c.absoluteUrl ? `<a href="${escHtml(c.absoluteUrl)}" target="_blank" rel="noopener">${escHtml(c.caseName)}</a>` : escHtml(c.caseName)}
+        ${/^https:\/\//i.test(String(c.url || '')) ? `<a href="${escHtml(c.url)}" target="_blank" rel="noopener">${escHtml(c.caseName)}</a>` : escHtml(c.caseName)}
       </div>
       <div class="case-meta">${escHtml(c.court || '')}${c.dateFiled ? ' · ' + escHtml(c.dateFiled) : ''}${c.citation ? ' · ' + escHtml(c.citation) : ''}</div>
       <div class="case-screen">${escHtml(screenLabel(c.screen))}</div>

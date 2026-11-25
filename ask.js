@@ -126,12 +126,12 @@ function searchLive(caseType, terms) {
 const LIBRARY_MIN_CLEAR = 5;
 
 // The decisions the library holds for the type, or null when it has too few or cannot be read (the live search then runs).
-// Each carries absoluteUrl, the name the page links a decision from, as a live search's decisions do.
+// Each carries url, the name the page links a decision from, as a live search's decisions do.
 async function libraryDecisions(caseType, terms) {
   try {
     if (await clearCount(sql, caseType) < LIBRARY_MIN_CLEAR) return null;
     const picked = await pickDecisions(sql, { caseType, terms, limit: LIBRARY_MIN_CLEAR });
-    return picked.length > 0 ? picked.map(c => ({ ...c, absoluteUrl: c.url || null })) : null;
+    return picked.length > 0 ? picked : null;
   } catch (err) {
     console.error('Could not read the case library:', err.message);
     return null;

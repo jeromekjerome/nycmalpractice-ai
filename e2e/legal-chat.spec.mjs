@@ -125,10 +125,10 @@ test('each decision in the list says whether it was screened, and a sentence und
     body: JSON.stringify({
       answer: 'The timeline and provider records will matter.',
       cases: [
-        { caseName: 'Patient v. Hospital', court: 'Appellate Division', dateFiled: '2025-02-20', snippet: 'Delayed diagnosis increased harm.', screen: { state: 'clear', on: '2026-11-24' } },
+        { caseName: 'Patient v. Hospital', court: 'Appellate Division', dateFiled: '2025-02-20', url: 'https://www.courtlistener.com/opinion/1/patient-v-hospital/', snippet: 'Delayed diagnosis increased harm.', screen: { state: 'clear', on: '2026-11-24' } },
         { caseName: 'Walker v. Clinic', court: 'Appellate Division', dateFiled: '2024-05-01', snippet: 'A missed fracture.', screen: { state: 'unscreened', on: null } },
         { caseName: 'Older v. Reply', court: 'Appellate Division', dateFiled: '2023-05-01' },
-        { caseName: 'Odd v. Date', court: 'Appellate Division', dateFiled: '2023-06-01', screen: { state: 'clear', on: '<img src=x onerror="window.__xss=1">' } },
+        { caseName: 'Odd v. Date', court: 'Appellate Division', dateFiled: '2023-06-01', url: 'javascript:window.__xss=5', screen: { state: 'clear', on: '<img src=x onerror="window.__xss=1">' } },
       ],
     }),
   }));
@@ -139,6 +139,9 @@ test('each decision in the list says whether it was screened, and a sentence und
 
   const items = page.locator('#casesList .case-item');
   await expect(items).toHaveCount(4);
+  // A decision links from its url when that is a web address; a javascript: address draws no link.
+  await expect(items.nth(0).locator('.case-name a')).toHaveAttribute('href', 'https://www.courtlistener.com/opinion/1/patient-v-hospital/');
+  await expect(items.nth(3).locator('.case-name a')).toHaveCount(0);
   await expect(items.nth(0).locator('.case-screen')).toHaveText('Screened Nov 24, 2026');
   await expect(items.nth(1).locator('.case-screen')).toHaveText('Not screened');
   await expect(items.nth(2).locator('.case-screen')).toHaveText('Not screened');

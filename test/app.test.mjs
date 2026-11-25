@@ -1988,8 +1988,9 @@ test('a type with five clear decisions is answered from the library, with no Cou
       assert.deepEqual(body.cases.map(c => c.caseName), ['Alpha v. Beta', 'Gamma v. Delta', 'Epsilon v. Zeta', 'Eta v. Theta', 'Iota v. Kappa']);
       assert.deepEqual(body.cases[0].screen, { state: 'clear', on: '2026-11-24' });
       assert.equal(body.cases[0].clusterId, 101);
-      // The page links a decision from absoluteUrl, as it does a decision from a live search.
-      assert.equal(body.cases[0].absoluteUrl, 'https://www.courtlistener.com/opinion/101/alpha-v-beta/');
+      // The page links a decision from url, which a library decision carries as it does one from a live search.
+      assert.equal(body.cases[0].url, 'https://www.courtlistener.com/opinion/101/alpha-v-beta/');
+      assert.equal(body.cases[0].absoluteUrl, undefined);
     });
     assert.deepEqual(world.calls.courtListener, [], 'a request went to CourtListener');
     assert.deepEqual(repliesCounted(), [['replies-library', '1']]);

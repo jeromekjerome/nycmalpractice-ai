@@ -2001,7 +2001,7 @@ function libraryHandler(world, { clear = 0, picks = [], states = [], failing = n
     // The tables are not made yet (setup-db has not run): Postgres answers 42P01 to every library query.
     if (failing === 'no-table' && /case_library/.test(query)) return jsonResponse({ message: 'relation "case_library" does not exist', code: '42P01' }, 400);
     if (/^SELECT COUNT\(\*\)::int AS n FROM case_library/.test(query)) return failing === 'count' ? broken() : rowsResponse([['n', INT]], [[String(clear)]]);
-    if (/FROM case_library WHERE screen_state = 'clear' AND pinned = FALSE/.test(query)) return rowsResponse(LIBRARY_PICK_FIELDS, picks);
+    if (/FROM case_library WHERE screen_state = 'clear' AND pinned = FALSE/.test(query)) return failing === 'pick' ? broken() : rowsResponse(LIBRARY_PICK_FIELDS, picks);
     if (/FROM case_library WHERE cluster_id = ANY/.test(query)) return failing === 'states' ? broken() : rowsResponse(LIBRARY_STATE_FIELDS, states);
     return response;
   };
@@ -2126,7 +2126,7 @@ test('a banned decision in a live result is dropped, and is not saved in the sea
   }
 });
 
-test('a held decision is never picked from the library', async () => {
+test('the library pick asks only for clear, unpinned decisions', async () => {
   clearSearchCache();
   const world = fakeWorld({ answer: `The scan should have been reported. ${DISCLAIMER}` });
   const server = await startServer(app);
@@ -2138,6 +2138,25 @@ test('a held decision is never picked from the library', async () => {
     assert.ok(pick, 'the library was not asked for decisions');
     assert.match(pick.query, /screen_state = 'clear'/);
     assert.ok(!/held|banned/.test(pick.query));
+  } finally {
+    await server.close();
+  }
+});
+
+test('when the pick from the library fails the reply takes the live path and logs it', async () => {
+  clearSearchCache();
+  usageInserts.length = 0;
+  const world = fakeWorld({ answer: `The scan should have been reported. ${DISCLAIMER}`, nyResults: [resultWithCluster(9, 'Kept Name v. Other')] });
+  const server = await startServer(app);
+  try {
+    const { logs } = await capturingLogs(() => withOutboundHttp(libraryHandler(world, { failing: 'pick', clear: 9, picks: LIBRARY_FIVE }), async () => {
+      const { response, body } = await postJson(server.baseUrl, '/api/ask', { question: 'My radiologist missed a tumor.', mode: 'personal', sessionId: 'sess-lib-9', history: [] });
+      assert.equal(response.status, 200);
+      assert.deepEqual(body.cases.map(c => c.caseName), ['Kept Name v. Other']);
+    }));
+    assert.ok(world.calls.courtListener.length >= 1, 'no live search was made');
+    assert.deepEqual(repliesCounted(), [['replies-live', '1']]);
+    assert.ok(logs.some(line => /case library/i.test(line)), logs.join('\n'));
   } finally {
     await server.close();
   }

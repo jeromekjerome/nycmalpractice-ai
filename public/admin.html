@@ -100,7 +100,7 @@
     <!-- Decisions held: library decisions the nightly screen held for the owner -->
     <div class="section-title">Decisions held</div>
     <div class="glass-panel" id="decisionsSection" style="padding:1.25rem;overflow-x:auto">
-      <p class="muted-note" style="margin-bottom:0.75rem">The nightly screen holds a decision when it finds a later decision to look at. A held decision is not offered to replies. Clear puts it back in the library; Ban keeps it out and it is not screened again. <button class="action-btn" onclick="loadDecisions()">↻ Refresh</button></p>
+      <p class="muted-note" style="margin-bottom:0.75rem">The nightly screen holds a decision when it finds a later decision to look at, or when it could not read CourtListener's answer for it. A held decision is not offered to replies. Clear puts it back in the library; Screen again sends a decision whose answer could not be read back to be screened; Ban keeps it out and it is not screened again. <button class="action-btn" onclick="loadDecisions()">↻ Refresh</button></p>
       <div id="decisionsBody"></div>
     </div>
 
@@ -403,11 +403,22 @@
       return `<div>${linkTo(later.url, later.case_name || 'A later decision')}${facts ? ` <span class="muted-note">${facts}</span>` : ''}</div>`;
     }
 
+    // What the screen found, worded by the hold's question; a question the page does not know gets a neutral line.
+    const HOLD_LEADS = { citing: 'A later decision that cites it:', 'higher-court': 'A later decision in a higher court with the same party names:' };
+    const foundCount = hits => (hits === 1 ? '1 later decision was found. It is shown below.' : `${hits} later decisions were found. The first is shown below.`);
+    // A hold that answered no question (unreadable, or none named): clearing it sends the decision back to be screened.
+    const screensAgain = hold => hold?.question == null || hold.question === 'unreadable';
+
     function foundOf(hold) {
       const found = hold || {};
-      if (found.question === 'unreadable') return `<div>The screen could not read CourtListener's answer for this decision (status ${esc(found.status ?? 'unknown')}).</div>`;
-      const lead = found.question === 'higher-court' ? 'A later decision in a higher court with the same party names:' : 'A later decision that cites it:';
-      return `<div>${lead}</div>${laterOf(found.later)}${found.passage ? `<div class="decision-passage muted-note">${esc(found.passage)}</div>` : ''}`;
+      if (found.question === 'unreadable') {
+        const status = found.status === 0 ? 'no answer' : `status ${found.status ?? 'unknown'}`;
+        return `<div>The screen could not read CourtListener's answer for this decision (${esc(status)}).</div>`;
+      }
+      const known = Object.hasOwn(HOLD_LEADS, found.question);
+      const count = known && Number.isInteger(found.hits) && found.hits > 0 ? `<div>${esc(foundCount(found.hits))}</div>` : '';
+      const lead = known ? HOLD_LEADS[found.question] : 'The screen held this decision.';
+      return `${count}<div>${esc(lead)}</div>${laterOf(found.later)}${found.passage ? `<div class="decision-passage muted-note">${esc(found.passage)}</div>` : ''}`;
     }
 
     function renderDecisions(decisions) {
@@ -421,7 +432,7 @@
           <div style="margin-top:0.5rem;font-size:0.85rem">${foundOf(d.hold)}</div>
           ${d.hold?.found_at ? `<div class="muted-note">Found ${esc(when(d.hold.found_at))}</div>` : ''}
           <div style="display:flex;gap:0.35rem;margin-top:0.5rem">
-            <button class="action-btn" data-action="clear-decision" data-cluster="${Number(d.cluster_id)}" data-name="${esc(d.case_name)}">Clear</button>
+            <button class="action-btn" data-action="clear-decision" data-cluster="${Number(d.cluster_id)}" data-name="${esc(d.case_name)}"${screensAgain(d.hold) ? ' data-again="1">Screen again' : '>Clear'}</button>
             <button class="action-btn danger" data-action="ban-decision" data-cluster="${Number(d.cluster_id)}" data-name="${esc(d.case_name)}">Ban</button>
           </div>
         </div>`).join('');
@@ -440,11 +451,13 @@
         const res = await fetch(`/api/admin/decisions/${id}/${ban ? 'ban' : 'clear'}`, { method: 'POST', headers: { 'x-admin-secret': adminSecret } });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || (ban ? 'Ban failed' : 'Clear failed'));
-        showMessage(`${name} ${ban ? 'banned' : 'cleared'}`);
+        showMessage(`${name} ${ban ? 'banned' : btn.dataset.again ? 'will be screened again' : 'cleared'}`);
         loadDecisions();
       } catch (e) {
         showMessage('Failed: ' + e.message, true);
         btn.disabled = false;
+        // The row may be out of date (decided in another tab, say), so the section is read again.
+        loadDecisions();
       }
     });
 

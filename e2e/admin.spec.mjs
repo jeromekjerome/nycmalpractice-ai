@@ -272,6 +272,74 @@ test('the Decisions held section shows what the screen found as text, and the ow
   await expect(body).toContainText('No decisions are held.');
 });
 
+test('the Decisions held section says how many later decisions were found, reads status 0 as no answer, words an unknown hold neutrally and offers Screen again for an unanswered one', async ({ page }) => {
+  const posted = [];
+  const later = heldDecision(31).hold.later;
+  let list = [
+    heldDecision(31, { hold: { ...heldDecision(31).hold, hits: 3, seen: [931, 932, 933] } }),
+    heldDecision(32, { hold: { ...heldDecision(32).hold, hits: 1, seen: [932] } }),
+    heldDecision(33, { hold: { found_at: '2026-11-23T23:00:00.000Z', question: 'unreadable', status: 0, later: null, passage: null, seen: [] } }),
+    heldDecision(34, { hold: { found_at: '2026-11-22T23:00:00.000Z', question: 'something-else', later, passage: 'a passage' } }),
+    heldDecision(35, { hold: null }),
+  ];
+  await page.route('**/api/admin/firms', route => route.fulfill(json({ firms: [], counts: { total: 0, active: 0 }, leadCounts: { total: 0 } })));
+  await mockOperations(page);
+  await page.route(url => url.pathname === '/api/admin/decisions', route => route.fulfill(json({ decisions: list })));
+  await page.route(url => /^\/api\/admin\/decisions\/\d+\/(clear|ban)$/.test(url.pathname), async route => {
+    const [, id, verb] = /decisions\/(\d+)\/(clear|ban)$/.exec(new URL(route.request().url()).pathname);
+    posted.push(`${id}/${verb}`);
+    list = list.filter(row => String(row.cluster_id) !== id);
+    await route.fulfill(json({ ok: true, cluster_id: Number(id), screen_state: 'clear' }));
+  });
+  await page.goto('/admin.html');
+  await page.locator('#secretInput').fill('secret');
+  await page.locator('button.admin-btn').click();
+
+  const body = page.locator('#decisionsBody');
+  const row = id => body.locator('.decision-row', { hasText: `Party${id} v. Other` });
+  await expect(row(31)).toContainText('3 later decisions were found. The first is shown below.');
+  await expect(row(32)).toContainText('1 later decision was found. It is shown below.');
+  await expect(row(33)).toContainText("The screen could not read CourtListener's answer for this decision (no answer).");
+  await expect(row(33)).not.toContainText('later decisions were found');
+  await expect(row(34)).toContainText('The screen held this decision.');
+  await expect(row(34)).not.toContainText('A later decision that cites it:');
+  await expect(row(35)).toContainText('The screen held this decision.');
+  await expect(page.locator('#decisionsSection')).not.toContainText(/matched/i);
+
+  // A hold that answered no question is sent back to be screened; any other is cleared.
+  for (const id of [31, 32, 34]) {
+    await expect(row(id).getByRole('button', { name: 'Clear' })).toHaveCount(1);
+    await expect(row(id).getByRole('button', { name: 'Screen again' })).toHaveCount(0);
+  }
+  for (const id of [33, 35]) {
+    await expect(row(id).getByRole('button', { name: 'Screen again' })).toHaveCount(1);
+    await expect(row(id).getByRole('button', { name: 'Clear' })).toHaveCount(0);
+  }
+  await expect(page.locator('#decisionsSection')).toContainText('Screen again sends a decision whose answer could not be read back to be screened');
+
+  await row(33).getByRole('button', { name: 'Screen again' }).click();
+  await expect.poll(() => posted).toEqual(['33/clear']);
+  await expect(page.locator('#adminMsg')).toContainText('Party33 v. Other will be screened again');
+  await expect(body.locator('.decision-row')).toHaveCount(4);
+});
+
+test('after a failed clear, a 409 included, the Decisions held section reloads', async ({ page }) => {
+  let reads = 0;
+  await page.route('**/api/admin/firms', route => route.fulfill(json({ firms: [], counts: { total: 0, active: 0 }, leadCounts: { total: 0 } })));
+  await mockOperations(page);
+  await page.route(url => url.pathname === '/api/admin/decisions', route => { reads += 1; route.fulfill(json({ decisions: reads > 1 ? [] : [heldDecision(41)] })); });
+  await page.route(url => /^\/api\/admin\/decisions\/\d+\/clear$/.test(url.pathname), route => route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: 'That decision is not held' }) }));
+  await page.goto('/admin.html');
+  await page.locator('#secretInput').fill('secret');
+  await page.locator('button.admin-btn').click();
+  const body = page.locator('#decisionsBody');
+  await expect(body.locator('.decision-row')).toHaveCount(1);
+  await body.getByRole('button', { name: 'Clear' }).click();
+  await expect(page.locator('#adminMsg')).toContainText('That decision is not held');
+  await expect(body).toContainText('No decisions are held.');
+  expect(reads).toBe(2);
+});
+
 test('a ban the owner declines at the dialog sends nothing', async ({ page }) => {
   const posted = [];
   await page.route('**/api/admin/firms', route => route.fulfill(json({ firms: [], counts: { total: 0, active: 0 }, leadCounts: { total: 0 } })));

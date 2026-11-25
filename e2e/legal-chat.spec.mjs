@@ -167,6 +167,13 @@ test('with no decisions in a reply there is no sentence about them', async ({ pa
   await expect(page.locator('#conversation .msg-ai').last()).toContainText('When did it happen?');
   await expect(page.locator('#casesCard .cases-note')).toHaveCount(0);
   await expect(page.locator('body')).not.toContainText(DECISIONS_SENTENCE);
+
+  // The list itself, drawn for no decisions after one with a decision, keeps no sentence.
+  await page.evaluate(() => renderCases([{ caseName: 'Driver v. Carrier' }], null));
+  await expect(page.locator('#casesCard .cases-note')).toHaveCount(1);
+  await page.evaluate(() => renderCases([], null));
+  await expect(page.locator('#casesCard .cases-note')).toHaveCount(0);
+  await expect(page.locator('#casesCard .case-item')).toHaveCount(0);
 });
 
 const NOTICE_SENTENCE = 'A sentence the reply carries about these decisions.';
@@ -218,6 +225,13 @@ test('a reply with no notice adds nothing to the card, and a notice with no deci
   await page.locator('#userInput').press('Enter');
   await expect(page.locator('#conversation .msg-ai').last()).toContainText('When did it happen?');
   await expect(page.locator('body')).not.toContainText(NOTICE_SENTENCE);
+
+  // Drawn for no decisions, the card shows no notice and no sentence, even when a notice is given.
+  await expect(page.locator('#casesCard .case-item')).toHaveCount(1);
+  await page.evaluate(notice => renderCases([], notice), NOTICE_SENTENCE);
+  await expect(page.locator('#casesCard .cases-notice')).toHaveCount(0);
+  await expect(page.locator('#casesCard .cases-note')).toHaveCount(0);
+  await expect(page.locator('#casesCard .case-item')).toHaveCount(0);
 });
 
 test('a visitor can email the assessment without putting the session in the return link', async ({ page }) => {

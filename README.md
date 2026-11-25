@@ -20,7 +20,7 @@ As the conversation develops, the AI scores the lead in the background. Qualifie
 - Estate mode: wrongful death malpractice (EPTL §5-4.1 — 2yr SOL from date of death)
 - Case types: surgical error, misdiagnosis, medication error, birth injury, anesthesia error, hospital negligence, nursing home abuse, dental malpractice
 - Case analysis panel with complexity estimate (level + reason) and SOL warning when deadline is approaching
-- NYC Supreme Court and Appellate Division decisions via CourtListener
+- NYC Supreme Court and Appellate Division decisions via CourtListener, from the case library or a live search, each saying whether and when it was screened
 - Conversation history persisted per session with personal/estate mode restoration
 
 **For Law Firms**
@@ -40,7 +40,23 @@ As the conversation develops, the AI scores the lead in the background. Qualifie
 - Admin dashboard at `/admin.html` — contact requests (read the conversation, deliver by hand to an approved firm), auctions (cancel a stuck one), leads with refunds and decline reasons, and firms with their activity
 - The Models section: the order of models each job runs with, which providers answer, what has been measured, and a form to change the order
 - Manually send portal links, toggle firm active status, update profiles
+- The Decisions held section: the library decisions the nightly screen held, with what it found, and Clear, Screen again or Ban for each
 - Protected via `ADMIN_SECRET` header (`x-admin-secret`)
+
+---
+
+## The case library
+
+Replies use the case library (`case-library.js`): the court decisions a nightly refresh finds on CourtListener with each case type's topic searches (`case-topics.js`, `library-refresh.js`), each put through a nightly screen (`case-screen.js`).
+
+- A case type with five or more clear decisions is answered from the library: the five that share the most words with the conversation's search terms, the newer first on a tie. No case law search is sent while the visitor waits.
+- A type with fewer searches CourtListener live, New York courts first, then a national search. The last decisions found for each case type are kept (`case-memory.js`) and used when the search fails.
+- Either way, a decision the screen held or the owner banned is never used, and each decision shown says whether, and on what day, it was screened. If the library cannot be counted or picked from, the reply searches live; if the screen states of a live reply's decisions cannot be read, it is given none; if the library's tables have not been made yet, every decision is shown as not screened.
+- The screen runs twice a night over the decisions due: those never screened, then those last screened 30 days ago or more. For each it asks CourtListener whether a later decision that cites it has one of a few words (such as "overruled") near its party's name, and, for a decision below the Court of Appeals, whether a higher court has since filed a decision under the same party names. A later decision the owner was already shown is not asked about again.
+  - Nothing found: the decision is clear.
+  - Anything found: it is held, left out of replies, and the owner is emailed what was found and how many later decisions there were. The owner decides on the admin page (Decisions held): Clear, Ban, or, for a decision whose answer could not be read, Screen again.
+  - It is a filter that errs toward holding, not a citator.
+- The gate's check of a citation against CourtListener is counted with the other requests, under `gate-lookup`.
 
 ---
 
@@ -120,7 +136,7 @@ Seven tables in Neon Postgres (separate database from other AntiGravity apps):
 - **Email:** Nodemailer via SMTP (lead delivery, portal links, auction notifications)
 - **Frontend:** Vanilla HTML/CSS/JS, glassmorphism UI — deep crimson (#9e3a5a) for personal mode, deep plum (#6e3a7c) for estate/wrongful death mode
 - **Deploy:** Vercel (serverless), Cloudflare DNS + Email Routing
-- **Cron:** Vercel built-in cron (daily reset) + cron-job.org (auction closing, overdue leads)
+- **Cron:** Vercel built-in cron (the nightly job and the case library's jobs) + cron-job.org (auction closing, overdue leads)
 
 ---
 
@@ -159,6 +175,7 @@ Server runs at `http://localhost:3003`.
 | `DATABASE_URL` | Neon Postgres connection string (separate DB from other apps) |
 | `OPENAI_API_KEY` | OpenAI API key. No setting chooses the models: they are the chains saved from the admin page, with the built-in chains of `models.js` behind them |
 | `COURTLISTENER_TOKEN` | CourtListener API token (optional) |
+| `LIBRARY_SEARCHES_PER_NIGHT`, `SCREEN_REQUESTS_PER_RUN`, `COURTLISTENER_RESERVE` | Optional case library limits: the topic searches a night (10), the screen's requests a run (20), and the requests left in CourtListener's day below which the library's jobs stop (30; they also stop with 5 or fewer left in the hour) |
 | `STRIPE_SECRET_KEY` | Stripe secret key |
 | `STRIPE_PUBLISHABLE_KEY` | Stripe publishable key |
 | `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret |
@@ -183,7 +200,9 @@ Server runs at `http://localhost:3003`.
 vercel --name nycmalpractice-ai --prod
 ```
 
-Set all environment variables in the Vercel dashboard. The nightly job (`/api/cron`) runs via Vercel at 7am UTC (2am ET). Each of its steps runs even if an earlier one fails; failed steps are emailed to the operator with a summary of the day. `/health/deep` answers 503 when the database cannot be reached, lacks a column the code uses, or the nightly job has not succeeded in 26 hours: point an uptime monitor at it.
+Set all environment variables in the Vercel dashboard. The nightly job (`/api/cron`) runs via Vercel at 7am UTC (2am ET). Each of its steps runs even if an earlier one fails; failed steps are emailed to the operator with a summary of the day. `/health/deep` answers 503 when the database cannot be reached, lacks a column the code uses, or the nightly job has not succeeded in 26 hours: point an uptime monitor at it. Its `library` and `screen` checks judge the case library's refresh and screen the same way: a failed last run, or none in 26 hours, answers 503, and a job not run yet is healthy.
+
+**The case library's jobs:** the refresh `/api/cron/library` runs at 03:00 UTC, and the screen `/api/cron/screen` at 04:00 and 05:00 UTC (as `?run=1` and `?run=2`, which do the same work). `vercel.json` rewrites these two routes to `api/jobs.js`, the same app with a 300-second limit; every other request goes to `api/index.js`, which gets 60. Each job reads CourtListener's usage report first and stops at the reserve, counts every request it sends by job, records its run, and emails a failed step. The daily summary's Case library section gives the clear, unscreened and held decisions of each type, the decisions held for the owner, the types short of five clear decisions, the previous New York day's CourtListener requests by job (`chat-search`, `gate-lookup`, `library`, `screen`), the replies answered from the library or live, and the allowance left.
 
 **cron-job.org** — two additional jobs needed:
 

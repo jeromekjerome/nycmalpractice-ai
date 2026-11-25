@@ -196,6 +196,23 @@ test('each anchored decision on the lead page shows its screen label, and a host
   await expect(page.locator('#citationAudit')).not.toContainText('Shepardized');
 });
 
+test('a decision the lookup found in CourtListener shows its screen label, a held one included', async ({ page }) => {
+  const found = (name, id, screen) => ({
+    citation_text: `${name}, 57 N.Y.2d 230`, status: 'UNANCHORED', courtlistener_status: 'VERIFIED', courtlistener_case_name: name,
+    courtlistener_url: `https://www.courtlistener.com/opinion/${id}/x/`, ...(screen ? { matched_case_screen: screen } : {}),
+  });
+  await page.route(url => url.pathname === '/api/leads/501', route => route.fulfill(json(leadWithAudit([
+    found('Licari v. Elliott', 5685956, { state: 'held', on: null }),
+    found('Toure v. Avis', 5685957, { state: 'clear', on: '2026-11-24' }),
+  ]))));
+  await page.goto('/lead.html?id=501&token=abc');
+
+  const row = text => page.locator('#citationAudit li', { hasText: text });
+  await expect(row('Licari v. Elliott').locator('.cite-detail')).toHaveText('Found in CourtListener — Licari v. Elliott');
+  await expect(row('Licari v. Elliott').locator('.cite-screen')).toHaveText('Held for review: later history found');
+  await expect(row('Toure v. Avis').locator('.cite-screen')).toHaveText('Screened Nov 24, 2026');
+});
+
 test('declining a lead shows the refund policy before it is sent', async ({ page }) => {
   await page.route(url => url.pathname === '/api/leads/501', route => route.fulfill(json(LEAD)));
   let declined = null;

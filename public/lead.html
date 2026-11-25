@@ -530,7 +530,8 @@
       return `<ul class="cite-list">${ev.citation_audit.map(citationRowHtml).join('')}</ul>`;
     }
 
-    // The label for what the library knows of an anchored decision. A row the server gave no label shows none.
+    // The label for what the library knows of a row's decision (anchored, or found by the lookup). A row the server gave no
+    // label shows none.
     function screenChipHtml(screen) {
       if (!isObj(screen)) return '';
       let label = 'Not screened';

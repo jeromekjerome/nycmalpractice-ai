@@ -959,6 +959,38 @@ test('GET /api/leads/:id gives each anchored row its screen label from the libra
   }
 });
 
+test('GET /api/leads/:id labels a decision the lookup found in CourtListener by its address, a held one included', async () => {
+  const found = (name, url) => ({ citation_text: name, status: 'UNANCHORED', courtlistener_status: 'VERIFIED', courtlistener_url: url, courtlistener_case_name: name });
+  const leadData = {
+    ...AUDIT_LEAD_DATA,
+    evaluation: {
+      gate_status: 'PASSED',
+      citation_audit: [
+        found('Licari v. Elliott, 57 N.Y.2d 230', 'https://www.courtlistener.com/opinion/5685960/licari-v-elliott/'),
+        found('Toure v. Avis Rent A Car Sys., 98 N.Y.2d 345', 'https://www.courtlistener.com/opinion/5685961/toure-v-avis/'),
+        { ...anchoredRow('Both v. Case', 'https://www.courtlistener.com/opinion/5685957/both-v-case/'), courtlistener_url: 'https://www.courtlistener.com/opinion/5685960/other/' },
+        { citation_text: 'Smith v. FakeCorp, 999 N.Y.3d 111', status: 'UNANCHORED', courtlistener_status: 'NOT_FOUND_404', courtlistener_url: null },
+      ],
+    },
+  };
+  const states = [['5685960', 'held', '2026-11-20T05:00:00Z', '2026-11-20', 'citing'], ['5685957', 'clear', '2026-11-24T05:00:00Z', '2026-11-24', null]];
+  const asked = [];
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(auditLeadHandler(leadData, { states, asked }), async () => {
+      const response = await fetch(`${server.baseUrl}/api/leads/501?token=firm-token`);
+      assert.equal(response.status, 200);
+      const rows = (await response.json()).leadData.evaluation.citation_audit;
+      assert.deepEqual(rows.map(row => row.matched_case_screen), [{ state: 'held', on: null }, UNSCREENED, { state: 'clear', on: '2026-11-24' }, undefined],
+        'a found row is labelled by its CourtListener address; an anchored row by its anchor');
+      assert.equal(asked.length, 1);
+      for (const id of ['5685960', '5685961', '5685957']) assert.ok(JSON.stringify(asked[0]).includes(id), id);
+    });
+  } finally {
+    await server.close();
+  }
+});
+
 test('GET /api/leads/:id still loads, with every anchored row not screened, when the library cannot be read', async () => {
   const server = await startServer(app);
   try {

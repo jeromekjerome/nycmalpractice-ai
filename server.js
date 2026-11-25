@@ -695,24 +695,27 @@ app.post('/api/auctions/:id/bid', async (req, res) => {
 });
 
 // ─── Leads ────────────────────────────────────────────────────────────────────
-// The lead's data with each anchored citation-audit row given the screen label its decision has now in the library
-// (`matched_case_screen`), worked out when the page is read and never written back. A failed lookup labels every row not screened.
+// The lead's data with each citation-audit row that names a decision given the screen label that decision has now in the
+// library (`matched_case_screen`), worked out when the page is read and never written back. A row names a decision by the
+// retrieved case it is anchored to, or else by the address the gate's CourtListener lookup found for it. A failed lookup
+// labels every such row not screened.
 async function withScreenLabels(leadData) {
   const audit = leadData?.evaluation?.citation_audit;
   if (!Array.isArray(audit)) return leadData;
+  const addressOf = row => row?.matched_case_url || row?.courtlistener_url;
   const idOf = row => {
-    const found = /\/opinion\/(\d+)\//.exec(String(row?.matched_case_url || ''));
+    const found = /\/opinion\/(\d+)\//.exec(String(addressOf(row) || ''));
     return found ? Number(found[1]) : null;
   };
-  const anchored = audit.filter(row => row && typeof row === 'object' && row.matched_case_url);
-  if (!anchored.length) return leadData;
+  const named = audit.filter(row => row && typeof row === 'object' && addressOf(row));
+  if (!named.length) return leadData;
   let states = new Map();
   try {
-    states = await screenStates(sql, anchored.map(idOf).filter(id => id !== null));
+    states = await screenStates(sql, named.map(idOf).filter(id => id !== null));
   } catch (err) {
     console.error('Could not read the screen states for a lead:', withoutKeys(err?.message || String(err)).slice(0, 300));
   }
-  const labelled = audit.map(row => (anchored.includes(row)
+  const labelled = audit.map(row => (named.includes(row)
     ? { ...row, matched_case_screen: shownScreen(states.get(idOf(row))) }
     : row));
   return { ...leadData, evaluation: { ...leadData.evaluation, citation_audit: labelled } };

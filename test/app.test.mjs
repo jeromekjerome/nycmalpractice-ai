@@ -919,14 +919,14 @@ const AUDIT_LEAD_DATA = {
     ],
   },
 };
-function auditLeadHandler(leadData, { states = [], failing = false, asked = [] } = {}) {
+function auditLeadHandler(leadData, { states = [], failing = false, asked = [], caseType = 'misdiagnosis' } = {}) {
   return async (url, init) => {
     const q = JSON.parse(init.body).query.replace(/\s+/g, ' ');
     if (/FROM firm_tokens/.test(q)) return rowsResponse([['firm_id', INT], ['name', TEXT], ['cold_decline_count', INT], ['auction_decline_count', INT]], [['7', 'Test Firm', '0', '0']]);
     if (/FROM leads WHERE id/.test(q)) {
       return rowsResponse(
         [['id', INT], ['status', TEXT], ['case_type', TEXT], ['tier', TEXT], ['price_paid', 1700], ['accept_deadline', TIMESTAMPTZ], ['auction_id', INT], ['lead_data', JSONB]],
-        [['501', 'pending', 'misdiagnosis', 'cold', '25.00', '2030-01-01 00:00:00+00', null, JSON.stringify(leadData)]],
+        [['501', 'pending', caseType, 'cold', '25.00', '2030-01-01 00:00:00+00', null, JSON.stringify(leadData)]],
       );
     }
     if (/FROM case_library WHERE cluster_id = ANY/.test(q)) {
@@ -1002,6 +1002,37 @@ test('GET /api/leads/:id still loads, with every anchored row not screened, when
     }));
     assert.ok(logs.some(line => /screen states/i.test(line)), logs.join('\n'));
   } finally {
+    await server.close();
+  }
+});
+
+test('GET /api/leads/:id carries the case-type notice for a type with one, when the audit has rows, and null otherwise', async () => {
+  const server = await startServer(app);
+  const caseNoticeOf = async (leadData, caseType) => {
+    let notice;
+    await withOutboundHttp(auditLeadHandler(leadData, { caseType }), async () => {
+      const response = await fetch(`${server.baseUrl}/api/leads/501?token=firm-token`);
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.ok('caseNotice' in body, 'the response has no caseNotice field');
+      notice = body.caseNotice;
+    });
+    return notice;
+  };
+  try {
+    assert.equal(await caseNoticeOf(AUDIT_LEAD_DATA), null, 'the notes file as it is has no notice');
+    app.locals.loadNotes = noticeFor('misdiagnosis');
+    assert.equal(await caseNoticeOf(AUDIT_LEAD_DATA), TEST_NOTICE);
+    assert.equal(await caseNoticeOf(AUDIT_LEAD_DATA, 'nursing_home'), null, 'a type with no notice');
+    assert.equal(await caseNoticeOf({ ...AUDIT_LEAD_DATA, evaluation: { gate_status: 'PASSED', citation_audit: [] } }), null, 'no rows');
+    assert.equal(await caseNoticeOf({ ...AUDIT_LEAD_DATA, evaluation: { gate_status: 'PASSED' } }), null, 'no audit');
+    assert.equal(await caseNoticeOf({ ...AUDIT_LEAD_DATA, evaluation: null }), null, 'no evaluation');
+    app.locals.loadNotes = () => { throw new Error('the notes file is unreadable'); };
+    const { result, logs } = await capturingLogs(() => caseNoticeOf(AUDIT_LEAD_DATA));
+    assert.equal(result, null, 'a notes file that cannot be read');
+    assert.ok(logs.some(line => /unreadable/.test(line)), logs.join('\n'));
+  } finally {
+    delete app.locals.loadNotes;
     await server.close();
   }
 });

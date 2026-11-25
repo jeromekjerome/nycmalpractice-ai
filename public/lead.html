@@ -159,6 +159,7 @@
           <div id="gateSummary" class="gate-summary"></div>
           <div class="gate-section">
             <h3 class="gate-section-title">Citation audit</h3>
+            <div id="caseNotice"></div>
             <div id="citationAudit"></div>
           </div>
           <div class="gate-section" id="gateChecks" hidden></div>
@@ -352,6 +353,7 @@
       $('transcript').replaceChildren(...turns);
 
       renderGatekeeper(info.evaluation);
+      renderCaseNotice(data.caseNotice);
       renderHitlHelp(info.evaluation);
       updateAcceptGate();
 
@@ -522,6 +524,11 @@
         lines.push('<p class="gate-alert">An audit is stored for this lead, but its gate status is missing or unrecognised. Treat the AI reply as unverified.</p>');
       }
       return lines.join('\n');
+    }
+
+    // The case-type notice the server read from the law file, as text above the audit; with none, nothing is drawn.
+    function renderCaseNotice(notice) {
+      $('caseNotice').innerHTML = typeof notice === 'string' && notice ? `<p class="cases-notice">${escHtml(notice)}</p>` : '';
     }
 
     function citationAuditHtml(ev) {

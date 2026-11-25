@@ -213,6 +213,33 @@ test('a decision the lookup found in CourtListener shows its screen label, a hel
   await expect(row('Toure v. Avis').locator('.cite-screen')).toHaveText('Screened Nov 24, 2026');
 });
 
+test('the lead page shows the case-type notice above the citation audit as text, and draws nothing when there is none', async ({ page }) => {
+  const NOTICE = 'A sentence the notes file carries about these decisions.';
+  await page.route(url => url.pathname === '/api/leads/501', route => route.fulfill(json({ ...LEAD, caseNotice: NOTICE })));
+  await page.goto('/lead.html?id=501&token=abc');
+  await expect(page.locator('#caseNotice')).toHaveText(NOTICE);
+  const above = await page.evaluate(() => Boolean(document.getElementById('caseNotice').compareDocumentPosition(document.getElementById('citationAudit')) & Node.DOCUMENT_POSITION_FOLLOWING));
+  expect(above).toBe(true);
+  await expect(page.locator('#citationAudit')).not.toContainText(NOTICE);
+});
+
+test('the lead page escapes a case-type notice, and shows no notice for null or a missing field', async ({ page }) => {
+  const HOSTILE = '<img src=x onerror="window.__notice=1">';
+  await page.route(url => url.pathname === '/api/leads/501', route => route.fulfill(json({ ...LEAD, caseNotice: HOSTILE })));
+  await page.goto('/lead.html?id=501&token=abc');
+  await expect(page.locator('#caseNotice')).toHaveText(HOSTILE);
+  await expect(page.locator('#caseNotice img')).toHaveCount(0);
+  expect(await page.evaluate(() => window.__notice)).toBeUndefined();
+
+  for (const lead of [{ ...LEAD, caseNotice: null }, LEAD]) {
+    await page.route(url => url.pathname === '/api/leads/501', route => route.fulfill(json(lead)));
+    await page.goto('/lead.html?id=501&token=abc');
+    await expect(page.locator('#gateStatusBadge')).toHaveText('Gate status: PASSED');
+    await expect(page.locator('#caseNotice')).toBeEmpty();
+    await expect(page.locator('#caseNotice .cases-notice')).toHaveCount(0);
+  }
+});
+
 test('declining a lead shows the refund policy before it is sent', async ({ page }) => {
   await page.route(url => url.pathname === '/api/leads/501', route => route.fulfill(json(LEAD)));
   let declined = null;

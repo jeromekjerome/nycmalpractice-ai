@@ -6,7 +6,7 @@ import { securityHeaders } from './security-headers.js';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { neon } from '@neondatabase/serverless';
-import { answerUserQuestion } from './ask.js';
+import { answerUserQuestion, noticeForReply } from './ask.js';
 import { closeExpiredAuctions, createAuction, deliverColdLead, getAuctionStatus, placeBid, acceptLead, declineLead, notifyOperatorOfContactRequest, notifyOperator, sendOperatorNotice, TIER_CONFIG, DECLINE_REASONS, deliverLeadByHand, remindClosingAuctions, openAuctionsFor, portalAuctionLink } from './auction.js';
 import { registerFirm, sendVerificationCode, verifyPhoneCode, validateToken, updateFirmSubscription, getFirm, updateFirmProfile, createMagicLink, VerificationLimitError, recentDeclineCounts, linkOpensAuction, linkOpensLead, linkOpensAccount, approveFirm, setSubscriptionStatus, ensureStripeCustomer, changeUnverifiedPhone, setCustomerCard, findFirmByEmail } from './firms.js';
 import { rateLimit } from './rate-limit.js';
@@ -738,6 +738,10 @@ app.get('/api/leads/:id', async (req, res) => {
   // Leads stored before deadlines travelled with them get theirs from the conversation.
   if (fullData && !fullData.deadlines && Array.isArray(fullData.history)) fullData.deadlines = deadlineNotices(fullData.history);
   fullData = await withScreenLabels(fullData);
+  // The notice the visitor and the AI are given for this case type, shown above the audit when the audit has rows. A failed read gives none.
+  // (A test sets app.locals.loadNotes to read other notes.)
+  const audit = fullData?.evaluation?.citation_audit;
+  const caseNotice = Array.isArray(audit) ? noticeForReply(lead.case_type, audit, app.locals.loadNotes) : null;
   const daysLeft     = Math.max(0, Math.ceil((new Date(lead.accept_deadline) - new Date()) / (1000 * 60 * 60 * 24)));
   // The same 30-day count declineLead uses, so the policy shown is the one applied.
   const recent       = await recentDeclineCounts(tokenData.firm_id);
@@ -747,7 +751,7 @@ app.get('/api/leads/:id', async (req, res) => {
   const declinePolicy = isAuction
     ? (auctionCount === 1 ? { refundPct: 50, message: '50% refund' } : auctionCount === 2 ? { refundPct: 25, message: '25% refund' } : { refundPct: 0, message: 'No refund + 30-day suspension' })
     : (coldCount <= 3 ? { refundPct: 100, message: 'Full refund' } : { refundPct: 50, message: '50% refund' });
-  res.json({ id: lead.id, status: lead.status, caseType: lead.case_type, tier: lead.tier, auctionId: lead.auction_id, pricePaid: parseFloat(lead.price_paid), acceptDeadline: lead.accept_deadline, daysLeft, leadData: fullData, declinePolicy });
+  res.json({ id: lead.id, status: lead.status, caseType: lead.case_type, tier: lead.tier, auctionId: lead.auction_id, pricePaid: parseFloat(lead.price_paid), acceptDeadline: lead.accept_deadline, daysLeft, leadData: fullData, caseNotice, declinePolicy });
 });
 
 app.post('/api/leads/:id/accept', async (req, res) => {

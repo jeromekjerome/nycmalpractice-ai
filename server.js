@@ -17,8 +17,9 @@ import { runJob, replyClock, MIN_TIME_LEFT_MS, configureProviders, withoutKeys, 
 import { modelWatch } from './model-watch.js';
 import { statuteWatch } from './statute-watch.js';
 import { refreshLibrary } from './library-refresh.js';
+import { screenDecisions } from './case-screen.js';
 import { CASE_TOPICS } from './case-topics.js';
-import { searchTopic, lookupCitations } from './courtlistener.js';
+import { searchTopic, lookupCitations, searchForScreen } from './courtlistener.js';
 import { readAllowance } from './courtlistener-usage.js';
 import { sourceReader } from './statute-text.js';
 import { readLawFile, snapshotReader } from './law-file.js';
@@ -1235,6 +1236,40 @@ app.get('/api/cron/library', async (req, res) => {
       dropped: refreshed?.dropped ?? null,
       pinsResolved: refreshed?.pinsResolved ?? null,
       stoppedBecause: refreshed ? refreshed.stoppedBecause : null,
+      failed: failed.map(f => f.step),
+    });
+  } catch (err) {
+    serverError(req, res, err);
+  }
+});
+
+// The screen of the case library (case-screen.js) runs twice a night, at 04:00 and 05:00 UTC, on the second function. The
+// scheduler calls it with ?run=1 and ?run=2; the number is not read, so both runs do the same work and a call without it
+// does too. A held decision is emailed to the owner through the same notice the statute watch uses.
+function screenCaseLibrary() {
+  const token = process.env.COURTLISTENER_TOKEN;
+  if (!token) throw new Error('COURTLISTENER_TOKEN is not set in this deployment');
+  return screenDecisions({
+    sqlClient: sql, search: searchForScreen, allowance: () => readAllowance({ token }), notify: sendOperatorNotice, site: SITE_NAME,
+    maxRequests: numberSetting('SCREEN_REQUESTS_PER_RUN', 20), reserve: numberSetting('COURTLISTENER_RESERVE', 30),
+  });
+}
+
+app.get('/api/cron/screen', async (req, res) => {
+  if (!verifyCron(req, res)) return;
+  try {
+    const { results, failed } = await runSteps([['screen the case library', screenCaseLibrary]]);
+    await recordJobRun('screen', failed).catch(err => console.error('Recording the screen run failed:', err.message));
+    await reportFailedSteps('screen', failed);
+    const screened = results['screen the case library'];
+    res.status(failed.length ? 500 : 200).json({
+      ok: failed.length === 0,
+      screened: screened?.screened ?? null,
+      cleared: screened?.cleared ?? null,
+      held: screened?.held ?? null,
+      requests: screened?.requests ?? null,
+      notifyFailed: screened?.notifyFailed ?? null,
+      stoppedBecause: screened ? screened.stoppedBecause : null,
       failed: failed.map(f => f.step),
     });
   } catch (err) {

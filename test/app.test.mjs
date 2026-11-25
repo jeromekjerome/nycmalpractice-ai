@@ -7716,6 +7716,149 @@ test('a throttled topic search makes the library route answer 500, record the ru
   }
 });
 
+// ─── The case library's nightly screen: its route ───
+// The usage report is the recorded one; the one decision due is a Court of Appeals decision, so a run asks one question and
+// nothing waits between requests. The database answers the due query with that decision, a screen write with its id, and
+// every other statement with no rows. Nothing reaches the network or a database.
+
+const SCREEN_DUE_FIELDS = [['cluster_id', TEXT], ['opinion_id', TEXT], ['case_name', TEXT], ['citations', JSONB], ['court', TEXT], ['court_id', TEXT], ['date_filed', TEXT], ['url', TEXT], ['screen_state', TEXT], ['decided_at', TIMESTAMPTZ], ['last_try_failed', BOOL]];
+const SCREEN_DUE_ROW = ['5685956', '5534961', 'Licari v. Elliott', JSON.stringify(['57 N.Y.2d 230', '441 N.E.2d 1088']), 'New York Court of Appeals', 'ny', '1982-10-14', 'https://www.courtlistener.com/opinion/5685956/licari-v-elliott/', 'unscreened', null, 'f'];
+
+function screenWorld({ searchStatus = 200, results = [] } = {}) {
+  const world = { courtListener: [], sql: [], jobRuns: [] };
+  world.handler = async (url, init = {}) => {
+    if (url.startsWith('https://www.courtlistener.com/')) {
+      world.courtListener.push(url);
+      if (url.includes('/api-usage/')) return jsonResponse(CL_USAGE_REPORT);
+      if (url.includes('/search/')) return searchStatus === 200 ? jsonResponse({ count: results.length, results }) : jsonResponse({ detail: 'Request was throttled.' }, searchStatus);
+      throw new Error(`Unexpected CourtListener request in test: ${url}`);
+    }
+    if (!url.endsWith('/sql')) throw new Error(`Unexpected outbound request in test: ${url}`);
+    const { query, params } = JSON.parse(init.body);
+    const q = query.replace(/\s+/g, ' ').trim();
+    world.sql.push({ query: q, params });
+    if (/^INSERT INTO job_runs/.test(q)) world.jobRuns.push(params);
+    if (/FROM case_library WHERE opinion_id IS NOT NULL/.test(q)) return rowsResponse(SCREEN_DUE_FIELDS, [SCREEN_DUE_ROW]);
+    if (/^UPDATE case_library SET screen_state/.test(q)) return rowsResponse([['cluster_id', TEXT]], [['5685956']], 'UPDATE');
+    return jsonResponse(EMPTY_ROWS);
+  };
+  return world;
+}
+
+async function withScreenSettings({ token = 'cl-test-token' } = {}, fn) {
+  const previous = process.env.COURTLISTENER_TOKEN;
+  if (token == null) delete process.env.COURTLISTENER_TOKEN; else process.env.COURTLISTENER_TOKEN = token;
+  try {
+    return await fn();
+  } finally {
+    if (previous === undefined) delete process.env.COURTLISTENER_TOKEN; else process.env.COURTLISTENER_TOKEN = previous;
+  }
+}
+
+const runScreen = (baseUrl, path = '/api/cron/screen?run=1') => fetch(`${baseUrl}${path}`, { headers: { authorization: `Bearer ${process.env.CRON_SECRET}` } });
+
+test("the screen route is closed without the scheduler's secret, screens the due decisions and records its run as screen, with or without its run number", async () => {
+  const world = screenWorld();
+  const server = await startServer(app);
+  try {
+    await capturingLogs(() => withScreenSettings({}, () => withoutMail(() => withOutboundHttp(world.handler, async () => {
+      assert.equal((await fetch(`${server.baseUrl}/api/cron/screen?run=1`)).status, 401);
+      assert.equal((await fetch(`${server.baseUrl}/api/cron/screen`, { headers: { authorization: 'Bearer not-the-secret' } })).status, 401);
+      assert.equal(world.courtListener.length, 0, 'CourtListener was asked on a request without the secret');
+      assert.equal(world.sql.length, 0);
+
+      for (const [i, path] of ['/api/cron/screen?run=1', '/api/cron/screen?run=2', '/api/cron/screen'].entries()) {
+        usageInserts.length = 0;
+        world.courtListener.length = 0;
+        const response = await runScreen(server.baseUrl, path);
+        assert.equal(response.status, 200, path);
+        assert.deepEqual(await response.json(), { ok: true, screened: 1, cleared: 1, held: 0, requests: 1, notifyFailed: 0, stoppedBecause: null, failed: [] }, path);
+        assert.equal(world.courtListener.length, 2, 'one read of the usage report and one question');
+        assert.ok(world.courtListener[0].includes('/api-usage/'));
+        const asked = new URL(world.courtListener[1]).searchParams;
+        assert.ok(asked.get('q').startsWith('cites:(5534961) AND ("Licari overrule"~15 OR '), asked.get('q'));
+        assert.equal(asked.get('order_by'), 'dateFiled desc');
+        assert.equal(asked.get('court'), null, 'the citing question asks every court');
+        assert.deepEqual(usageInserts.map(params => params.slice(1)), [['screen', '1']]);
+        assert.equal(String(world.jobRuns[i][0]), 'screen');
+        assert.equal(String(world.jobRuns[i][1]), 'true');
+      }
+      const clear = world.sql.find(call => /^UPDATE case_library SET screen_state = 'clear'/.test(call.query));
+      assert.equal(String(clear.params.at(-1)), '5685956');
+    }))));
+  } finally {
+    await server.close();
+  }
+});
+
+test('a decision the screen holds is emailed to the owner, naming the site and the decision', async () => {
+  const later = { cluster_id: 10717771, absolute_url: '/opinion/10717771/later-v-case/', caseName: 'Later v. Case', court: 'New York Court of Appeals', court_id: 'ny', dateFiled: '2025-10-21', opinions: [{ snippet: 'a made-up passage: the <mark>objection</mark> was <mark>overruled</mark>' }] };
+  const world = screenWorld({ results: [later] });
+  const server = await startServer(app);
+  try {
+    await capturingLogs(() => withScreenSettings({}, () => withOperatorMail(async sent => {
+      await withOutboundHttp(world.handler, async () => {
+        const response = await runScreen(server.baseUrl);
+        assert.equal(response.status, 200);
+        assert.deepEqual(await response.json(), { ok: true, screened: 1, cleared: 0, held: 1, requests: 1, notifyFailed: 0, stoppedBecause: null, failed: [] });
+      });
+      const held = world.sql.find(call => /^UPDATE case_library SET screen_state = 'held'/.test(call.query));
+      assert.equal(JSON.parse(held.params[2]).later.case_name, 'Later v. Case');
+      assert.equal(sent.length, 1);
+      assert.ok(sent[0].subject.startsWith('NYCMalpractice.ai: ') && sent[0].subject.includes('Licari v. Elliott'), sent[0].subject);
+      assert.ok(sent[0].html.includes('a made-up passage: the objection was overruled'), sent[0].html);
+    })));
+  } finally {
+    await server.close();
+  }
+});
+
+test('the screen route answers 500 and emails the failed step when the token is missing, sending nothing to CourtListener', async () => {
+  const world = screenWorld();
+  const server = await startServer(app);
+  try {
+    await capturingLogs(() => withScreenSettings({ token: null }, () => withOperatorMail(async sent => {
+      await withOutboundHttp(world.handler, async () => {
+        const response = await runScreen(server.baseUrl);
+        assert.equal(response.status, 500);
+        assert.deepEqual(await response.json(), { ok: false, screened: null, cleared: null, held: null, requests: null, notifyFailed: null, stoppedBecause: null, failed: ['screen the case library'] });
+      });
+      assert.equal(world.courtListener.length, 0);
+      assert.equal(String(world.jobRuns[0][0]), 'screen');
+      assert.equal(String(world.jobRuns[0][1]), 'false');
+      assert.match(String(world.jobRuns[0][2]), /COURTLISTENER_TOKEN is not set in this deployment/);
+      assert.equal(sent.length, 1);
+      assert.match(sent[0].subject, /1 step of the screen job failed/);
+    })));
+  } finally {
+    await server.close();
+  }
+});
+
+test('a refused or unanswered screen question makes the route answer 500 and record the run as failed; a refusal writes nothing, a first failure only the try time', async () => {
+  const server = await startServer(app);
+  try {
+    for (const status of [429, 503]) {
+      const world = screenWorld({ searchStatus: status });
+      await capturingLogs(() => withScreenSettings({}, () => withOperatorMail(async sent => {
+        await withOutboundHttp(world.handler, async () => {
+          const response = await runScreen(server.baseUrl);
+          assert.equal(response.status, 500);
+          assert.deepEqual((await response.json()).failed, ['screen the case library']);
+        });
+        assert.equal(String(world.jobRuns[0][1]), 'false');
+        assert.match(String(world.jobRuns[0][2]), new RegExp(`CourtListener answered ${status} to the screen of 5685956; the run stopped`));
+        const tried = world.sql.filter(call => /^UPDATE case_library SET screen_tried_at/.test(call.query) && String(call.params.at(-1)) === '5685956');
+        assert.equal(tried.length, status === 429 ? 0 : 1, `${status}: the try time`);
+        assert.ok(!world.sql.some(call => /^UPDATE case_library SET screen_state/.test(call.query)), 'the decision changed its state');
+        assert.equal(sent.length, 1, 'only the failed step is emailed');
+      })));
+    }
+  } finally {
+    await server.close();
+  }
+});
+
 test("the daily summary carries a case library section: counts by type, the types short of clear decisions, the day's requests and replies, and what is left of the allowance", async () => {
   const { sendDailyDigest } = await import('../operations.js');
   const { CASE_TOPICS } = await import('../case-topics.js');

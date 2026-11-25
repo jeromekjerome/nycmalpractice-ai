@@ -2,9 +2,13 @@
   "version": 2,
   "framework": null,
   "functions": {
-    "api/*.js": {
+    "api/index.js": {
       "includeFiles": "{public,rubrics,content}/**",
       "maxDuration": 60
+    },
+    "api/jobs.js": {
+      "includeFiles": "{public,rubrics,content}/**",
+      "maxDuration": 300
     }
   },
   "redirects": [
@@ -23,11 +27,31 @@
   ],
   "rewrites": [
     {
+      "source": "/api/cron/library",
+      "destination": "/api/jobs"
+    },
+    {
+      "source": "/api/cron/screen",
+      "destination": "/api/jobs"
+    },
+    {
       "source": "/(.*)",
       "destination": "/api"
     }
   ],
   "crons": [
+    {
+      "path": "/api/cron/library",
+      "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/screen?run=1",
+      "schedule": "0 4 * * *"
+    },
+    {
+      "path": "/api/cron/screen?run=2",
+      "schedule": "0 5 * * *"
+    },
     {
       "path": "/api/cron/statute-watch",
       "schedule": "0 6 * * *"

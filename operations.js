@@ -15,6 +15,9 @@ import { DEFAULTS } from './models.js';
 import { SITE_NAME, CURRENT_LAW_FILE } from './gate-config.js';
 import { readLawFile } from './law-file.js';
 import { statuteWatchSummary } from './statute-watch.js';
+import { libraryCounts } from './case-library.js';
+import { usageToday, readAllowance } from './courtlistener-usage.js';
+import { CASE_TOPICS } from './case-topics.js';
 
 const sql = neon(process.env.DATABASE_URL);
 const SITE = SITE_NAME;
@@ -206,6 +209,37 @@ async function statuteWatchSection() {
   }
 }
 
+// The daily summary's part on the case library (case-library.js): per case type the clear, unscreened and held decisions, the
+// types with too few clear ones to be offered to a reply, the day's CourtListener requests by job, the replies given from the
+// library and live (counted under the jobs below), and what the token has left today. This app has no pinned decisions, so the
+// section has no line for them. Never fails: what cannot be read says so, and the rest of the summary goes as it was.
+const MIN_CLEAR_DECISIONS = 5;
+const REPLIES_FROM_LIBRARY = 'replies-library';
+const REPLIES_LIVE = 'replies-live';
+const ALLOWANCE_READ_MS = 5000;
+
+async function caseLibrarySection() {
+  try {
+    const [counts, usage] = await Promise.all([libraryCounts(sql), usageToday(sql)]);
+    const token = process.env.COURTLISTENER_TOKEN;
+    const allowance = token ? await timeLimit(readAllowance({ token }), ALLOWANCE_READ_MS, 'The usage report').catch(() => null) : null;
+    const types = Object.keys(CASE_TOPICS);
+    const of = type => counts.byType[type] || { clear: 0, unscreened: 0, held: 0 };
+    const few = types.filter(type => of(type).clear < MIN_CLEAR_DECISIONS);
+    const isReply = row => row.job.startsWith('replies-');
+    const requests = usage.filter(row => !isReply(row));
+    const repliesOf = job => usage.find(row => row.job === job)?.requests ?? 0;
+    return `<ul>${types.map(type => `<li>${escapeHtml(type)}: ${of(type).clear} clear, ${of(type).unscreened} unscreened, ${of(type).held} held</li>`).join('')}</ul>` +
+      `<p>Types with fewer than ${MIN_CLEAR_DECISIONS} clear decisions: ${few.length ? few.map(escapeHtml).join(', ') : 'none'}.</p>` +
+      `<p>CourtListener requests today: ${requests.length ? requests.map(row => `${escapeHtml(row.job)} ${row.requests}`).join(', ') : 'none'}.</p>` +
+      `<p>Replies today: ${repliesOf(REPLIES_FROM_LIBRARY)} from the library, ${repliesOf(REPLIES_LIVE)} live.</p>` +
+      `<p>${allowance ? `CourtListener allowance left: ${allowance.day} today, ${allowance.hour} this hour.` : 'The CourtListener allowance left could not be read.'}</p>`;
+  } catch (err) {
+    console.error('[digest] The case library could not be read, so the summary says so:', withoutKeys(err?.message ?? err));
+    return '<p>The case library could not be read for this summary.</p>';
+  }
+}
+
 function repliesLine({ rows, first }) {
   const counted = list => list.map(row => `${escapeHtml(row.model)} ${row.replies}`).join(', ');
   if (!rows.length) return '<p>Replies by the model that wrote them: none.</p>';
@@ -231,7 +265,7 @@ let deepHealthCache = { at: 0, value: null };
 export async function deepHealth() {
   const cacheMs = Number(process.env.HEALTH_DEEP_CACHE_MS ?? 30_000);
   if (deepHealthCache.value && Date.now() - deepHealthCache.at < cacheMs) return deepHealthCache.value;
-  const checks = { database: 'down', schema: 'unknown', nightlyJob: 'unknown', statuteWatch: 'unknown', statuteWatchLastOk: null };
+  const checks = { database: 'down', schema: 'unknown', nightlyJob: 'unknown', statuteWatch: 'unknown', statuteWatchLastOk: null, library: 'unknown', screen: 'unknown' };
   try {
     await timeLimit(sql`SELECT 1`, 3000, 'The database');
     checks.database = 'ok';
@@ -260,12 +294,24 @@ export async function deepHealth() {
         : Date.now() - new Date(watch.last_run).getTime() > 26 * HOUR ? 'late'
           : watch.last_ok ? 'ok' : 'failed';
       checks.statuteWatchLastOk = watch?.last_ok_at ? new Date(watch.last_ok_at).toISOString() : null;
+      // The case library's nightly refresh and its screening, judged the same way.
+      const judged = job => (!job?.last_run ? 'not run yet'
+        : Date.now() - new Date(job.last_run).getTime() > 26 * HOUR ? 'late'
+          : job.last_ok ? 'ok' : 'failed');
+      const [library] = await timeLimit(sql`
+        SELECT (SELECT ok FROM job_runs WHERE job = 'library' ORDER BY ran_at DESC LIMIT 1) AS last_ok,
+               (SELECT max(ran_at) FROM job_runs WHERE job = 'library') AS last_run`, 3000, 'The case library check');
+      checks.library = judged(library);
+      const [screen] = await timeLimit(sql`
+        SELECT (SELECT ok FROM job_runs WHERE job = 'screen' ORDER BY ran_at DESC LIMIT 1) AS last_ok,
+               (SELECT max(ran_at) FROM job_runs WHERE job = 'screen') AS last_run`, 3000, 'The screening check');
+      checks.screen = judged(screen);
     }
   } catch (err) {
     console.error('[health] deep check failed:', err.message);
   }
   const ok = checks.database === 'ok' && checks.schema === 'ok' && ['ok', 'not run yet'].includes(checks.nightlyJob)
-    && ['ok', 'not run yet'].includes(checks.statuteWatch);
+    && ['ok', 'not run yet'].includes(checks.statuteWatch) && ['ok', 'not run yet'].includes(checks.library) && ['ok', 'not run yet'].includes(checks.screen);
   deepHealthCache = { at: Date.now(), value: { ok, ...checks } };
   return deepHealthCache.value;
 }
@@ -325,6 +371,8 @@ export async function sendDailyDigest({ failed = [] } = {}) {
   const replies = await repliesByModel();
   // Never fails: a watch that cannot be read leaves its section out.
   const watch = await statuteWatchSection();
+  // Never fails: a library that cannot be read says so in its own section.
+  const library = await caseLibrarySection();
   const row = (label, value) => `<tr><td style="color:#666;padding:4px 12px 4px 0">${label}</td><td><strong>${escapeHtml(value ?? 0)}</strong></td></tr>`;
   const html = `
     <div style="font-family:sans-serif;max-width:600px">
@@ -346,6 +394,7 @@ export async function sendDailyDigest({ failed = [] } = {}) {
       ${replies ? repliesLine(replies) : ''}
       ${override ? overrideLine(override) : ''}
       ${watch ? `<h3 style="margin-bottom:0.25rem">Statute watch</h3>${watch}` : ''}
+      <h3 style="margin-bottom:0.25rem">Case library</h3>${library}
       <p>${failed.length ? `The nightly job had ${failed.length} failed step${failed.length === 1 ? '' : 's'}: ${failed.map(f => escapeHtml(f.step)).join(', ')}.` : 'The nightly job ran every step.'}</p>
     </div>`;
   await notifyOperator(`${SITE} daily summary: ${day?.messages || 0} messages, ${day?.requests || 0} contact requests, ${day?.leads || 0} leads`, html);

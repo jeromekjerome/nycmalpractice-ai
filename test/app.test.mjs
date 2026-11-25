@@ -1470,21 +1470,28 @@ test('Vercel permanently redirects only the www host to the canonical domain', (
   }]);
 });
 
-test('Vercel uses the bounded single-function setup and protects static responses', async () => {
+test('Vercel uses the bounded two-function setup and protects static responses', async () => {
   const vercel = JSON.parse(readFileSync(new URL('../vercel.json', import.meta.url), 'utf8'));
   assert.equal(vercel.framework, null);
   assert.equal(vercel.builds, undefined);
   assert.equal(vercel.routes, undefined);
   assert.deepEqual(vercel.functions, {
-    'api/*.js': { includeFiles: '{public,rubrics,content}/**', maxDuration: 60 },
+    'api/index.js': { includeFiles: '{public,rubrics,content}/**', maxDuration: 60 },
+    'api/jobs.js': { includeFiles: '{public,rubrics,content}/**', maxDuration: 300 },
   });
-  assert.deepEqual(vercel.rewrites, [{ source: '/(.*)', destination: '/api' }]);
-  assert.deepEqual(vercel.crons, [{ path: '/api/cron/statute-watch', schedule: '0 6 * * *' }, { path: '/api/cron', schedule: '0 7 * * *' }]);
+  assert.deepEqual(vercel.rewrites, [
+    { source: '/api/cron/library', destination: '/api/jobs' },
+    { source: '/api/cron/screen', destination: '/api/jobs' },
+    { source: '/(.*)', destination: '/api' },
+  ]);
   const all = vercel.headers.find(rule => rule.source === '/(.*)');
   const { SECURITY_HEADERS } = await import('../security-headers.js');
   assert.deepEqual(Object.fromEntries(all.headers.map(({ key, value }) => [key, value])), { ...SECURITY_HEADERS });
   const { default: entryPoint } = await import('../api/index.js');
   assert.equal(entryPoint, app);
+  // The jobs function is the same app with a longer time limit.
+  const { default: jobsEntryPoint } = await import('../api/jobs.js');
+  assert.equal(jobsEntryPoint, app);
 });
 
 test('the blog articles state the New York malpractice rules correctly', () => {
@@ -5374,6 +5381,7 @@ test('/health/deep reports the database, its columns and the nightly job, for an
     if (/^SELECT 1$/.test(q)) return rowsResponse([['?column?', INT]], [['1']]);
     if (/FROM information_schema\.columns/.test(q)) return rowsResponse([['col', TEXT]], (world.columns || columns).map(col => [col]));
     if (/FROM job_runs WHERE job = 'statute-watch'/.test(q)) return rowsResponse([['last_ok', BOOL], ['last_run', TIMESTAMPTZ], ['last_ok_at', TIMESTAMPTZ]], [[null, null, null]]);
+    if (/FROM job_runs WHERE job = '(library|screen)'/.test(q)) return rowsResponse([['last_ok', BOOL], ['last_run', TIMESTAMPTZ]], [[null, null]]);
     if (/FROM job_runs/.test(q)) return rowsResponse([['last_ok', BOOL], ['last_run', TIMESTAMPTZ]], [[world.lastOk ?? 't', world.lastRun ?? pgTime(Date.now() - 3600_000)]]);
     return jsonResponse(EMPTY_ROWS);
   };
@@ -5384,15 +5392,15 @@ test('/health/deep reports the database, its columns and the nightly job, for an
   };
   try {
     await capturingLogs(() => withOutboundHttp(handler, async () => {
-      assert.deepEqual(await check(), { status: 200, body: { ok: true, database: 'ok', schema: 'ok', nightlyJob: 'ok', statuteWatch: 'not run yet', statuteWatchLastOk: null } });
+      assert.deepEqual(await check(), { status: 200, body: { ok: true, database: 'ok', schema: 'ok', nightlyJob: 'ok', statuteWatch: 'not run yet', statuteWatchLastOk: null, library: 'not run yet', screen: 'not run yet' } });
       world = { columns: columns.slice(1) };
-      assert.deepEqual((await check()).body, { ok: false, database: 'ok', schema: 'missing columns', nightlyJob: 'ok', statuteWatch: 'not run yet', statuteWatchLastOk: null });
+      assert.deepEqual((await check()).body, { ok: false, database: 'ok', schema: 'missing columns', nightlyJob: 'ok', statuteWatch: 'not run yet', statuteWatchLastOk: null, library: 'not run yet', screen: 'not run yet' });
       world = { lastOk: 'f' };
       assert.equal((await check()).body.nightlyJob, 'failed');
       world = { lastRun: pgTime(Date.now() - 30 * 3600_000) };
       assert.equal((await check()).status, 503);
       world = { down: true };
-      assert.deepEqual(await check(), { status: 503, body: { ok: false, database: 'down', schema: 'unknown', nightlyJob: 'unknown', statuteWatch: 'unknown', statuteWatchLastOk: null } });
+      assert.deepEqual(await check(), { status: 503, body: { ok: false, database: 'down', schema: 'unknown', nightlyJob: 'unknown', statuteWatch: 'unknown', statuteWatchLastOk: null, library: 'unknown', screen: 'unknown' } });
     }));
   } finally {
     if (previous === undefined) delete process.env.HEALTH_DEEP_CACHE_MS; else process.env.HEALTH_DEEP_CACHE_MS = previous;
@@ -5416,13 +5424,14 @@ test("/health/deep fails a database that lacks the provider state's table, the m
       return rowsResponse([['col', TEXT]], older.map(col => [col]));
     }
     if (/FROM job_runs WHERE job = 'statute-watch'/.test(q)) return rowsResponse([['last_ok', BOOL], ['last_run', TIMESTAMPTZ], ['last_ok_at', TIMESTAMPTZ]], [[null, null, null]]);
+    if (/FROM job_runs WHERE job = '(library|screen)'/.test(q)) return rowsResponse([['last_ok', BOOL], ['last_run', TIMESTAMPTZ]], [[null, null]]);
     if (/FROM job_runs/.test(q)) return rowsResponse([['last_ok', BOOL], ['last_run', TIMESTAMPTZ]], [['t', new Date(Date.now() - 3600_000).toISOString().replace('T', ' ').replace('Z', '+00')]]);
     return jsonResponse(EMPTY_ROWS);
   };
   const server = await startServer(app);
   try {
     const { result, logs } = await capturingLogs(() => withOutboundHttp(handler, async () => (await fetch(`${server.baseUrl}/health/deep`)).json()));
-    assert.deepEqual(result, { ok: false, database: 'ok', schema: 'missing columns', nightlyJob: 'ok', statuteWatch: 'not run yet', statuteWatchLastOk: null });
+    assert.deepEqual(result, { ok: false, database: 'ok', schema: 'missing columns', nightlyJob: 'ok', statuteWatch: 'not run yet', statuteWatchLastOk: null, library: 'not run yet', screen: 'not run yet' });
     for (const table of ['ai_provider_state', 'app_settings', 'model_measurements', 'provider_model_lists', 'statute_watch', 'unconfirmed_charges', 'courtlistener_usage', 'case_library', 'library_topics']) assert.ok(asked.includes(table), `${table} was not looked for`);
     assert.ok(logs.includes('[health] the database is missing columns the code uses: ai_provider_state.failed_replies, app_settings.value, model_measurements.bar_ok, provider_model_lists.models, statute_watch.unread_emailed_at, unconfirmed_charges.firm_id, courtlistener_usage.requests, case_library.screen_tried_at, library_topics.last_found'), logs.join('\n'));
   } finally {
@@ -7411,6 +7420,7 @@ test('/health/deep reports the statute watch: not run yet is healthy, failed and
   const now = Math.floor(Date.now() / 1000) * 1000;
   const lastGood = now - 3 * 3600_000;
   let watch = null; // { lastOk, lastRun, lastOkAt }, or null for no run yet
+  const libraryJobs = { library: null, screen: null }; // { lastOk, lastRun }, or null for no run yet
   let present = columns;
   const handler = async (url, init) => {
     const q = JSON.parse(init.body).query.replace(/\s+/g, ' ').trim();
@@ -7419,6 +7429,11 @@ test('/health/deep reports the statute watch: not run yet is healthy, failed and
     if (/FROM job_runs WHERE job = 'statute-watch'/.test(q)) {
       return rowsResponse([['last_ok', BOOL], ['last_run', TIMESTAMPTZ], ['last_ok_at', TIMESTAMPTZ]],
         [watch ? [watch.lastOk, pgTime(watch.lastRun), watch.lastOkAt ? pgTime(watch.lastOkAt) : null] : [null, null, null]]);
+    }
+    const libraryJob = /FROM job_runs WHERE job = '(library|screen)'/.exec(q);
+    if (libraryJob) {
+      const run = libraryJobs[libraryJob[1]];
+      return rowsResponse([['last_ok', BOOL], ['last_run', TIMESTAMPTZ]], [run ? [run.lastOk, pgTime(run.lastRun)] : [null, null]]);
     }
     if (/FROM job_runs/.test(q)) return rowsResponse([['last_ok', BOOL], ['last_run', TIMESTAMPTZ]], [['t', pgTime(now - 3600_000)]]);
     return jsonResponse(EMPTY_ROWS);
@@ -7430,12 +7445,12 @@ test('/health/deep reports the statute watch: not run yet is healthy, failed and
   };
   try {
     await capturingLogs(() => withOutboundHttp(handler, async () => {
-      assert.deepEqual(await check(), { status: 200, body: { ok: true, database: 'ok', schema: 'ok', nightlyJob: 'ok', statuteWatch: 'not run yet', statuteWatchLastOk: null } });
+      assert.deepEqual(await check(), { status: 200, body: { ok: true, database: 'ok', schema: 'ok', nightlyJob: 'ok', statuteWatch: 'not run yet', statuteWatchLastOk: null, library: 'not run yet', screen: 'not run yet' } });
       watch = { lastOk: 't', lastRun: lastGood, lastOkAt: lastGood };
-      assert.deepEqual(await check(), { status: 200, body: { ok: true, database: 'ok', schema: 'ok', nightlyJob: 'ok', statuteWatch: 'ok', statuteWatchLastOk: new Date(lastGood).toISOString() } });
+      assert.deepEqual(await check(), { status: 200, body: { ok: true, database: 'ok', schema: 'ok', nightlyJob: 'ok', statuteWatch: 'ok', statuteWatchLastOk: new Date(lastGood).toISOString(), library: 'not run yet', screen: 'not run yet' } });
       // The last run failed (an earlier one was good): not healthy, and the time of the last good one is reported.
       watch = { lastOk: 'f', lastRun: now - 3600_000, lastOkAt: lastGood - 24 * 3600_000 };
-      assert.deepEqual(await check(), { status: 503, body: { ok: false, database: 'ok', schema: 'ok', nightlyJob: 'ok', statuteWatch: 'failed', statuteWatchLastOk: new Date(lastGood - 24 * 3600_000).toISOString() } });
+      assert.deepEqual(await check(), { status: 503, body: { ok: false, database: 'ok', schema: 'ok', nightlyJob: 'ok', statuteWatch: 'failed', statuteWatchLastOk: new Date(lastGood - 24 * 3600_000).toISOString(), library: 'not run yet', screen: 'not run yet' } });
       // Longer than 26 hours since the last run, however it ended.
       watch = { lastOk: 't', lastRun: now - 30 * 3600_000, lastOkAt: now - 30 * 3600_000 };
       const late = await check();
@@ -7455,9 +7470,301 @@ test('/health/deep reports the statute watch: not run yet is healthy, failed and
   }
 });
 
-test('vercel.json schedules the statute watch at 06:00 UTC and the nightly job at 07:00', () => {
+test('/health/deep judges the library refresh and the screening as it judges the statute watch: not run yet is healthy, failed and late are not', async () => {
+  const previous = process.env.HEALTH_DEEP_CACHE_MS;
+  process.env.HEALTH_DEEP_CACHE_MS = '0';
+  const columns = ['firms.card_declined_at', 'leads.decline_reason', 'user_interactions.outcome', 'job_runs.ran_at', 'ai_usage.created_at', 'auctions.reminder_sent_at',
+    'ai_provider_state.failed_replies', 'app_settings.value', 'model_measurements.bar_ok', 'provider_model_lists.models', 'statute_watch.unread_emailed_at', 'unconfirmed_charges.firm_id', 'courtlistener_usage.requests', 'case_library.screen_tried_at', 'library_topics.last_found'];
+  const pgTime = ms => new Date(ms).toISOString().replace('T', ' ').replace('Z', '+00');
+  const now = Date.now();
+  const jobs = { library: null, screen: null }; // { lastOk, lastRun }, or null for no run yet
+  const asked = [];
+  const handler = async (url, init) => {
+    const q = JSON.parse(init.body).query.replace(/\s+/g, ' ').trim();
+    if (/^SELECT 1$/.test(q)) return rowsResponse([['?column?', INT]], [['1']]);
+    if (/FROM information_schema\.columns/.test(q)) return rowsResponse([['col', TEXT]], columns.map(col => [col]));
+    if (/FROM job_runs WHERE job = 'statute-watch'/.test(q)) return rowsResponse([['last_ok', BOOL], ['last_run', TIMESTAMPTZ], ['last_ok_at', TIMESTAMPTZ]], [[null, null, null]]);
+    const job = /FROM job_runs WHERE job = '(library|screen)'/.exec(q);
+    if (job) {
+      asked.push(job[1]);
+      const run = jobs[job[1]];
+      return rowsResponse([['last_ok', BOOL], ['last_run', TIMESTAMPTZ]], [run ? [run.lastOk, pgTime(run.lastRun)] : [null, null]]);
+    }
+    if (/FROM job_runs/.test(q)) return rowsResponse([['last_ok', BOOL], ['last_run', TIMESTAMPTZ]], [['t', pgTime(now - 3600_000)]]);
+    return jsonResponse(EMPTY_ROWS);
+  };
+  const server = await startServer(app);
+  const check = async () => {
+    const response = await fetch(server.baseUrl + '/health/deep');
+    return { status: response.status, body: await response.json() };
+  };
+  try {
+    await capturingLogs(() => withOutboundHttp(handler, async () => {
+      let answer = await check();
+      assert.deepEqual([answer.status, answer.body.library, answer.body.screen], [200, 'not run yet', 'not run yet']);
+      assert.deepEqual(asked, ['library', 'screen']);
+      jobs.library = { lastOk: 't', lastRun: now - 3600_000 };
+      jobs.screen = { lastOk: 't', lastRun: now - 2 * 3600_000 };
+      answer = await check();
+      assert.deepEqual([answer.status, answer.body.ok, answer.body.library, answer.body.screen], [200, true, 'ok', 'ok']);
+      // A failed last run of either is not healthy.
+      jobs.library = { lastOk: 'f', lastRun: now - 3600_000 };
+      answer = await check();
+      assert.deepEqual([answer.status, answer.body.library, answer.body.screen], [503, 'failed', 'ok']);
+      jobs.library = { lastOk: 't', lastRun: now - 3600_000 };
+      jobs.screen = { lastOk: 'f', lastRun: now - 3600_000 };
+      answer = await check();
+      assert.deepEqual([answer.status, answer.body.library, answer.body.screen], [503, 'ok', 'failed']);
+      // Longer than 26 hours since the last run, however it ended.
+      jobs.screen = { lastOk: 't', lastRun: now - 30 * 3600_000 };
+      answer = await check();
+      assert.deepEqual([answer.status, answer.body.library, answer.body.screen], [503, 'ok', 'late']);
+    }));
+  } finally {
+    if (previous === undefined) delete process.env.HEALTH_DEEP_CACHE_MS; else process.env.HEALTH_DEEP_CACHE_MS = previous;
+    await server.close();
+  }
+});
+
+test('vercel.json schedules the library refresh and the screening before the statute watch at 06:00 UTC and the nightly job at 07:00, and gives the jobs a function with five minutes', () => {
   const vercel = JSON.parse(readFileSync(new URL('../vercel.json', import.meta.url), 'utf8'));
-  assert.deepEqual(vercel.crons.find(cron => cron.path === '/api/cron/statute-watch'), { path: '/api/cron/statute-watch', schedule: '0 6 * * *' });
-  assert.deepEqual(vercel.crons.find(cron => cron.path === '/api/cron'), { path: '/api/cron', schedule: '0 7 * * *' });
-  assert.equal(vercel.crons.length, 2);
+  assert.deepEqual(vercel.crons, [
+    { path: '/api/cron/library', schedule: '0 3 * * *' },
+    { path: '/api/cron/screen?run=1', schedule: '0 4 * * *' },
+    { path: '/api/cron/screen?run=2', schedule: '0 5 * * *' },
+    { path: '/api/cron/statute-watch', schedule: '0 6 * * *' },
+    { path: '/api/cron', schedule: '0 7 * * *' },
+  ]);
+  const includeFiles = '{public,rubrics,content}/**';
+  assert.deepEqual(vercel.functions, {
+    'api/index.js': { includeFiles, maxDuration: 60 },
+    'api/jobs.js': { includeFiles, maxDuration: 300 },
+  });
+  const sources = vercel.rewrites.map(rewrite => rewrite.source);
+  assert.deepEqual(vercel.rewrites.slice(0, 2), [
+    { source: '/api/cron/library', destination: '/api/jobs' },
+    { source: '/api/cron/screen', destination: '/api/jobs' },
+  ]);
+  assert.equal(sources.at(-1), '/(.*)', 'the catch-all stays last');
+  assert.equal(readFileSync(new URL('../api/jobs.js', import.meta.url), 'utf8').includes("export { default } from '../server.js';"), true);
+});
+
+// ─── The case library's topic searches ───
+
+test('the topic searches cover each case type the classifier gives, five each and two for other, with unique ids that begin with their type, in plain words that name no statute and state no period or amount', async () => {
+  const { CASE_TOPICS } = await import('../case-topics.js');
+  const { findStatuteCitations, findStatedPeriods } = await import('../law-citations.js');
+  const ask = readFileSync(new URL('../ask.js', import.meta.url), 'utf8');
+  const caseTypes = [...(/const CASE_TYPE_NAMES = \{([\s\S]*?)\};/.exec(ask)?.[1] ?? '').matchAll(/^\s*(\w+):/gm)].map(match => match[1]);
+  assert.equal(caseTypes.length, 9);
+  assert.deepEqual(Object.keys(CASE_TOPICS), caseTypes);
+  const ids = [];
+  for (const [type, topics] of Object.entries(CASE_TOPICS)) {
+    assert.equal(topics.length, type === 'other' ? 2 : 5, type);
+    for (const topic of topics) {
+      assert.deepEqual(Object.keys(topic), ['id', 'q'], topic.id);
+      assert.match(topic.id, new RegExp(`^${type.replace(/_/g, '-')}-[a-z0-9]+(?:-[a-z0-9]+)*$`));
+      // Plain lowercase words: no digit, sign, quote or search operator.
+      assert.match(topic.q, /^[a-z]+(?:[ -][a-z]+)+$/, topic.id);
+      assert.doesNotMatch(topic.q, /\b(?:law|statute|act|section|code)\b/, topic.id);
+      assert.deepEqual(findStatuteCitations(topic.q), [], topic.id);
+      assert.deepEqual(findStatedPeriods(topic.q), [], topic.id);
+      ids.push(topic.id);
+    }
+  }
+  assert.equal(new Set(ids).size, ids.length, 'a topic id is used twice');
+});
+
+// ─── The case library's nightly refresh: its route and its place in the daily summary ───
+// CourtListener is answered here from the recorded usage report and search result; the database answers every statement with no
+// rows. Nothing reaches the network or a database. This app has no pinned decisions, so the refresh never looks any up.
+
+const CL_USAGE_REPORT = JSON.parse(readFileSync(new URL('./fixtures/cl-api-usage.json', import.meta.url), 'utf8'));
+const CL_LIBRARY_RESULT = JSON.parse(readFileSync(new URL('./fixtures/cl-search-result.json', import.meta.url), 'utf8'));
+const FIRST_TOPIC = 'surgical-error-departure';
+
+// The usage report with the token's day and hour left as given (the report's own other rows are kept).
+function usageReportWith({ day, hour }) {
+  const left = { 86400: day, 3600: hour };
+  return { current_usage: CL_USAGE_REPORT.current_usage.map(row => (row.scope === 'user' && left[row.window_seconds] !== undefined ? { ...row, remaining: left[row.window_seconds] } : row)) };
+}
+
+function libraryWorld({ searchStatus = 200, usage = CL_USAGE_REPORT } = {}) {
+  const world = { courtListener: [], sql: [], jobRuns: [] };
+  world.handler = async (url, init = {}) => {
+    if (url.startsWith('https://www.courtlistener.com/')) {
+      world.courtListener.push(url);
+      if (url.includes('/api-usage/')) return jsonResponse(usage);
+      if (url.includes('/search/')) return searchStatus === 200 ? jsonResponse({ count: 1, results: [CL_LIBRARY_RESULT] }) : jsonResponse({ detail: 'Request was throttled.' }, searchStatus);
+      throw new Error(`Unexpected CourtListener request in test: ${url}`);
+    }
+    if (!url.endsWith('/sql')) throw new Error(`Unexpected outbound request in test: ${url}`);
+    const { query, params } = JSON.parse(init.body);
+    const q = query.replace(/\s+/g, ' ').trim();
+    world.sql.push({ query: q, params });
+    if (/^INSERT INTO job_runs/.test(q)) world.jobRuns.push(params);
+    return jsonResponse(EMPTY_ROWS);
+  };
+  return world;
+}
+
+async function withLibrarySettings({ token = 'cl-test-token', searches = '1' } = {}, fn) {
+  const names = { COURTLISTENER_TOKEN: token, LIBRARY_SEARCHES_PER_NIGHT: searches };
+  const previous = Object.fromEntries(Object.keys(names).map(name => [name, process.env[name]]));
+  for (const [name, value] of Object.entries(names)) { if (value == null) delete process.env[name]; else process.env[name] = value; }
+  try {
+    return await fn();
+  } finally {
+    for (const [name, value] of Object.entries(previous)) { if (value === undefined) delete process.env[name]; else process.env[name] = value; }
+  }
+}
+
+const runLibrary = baseUrl => fetch(`${baseUrl}/api/cron/library`, { headers: { authorization: `Bearer ${process.env.CRON_SECRET}` } });
+
+test("the library route is closed without the scheduler's secret, refreshes the library and records its run", async () => {
+  const world = libraryWorld();
+  usageInserts.length = 0;
+  const server = await startServer(app);
+  try {
+    await capturingLogs(() => withLibrarySettings({}, () => withoutMail(() => withOutboundHttp(world.handler, async () => {
+      assert.equal((await fetch(`${server.baseUrl}/api/cron/library`)).status, 401);
+      assert.equal((await fetch(`${server.baseUrl}/api/cron/library`, { headers: { authorization: 'Bearer not-the-secret' } })).status, 401);
+      assert.equal(world.courtListener.length, 0, 'CourtListener was asked on a request without the secret');
+      assert.equal(world.sql.length, 0);
+
+      const { CASE_TOPICS } = await import('../case-topics.js');
+      assert.equal(CASE_TOPICS.surgical_error[0].id, FIRST_TOPIC);
+      const response = await runLibrary(server.baseUrl);
+      assert.equal(response.status, 200);
+      assert.deepEqual(await response.json(), { ok: true, searched: [FIRST_TOPIC], added: 1, dropped: 0, pinsResolved: 0, stoppedBecause: null, failed: [] });
+      assert.equal(world.courtListener.length, 2, 'one read of the usage report and one search');
+      assert.ok(world.courtListener[0].includes('/api-usage/'));
+      const searched = new URL(world.courtListener[1]);
+      assert.ok(searched.pathname.endsWith('/search/') && searched.searchParams.get('stat_Precedential') === 'on');
+      assert.equal(searched.searchParams.get('q'), CASE_TOPICS.surgical_error[0].q);
+      assert.ok(!world.courtListener.some(url => url.includes('/citation-lookup/')), 'a citation lookup was sent with no pins');
+      assert.deepEqual(usageInserts.map(params => params.slice(1)), [['library', '1']]);
+      assert.equal(world.sql.filter(call => /^INSERT INTO case_library .*TRUE\)/.test(call.query)).length, 0, 'a decision was saved pinned');
+      assert.ok(world.sql.some(call => /^INSERT INTO library_topics/.test(call.query) && call.params[0] === FIRST_TOPIC && String(call.params[1]) === '1'));
+      const saved = world.sql.find(call => /^INSERT INTO case_library/.test(call.query) && String(call.params[0]) === '9398198');
+      assert.ok(saved, 'the decision found was not saved');
+      assert.ok(String(saved.params[10]).includes('surgical_error'), 'the decision was not saved under its case type');
+      assert.equal(world.jobRuns.length, 1);
+      assert.equal(String(world.jobRuns[0][0]), 'library');
+      assert.equal(String(world.jobRuns[0][1]), 'true');
+    }))));
+  } finally {
+    await server.close();
+  }
+});
+
+test('the library route stops before any search when the allowance has nothing to spare', async () => {
+  const world = libraryWorld({ usage: usageReportWith({ day: 30, hour: 50 }) });
+  const server = await startServer(app);
+  try {
+    await capturingLogs(() => withLibrarySettings({ searches: null }, () => withoutMail(() => withOutboundHttp(world.handler, async () => {
+      const response = await runLibrary(server.baseUrl);
+      assert.equal(response.status, 200);
+      assert.deepEqual(await response.json(), { ok: true, searched: [], added: 0, dropped: 0, pinsResolved: 0, stoppedBecause: 'allowance', failed: [] });
+      assert.deepEqual(world.courtListener.map(url => url.includes('/api-usage/')), [true], 'only the usage report was read');
+      assert.equal(String(world.jobRuns[0][1]), 'true');
+    }))));
+  } finally {
+    await server.close();
+  }
+});
+
+test('the library route answers 500 and emails the failed step when the token is missing, sending nothing to CourtListener', async () => {
+  const world = libraryWorld();
+  const server = await startServer(app);
+  try {
+    await capturingLogs(() => withLibrarySettings({ token: null }, () => withOperatorMail(async sent => {
+      await withOutboundHttp(world.handler, async () => {
+        const response = await runLibrary(server.baseUrl);
+        assert.equal(response.status, 500);
+        assert.deepEqual(await response.json(), { ok: false, searched: null, added: null, dropped: null, pinsResolved: null, stoppedBecause: null, failed: ['refresh the case library'] });
+      });
+      assert.equal(world.courtListener.length, 0);
+      assert.equal(String(world.jobRuns[0][0]), 'library');
+      assert.equal(String(world.jobRuns[0][1]), 'false');
+      assert.match(String(world.jobRuns[0][2]), /COURTLISTENER_TOKEN is not set in this deployment/);
+      assert.equal(sent.length, 1);
+      assert.match(sent[0].subject, /1 step of the case library job failed/);
+    })));
+  } finally {
+    await server.close();
+  }
+});
+
+test('a throttled topic search makes the library route answer 500, record the run as failed and leave the topic as it was', async () => {
+  const world = libraryWorld({ searchStatus: 429 });
+  const server = await startServer(app);
+  try {
+    await capturingLogs(() => withLibrarySettings({}, () => withOperatorMail(async sent => {
+      await withOutboundHttp(world.handler, async () => {
+        const response = await runLibrary(server.baseUrl);
+        assert.equal(response.status, 500);
+        assert.deepEqual(await response.json(), { ok: false, searched: null, added: null, dropped: null, pinsResolved: null, stoppedBecause: null, failed: ['refresh the case library'] });
+      });
+      assert.equal(String(world.jobRuns[0][1]), 'false');
+      assert.match(String(world.jobRuns[0][2]), new RegExp(`CourtListener answered 429 to the topic search ${FIRST_TOPIC}; the run stopped`));
+      assert.ok(!world.sql.some(call => /^INSERT INTO library_topics|^DELETE FROM case_library/.test(call.query)), 'the topic was marked as run, or stale rows were dropped');
+      assert.equal(sent.length, 1);
+    })));
+  } finally {
+    await server.close();
+  }
+});
+
+test("the daily summary carries a case library section: counts by type, the types short of clear decisions, the day's requests and replies, and what is left of the allowance", async () => {
+  const { sendDailyDigest } = await import('../operations.js');
+  const { CASE_TOPICS } = await import('../case-topics.js');
+  let state = 'ok';
+  const queries = [];
+  const handler = async (url, init = {}) => {
+    if (url.includes('/api-usage/')) return state === 'no-allowance' ? jsonResponse({ detail: 'no' }, 500) : jsonResponse(usageReportWith({ day: 90, hour: 40 }));
+    if (!url.endsWith('/sql')) throw new Error(`Unexpected outbound request in test: ${url}`);
+    const query = JSON.parse(init.body).query.replace(/\s+/g, ' ').trim();
+    queries.push(query);
+    if (/unnest\(case_types\)/.test(query)) {
+      if (state === 'broken') return jsonResponse({ message: 'relation "case_library" does not exist', code: '42P01' }, 400);
+      return rowsResponse([['case_type', TEXT], ['screen_state', TEXT], ['n', INT]], [['surgical_error', 'clear', '6'], ['surgical_error', 'unscreened', '2'], ['misdiagnosis', 'clear', '4'], ['misdiagnosis', 'held', '1']]);
+    }
+    if (/FROM case_library GROUP BY screen_state, pinned/.test(query)) return rowsResponse([['screen_state', TEXT], ['pinned', BOOL], ['n', INT]], [['clear', 'f', '10'], ['unscreened', 'f', '2'], ['held', 'f', '1']]);
+    if (/FROM courtlistener_usage WHERE day/.test(query)) return rowsResponse([['job', TEXT], ['requests', INT]], [['chat-search', '4'], ['library', '10'], ['replies-library', '7'], ['replies-live', '3']]);
+    return jsonResponse(EMPTY_ROWS);
+  };
+  const summaries = [];
+  const { logs } = await capturingLogs(() => withDigest(() => withOperatorMail(async sent => {
+    await withOutboundHttp(handler, async () => {
+      await sendDailyDigest();
+      state = 'no-allowance';
+      await sendDailyDigest();
+      state = 'broken';
+      await sendDailyDigest();
+    });
+    summaries.push(...sent.map(mail => String(mail.html)));
+  })));
+  assert.equal(summaries.length, 3);
+  const [full, noAllowance, broken] = summaries;
+  assert.ok(full.includes('Case library'));
+  assert.ok(full.includes('<li>surgical_error: 6 clear, 2 unscreened, 0 held</li>'), full);
+  assert.ok(full.includes('<li>misdiagnosis: 4 clear, 0 unscreened, 1 held</li>'), full);
+  assert.ok(full.includes('<li>other: 0 clear, 0 unscreened, 0 held</li>'), 'a type with no rows counts as 0');
+  assert.equal((full.match(/<li>[a-z_]+: \d+ clear/g) || []).length, Object.keys(CASE_TOPICS).length, 'every case type has its line');
+  const short = Object.keys(CASE_TOPICS).filter(type => type !== 'surgical_error').join(', ');
+  assert.ok(full.includes(`<p>Types with fewer than 5 clear decisions: ${short}.</p>`), full);
+  assert.ok(full.includes('<p>CourtListener requests today: chat-search 4, library 10.</p>'), full);
+  assert.ok(full.includes('<p>Replies today: 7 from the library, 3 live.</p>'), full);
+  assert.ok(full.includes('<p>CourtListener allowance left: 90 today, 40 this hour.</p>'), full);
+  // This app has no pinned decisions: the summary has no line for them, and asks for none.
+  assert.ok(!full.includes('Pinned'), full);
+  assert.ok(!queries.some(query => /pinned = TRUE/.test(query)), 'the pinned decisions were looked up');
+  assert.ok(full.indexOf('</table>') < full.indexOf('Case library'));
+  assert.ok(full.indexOf('Case library') < full.indexOf('The nightly job ran every step.'));
+  assert.ok(noAllowance.includes('The CourtListener allowance left could not be read.'), noAllowance);
+  assert.ok(noAllowance.includes('<li>surgical_error: 6 clear'), 'the counts still show');
+  assert.ok(broken.includes('The case library could not be read for this summary.'), broken);
+  for (const line of ['the last 24 hours', 'Chat messages', 'Estimated AI spend', 'The nightly job ran every step.']) assert.ok(broken.includes(line), line);
+  assert.ok(logs.some(line => /\[digest\] The case library could not be read/.test(line)), logs.join('\n'));
 });

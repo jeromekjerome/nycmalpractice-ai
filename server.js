@@ -16,6 +16,10 @@ import { createSubscriptionCheckout, createPortalSession, constructWebhookEvent,
 import { runJob, replyClock, MIN_TIME_LEFT_MS, configureProviders, withoutKeys, providerPing, providerStates, adaptersFor } from './providers.js';
 import { modelWatch } from './model-watch.js';
 import { statuteWatch } from './statute-watch.js';
+import { refreshLibrary } from './library-refresh.js';
+import { CASE_TOPICS } from './case-topics.js';
+import { searchTopic, lookupCitations } from './courtlistener.js';
+import { readAllowance } from './courtlistener-usage.js';
 import { sourceReader } from './statute-text.js';
 import { readLawFile, snapshotReader } from './law-file.js';
 import { CURRENT_LAW_FILE, STATUTE_TEXTS_DIR, SITE_NAME } from './gate-config.js';
@@ -1195,6 +1199,42 @@ app.get('/api/cron/statute-watch', async (req, res) => {
       checked: watched?.checked ?? null,
       differing: watched?.differing ?? null,
       unread: watched?.unread ?? null,
+      failed: failed.map(f => f.step),
+    });
+  } catch (err) {
+    serverError(req, res, err);
+  }
+});
+
+// The case library's refresh (library-refresh.js) has a job of its own at 03:00 UTC, answered by the second function
+// (api/jobs.js, five minutes): the topic searches are spaced to keep inside CourtListener's allowance, so a run takes
+// minutes where a reply must not. The token and the limits are read when the step runs. This app's pages cite no decision,
+// so the refresh has no pins to look up.
+const numberSetting = (name, fallback) => (process.env[name] && Number.isFinite(Number(process.env[name])) ? Number(process.env[name]) : fallback);
+
+function refreshCaseLibrary() {
+  const token = process.env.COURTLISTENER_TOKEN;
+  if (!token) throw new Error('COURTLISTENER_TOKEN is not set in this deployment');
+  return refreshLibrary({
+    sqlClient: sql, topics: CASE_TOPICS, pins: [], search: searchTopic, lookupPins: lookupCitations,
+    allowance: () => readAllowance({ token }), maxSearches: numberSetting('LIBRARY_SEARCHES_PER_NIGHT', 10), reserve: numberSetting('COURTLISTENER_RESERVE', 30),
+  });
+}
+
+app.get('/api/cron/library', async (req, res) => {
+  if (!verifyCron(req, res)) return;
+  try {
+    const { results, failed } = await runSteps([['refresh the case library', refreshCaseLibrary]]);
+    await recordJobRun('library', failed).catch(err => console.error('Recording the case library run failed:', err.message));
+    await reportFailedSteps('case library', failed);
+    const refreshed = results['refresh the case library'];
+    res.status(failed.length ? 500 : 200).json({
+      ok: failed.length === 0,
+      searched: refreshed?.searched ?? null,
+      added: refreshed?.added ?? null,
+      dropped: refreshed?.dropped ?? null,
+      pinsResolved: refreshed?.pinsResolved ?? null,
+      stoppedBecause: refreshed ? refreshed.stoppedBecause : null,
       failed: failed.map(f => f.step),
     });
   } catch (err) {

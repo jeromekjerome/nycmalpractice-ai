@@ -66,7 +66,7 @@ export function noticeForReply(caseType, cases, load = loadCurrentLawNotes) {
   try {
     return caseNoticeFor(load(), caseType);
   } catch (err) {
-    console.error('Could not read the case notice:', err.message);
+    console.error('Could not read the case notice:', withoutKeys(err.message));
     return null;
   }
 }
@@ -138,7 +138,7 @@ async function libraryDecisions(caseType, terms) {
     const picked = await pickDecisions(sql, { caseType, terms, limit: LIBRARY_MIN_CLEAR });
     return picked.length > 0 ? picked : null;
   } catch (err) {
-    console.error('Could not read the case library:', err.message);
+    console.error('Could not read the case library:', withoutKeys(err.message));
     return null;
   }
 }
@@ -178,7 +178,7 @@ async function findCases(history, question, clock) {
   const { caseType, terms } = await classifyConversation(history, question, clock);
 
   // The count of the reply is started now and finished before the reply ends, with the saving of what was found.
-  const counting = job => countRequests(sql, job, 1).catch(err => console.error('Could not count the reply:', err.message));
+  const counting = job => countRequests(sql, job, 1).catch(err => console.error('Could not count the reply:', withoutKeys(err.message)));
 
   const fromLibrary = await libraryDecisions(caseType, terms);
   if (fromLibrary) return { caseType, cases: fromLibrary, recalled: false, remembering: counting('replies-library') };
@@ -191,13 +191,13 @@ async function findCases(history, question, clock) {
   // nothing (CourtListener throttled, slow or down), the decisions saved last time are used instead.
   // Either way the library has the say first: what it holds as banned or held is never used or saved.
   try {
-    if (!found) cases = await recallCases(caseType).catch(err => { console.error('Could not read the saved cases:', err.message); return []; });
+    if (!found) cases = await recallCases(caseType).catch(err => { console.error('Could not read the saved cases:', withoutKeys(err.message)); return []; });
     cases = await labelledByLibrary(cases);
-    if (found) remembering.push(rememberCases(caseType, cases).catch(err => console.error('Could not save the cases found:', err.message)));
+    if (found) remembering.push(rememberCases(caseType, cases).catch(err => console.error('Could not save the cases found:', withoutKeys(err.message))));
     else recalled = cases.length > 0;
   } catch (err) {
     // What cannot be checked is not used.
-    console.error('Could not read the screen state of the decisions:', err.message);
+    console.error('Could not read the screen state of the decisions:', withoutKeys(err.message));
     cases = [];
   }
   return { caseType, cases, recalled, remembering: Promise.all(remembering) };
@@ -290,7 +290,7 @@ function rubricPromptBlock(mode, turn) {
   try {
     return renderRubricForPrompt(mode, turn);
   } catch (err) {
-    console.error('[Gatekeeper] Could not render rubric for the system prompt:', err.message);
+    console.error('[Gatekeeper] Could not render rubric for the system prompt:', withoutKeys(err.message));
     return '';
   }
 }

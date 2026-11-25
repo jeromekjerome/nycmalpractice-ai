@@ -1960,12 +1960,12 @@ const libraryPick = (id, name) => [String(id), name, JSON.stringify([`${id} A.D.
 const LIBRARY_FIVE = [[101, 'Alpha v. Beta'], [102, 'Gamma v. Delta'], [103, 'Epsilon v. Zeta'], [104, 'Eta v. Theta'], [105, 'Iota v. Kappa']].map(([id, name]) => libraryPick(id, name));
 const resultWithCluster = (id, name) => ({ ...CL_RESULT, caseName: name, absolute_url: `/opinion/${id}/${name.toLowerCase().replace(/\W+/g, '-')}/` });
 
-function libraryHandler(world, { clear = 0, picks = [], states = [], failing = null } = {}) {
+function libraryHandler(world, { clear = 0, picks = [], states = [], failing = null, failMessage = 'the library is down' } = {}) {
   return async (url, init) => {
     const response = await world.handler(url, init);
     if (!url.endsWith('/sql')) return response;
     const query = JSON.parse(init.body).query.replace(/\s+/g, ' ').trim();
-    const broken = () => jsonResponse({ message: 'the library is down', code: '08006' }, 400);
+    const broken = () => jsonResponse({ message: failMessage, code: '08006' }, 400);
     // The tables are not made yet (setup-db has not run): Postgres answers 42P01 to every library query.
     if (failing === 'no-table' && /case_library/.test(query)) return jsonResponse({ message: 'relation "case_library" does not exist', code: '42P01' }, 400);
     if (/^SELECT COUNT\(\*\)::int AS n FROM case_library/.test(query)) return failing === 'count' ? broken() : rowsResponse([['n', INT]], [[String(clear)]]);
@@ -2135,6 +2135,25 @@ test('when the library cannot be read the reply searches live, and when the scre
     }));
     assert.ok(second.logs.some(line => /screen/i.test(line)), second.logs.join('\n'));
     assert.ok(!unchecked.calls.sql.some(call => /^INSERT INTO search_cache/.test(call.query)), 'unchecked decisions were saved');
+  } finally {
+    await server.close();
+  }
+});
+
+test("a reply's library and screen-state errors are logged without a key they quote", async () => {
+  const leaky = 'sk-proj-abcdefghijklmnop1234';
+  const server = await startServer(app);
+  try {
+    for (const failing of ['count', 'states']) {
+      clearSearchCache();
+      const world = fakeWorld({ answer: `The scan should have been reported. ${DISCLAIMER}`, nyResults: [resultWithCluster(9, 'Kept Name v. Other')] });
+      const { logs } = await capturingLogs(() => withOutboundHttp(libraryHandler(world, { failing, clear: 9, failMessage: `the library is down for ${leaky}` }), async () => {
+        const { response } = await postJson(server.baseUrl, '/api/ask', { question: 'My radiologist missed a tumor.', mode: 'personal', sessionId: `sess-leak-${failing}`, history: [] });
+        assert.equal(response.status, 200);
+      }));
+      assert.ok(logs.some(line => /the library is down for \[key withheld\]/.test(line)), `${failing}: ${logs.join('\n')}`);
+      assert.ok(!logs.some(line => line.includes(leaky)), `${failing}: the key was logged`);
+    }
   } finally {
     await server.close();
   }

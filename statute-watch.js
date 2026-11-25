@@ -38,7 +38,7 @@
 // This file is shared with the sister app (shared-code.json), so it knows nothing of either app: the caller hands over the
 // notes file, the reader (with the key bound), the approved texts, the email and the site's name.
 import { statuteFingerprint, diffStatuteText, diffToHtml } from './statute-text.js';
-import { notesResting, registeredPlaces, requirementsResting } from './law-file.js';
+import { notesResting, registeredPlaces, requirementsResting, caseNoticesResting } from './law-file.js';
 import { withoutKeys } from './without-keys.js';
 
 const TIME_ZONE = 'America/New_York';
@@ -261,6 +261,13 @@ function changedBlock(notice, context) {
   if (notes.length) parts.push(`<p>The notes that rest on it:</p><ul>${notes.map(note => `<li>${escapeHtml(note.topic)}: ${escapeHtml(note.rule)}</li>`).join('')}</ul>`);
   else if (!requirementsOnly) parts.push('<p>No note rests on it.</p>');
   if (requirements.length) parts.push(`<p>The requirements that rest on it:</p>${requirementItems(requirements)}<p>Read the change, and if it affects one, take it to a lawyer.</p>`);
+  // A case notice is copy shown above the decisions of its case types, so the owner is told which ones to read again.
+  const caseNotices = caseNoticesResting(law, source.id);
+  if (caseNotices.length) {
+    const types = item => (Array.isArray(item?.case_types) ? item.case_types : []).map(escapeHtml).join(', ');
+    parts.push('<p>The case notices that rest on it, each shown with the decisions of its case types. Read each one again:</p>'
+      + `<ul>${caseNotices.map(item => `<li>${escapeHtml(item.id)} (case types: ${types(item)})</li>`).join('')}</ul>`);
+  }
   const places = registeredPlaces(law, source.id);
   const times = count => (Number(count) === 1 ? 'once' : `${escapeHtml(count)} times`);
   if (places.length) parts.push(`<p>The places that state it:</p><ul>${places.map(place => `<li>${escapeHtml(place.file)}: "${escapeHtml(place.states)}", ${times(place.count)}</li>`).join('')}</ul>`);

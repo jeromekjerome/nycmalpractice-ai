@@ -40,6 +40,11 @@ export function caseNoticeFor(law, caseType) {
   return typeof found?.text === 'string' && found.text ? found.text : null;
 }
 
+// The case notices that name a source.
+export function caseNoticesResting(law, id) {
+  return listOf(law?.case_notices).filter(item => listOf(item?.sources).includes(id));
+}
+
 export function registeredPlaces(law, id) {
   return listOf(law?.register).filter(entry => listOf(entry?.sources).includes(id));
 }

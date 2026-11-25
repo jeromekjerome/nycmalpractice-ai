@@ -948,16 +948,18 @@ async function lookupReporters(reporterTexts, token, fetchImpl) {
  *
  * @param {string} draftText
  * @param {Array<{caseName?: string, citation?: string, citations?: string[], snippet?: string, url?: string}>} retrievedCases
- * @param {{enableCourtListener?: boolean, fetchImpl?: Function, lookupCache?: Map}} [options]
+ * @param {{enableCourtListener?: boolean, fetchImpl?: Function, lookupCache?: Map, countLookup?: Function}} [options]
  *   enableCourtListener — also check non-anchored reporter citations against CourtListener's
  *   citation-lookup API. Only runs when COURTLISTENER_TOKEN is set and NODE_ENV !== 'test'
  *   (an injected fetchImpl is not network access, so it is honoured in tests).
  *   lookupCache — a Map the caller keeps between audits of successive versions of one reply. What
  *   CourtListener said about a citation is remembered there, so it is not asked twice and a later
  *   lookup that is throttled cannot turn "no such citation" back into "not checked".
+ *   countLookup — () => Promise, awaited before each lookup request is sent, so the caller can count it
+ *   as CourtListener does. A count that fails is logged and the lookup is still sent.
  * @returns {Promise<Array<{citation_text: string, kind: string, status: 'ANCHORED'|'PLACEHOLDER_FLAGGED'|'UNANCHORED', reason: string, courtlistener_status: 'VERIFIED'|'NOT_FOUND_404'|'UNCHECKED', courtlistener_url: string|null}>>}
  */
-export async function auditDraftCitations(draftText, retrievedCases = [], { enableCourtListener = false, fetchImpl, lookupCache } = {}) {
+export async function auditDraftCitations(draftText, retrievedCases = [], { enableCourtListener = false, fetchImpl, lookupCache, countLookup } = {}) {
   const classified = classifyCitations(draftText, retrievedCases);
   const lookups = lookupCache instanceof Map ? lookupCache : new Map();
 
@@ -976,6 +978,13 @@ export async function auditDraftCitations(draftText, retrievedCases = [], { enab
     (process.env.NODE_ENV !== 'test' || injected);
 
   if (canLookUp) {
+    if (typeof countLookup === 'function') {
+      try {
+        await countLookup();
+      } catch (err) {
+        console.warn(`[Citator] The CourtListener citation-lookup could not be counted: ${err?.message ?? err}`);
+      }
+    }
     const answers = await lookupReporters(pending, token, injected ? fetchImpl : fetch);
     // Only a definite answer is kept; anything else is asked again next time.
     for (const [key, outcome] of answers) {

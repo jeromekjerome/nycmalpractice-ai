@@ -8326,11 +8326,11 @@ test('the owner lists the held decisions, then clears or bans one; a decision th
     const q = query.replace(/\s+/g, ' ').trim();
     sql.push({ query: q, params });
     if (/FROM case_library WHERE screen_state = 'held'/.test(q)) return rowsResponse(HELD_FIELDS, [heldRow]);
-    const write = /^UPDATE case_library SET screen_state = '(clear|banned)'/.exec(q);
+    const write = /^UPDATE case_library SET screen_state = (?:'(banned)'|CASE WHEN .* THEN 'unscreened' ELSE '(clear)' END)/.exec(q);
     if (write && /AND screen_state = 'held' RETURNING/.test(q)) {
       const id = String(params.at(-1));
       if (states.get(id) !== 'held') return rowsResponse([], [], 'UPDATE');
-      states.set(id, write[1]);
+      states.set(id, write[1] || write[2]);
       return rowsResponse([['cluster_id', TEXT]], [[id]], 'UPDATE');
     }
     return jsonResponse(EMPTY_ROWS);
@@ -8376,7 +8376,7 @@ test('the owner lists the held decisions, then clears or bans one; a decision th
       assert.equal(states.get('5685958'), 'banned');
       assert.equal((await call('POST', '/api/admin/decisions/5685958/ban')).status, 409);
       assert.equal((await call('POST', '/api/admin/decisions/5685958/clear')).status, 409, 'a banned decision is not cleared from this page');
-      for (const write of writes().filter(entry => /SET screen_state = 'clear'/.test(entry.query) && String(entry.params.at(-1)) === '5685956')) {
+      for (const write of writes().filter(entry => /SET screen_state = CASE/.test(entry.query) && String(entry.params.at(-1)) === '5685956')) {
         assert.equal(new Date(write.params[0]).toISOString(), write.params[0], 'the decision time is a timestamp');
         assert.equal(write.params[0], write.params[1], 'a clear writes one time to both columns');
       }

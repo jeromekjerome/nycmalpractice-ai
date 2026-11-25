@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
-  readLawFile, formatLawFile, writeLawFile, checkLawFile, earliestSourceDate, notesResting, registeredPlaces, requirementsResting, snapshotReader, caseNoticeFor,
+  readLawFile, formatLawFile, writeLawFile, checkLawFile, earliestSourceDate, notesResting, registeredPlaces, requirementsResting, snapshotReader, caseNoticeFor, caseNoticesResting,
 } from '../law-file.js';
 import { NO_NEW_OPINIONS } from '../opinion-list.js';
 import { renderCurrentLawForPrompt } from '../gatekeeper.js';
@@ -247,6 +247,15 @@ test('caseNoticeFor gives the text of the first notice for the type, and null wh
   assert.equal(caseNoticeFor({}, 'auto'), null);
   assert.equal(caseNoticeFor({ case_notices: 'x' }, 'auto'), null);
   assert.equal(caseNoticeFor(null, 'auto'), null);
+});
+
+test('caseNoticesResting returns the case notices naming a source', () => {
+  const law = { case_notices: [notice(), { ...notice(), id: 'C2', case_types: ['slip'], sources: ['NYCRR-1'] }, { ...notice(), id: 'C3', sources: ['NYCRR-1', 'CPLR-214'] }] };
+  assert.deepEqual(caseNoticesResting(law, 'CPLR-214').map(item => item.id), ['C1', 'C3']);
+  assert.deepEqual(caseNoticesResting(law, 'GML-50-I'), []);
+  assert.deepEqual(caseNoticesResting({}, 'CPLR-214'), []);
+  assert.deepEqual(caseNoticesResting({ case_notices: 'x' }, 'CPLR-214'), []);
+  assert.deepEqual(caseNoticesResting({ case_notices: [{ id: 'C4', sources: 'CPLR-214' }, null] }, 'CPLR-214'), []);
 });
 
 test('a file with case_notices is written back exactly as formatLawFile gives it', () => {

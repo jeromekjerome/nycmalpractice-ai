@@ -153,7 +153,7 @@ const courtOfAppeals = (extra = {}) => decision({ court: 'New York Court of Appe
 const plainSnippet = result => result.opinions[0].snippet.replace(/<[^>]+>/g, '');
 const ago = days => new Date(NIGHT - days * DAY_MS).toISOString();
 
-test('on the recorded answers, the three decisions with later bad history are held and the three sound ones cleared', async () => {
+test('on the recorded answers, the three recorded to hold are held and the three recorded to clear are cleared', async () => {
   const db = fakeLibrary(Object.values(SIX));
   const { search, asked } = recorded(db, ...ALL_ANSWERS);
   const { result, mail, clock } = await run({ db, search });
@@ -175,7 +175,7 @@ test('on the recorded answers, the three decisions with later bad history are he
   assert.equal(campo.passage, 'examples see, 1 NY PJI2d 193-195. . The Campo case was overruled in Micallef v Miehle Co. (39 NY2d 376');
 
   const perl = db.row(SIX.perl.cluster_id).hold;
-  assert.equal(perl.question, 'higher-court', 'the reversed decision is held by the higher court question');
+  assert.equal(perl.question, 'higher-court', "Perl's recorded answers hold it on the higher-court question");
   assert.deepEqual(perl.later, { case_name: 'Perl v. Meher', url: 'https://www.courtlistener.com/opinion/2522412/perl-v-meher/', court: 'New York Court of Appeals', date_filed: '2011-11-22' });
   assert.ok(perl.later.url.includes('/2522412/'), 'the higher court hit is still the first one, cluster 2522412');
   assert.ok(perl.passage.startsWith('18 N.Y.3d 208 (2011) 960 N.E.2d 424'), perl.passage);
@@ -191,7 +191,7 @@ test('on the recorded answers, the three decisions with later bad history are he
   assert.deepEqual(clock.sleeps, Array(7).fill(13000), 'the requests are spaced, and nothing waits before the first');
 });
 
-test('the recorded Licari answer clears a sound, heavily cited Court of Appeals decision with one question', async () => {
+test('clears Licari on its recorded answer', async () => {
   const db = fakeLibrary([SIX.licari]);
   const { search, asked } = recorded(db, 'licari-q1');
   const { result, mail } = await run({ db, search });
@@ -256,14 +256,86 @@ test('with one side giving no word, the higher court question names the other al
   assert.match(unknown.citing.q, /"Jones overrule"~15/, 'the second side gives the citing word when the first gives none');
 });
 
-test("a decision the owner cleared is asked only about decisions filed since the owner's New York day", () => {
-  // 03:00 UTC on 1 October is 23:00 on 30 September in New York.
-  const cleared = screenQuestions(decision({ screen_state: 'clear', decided_at: new Date('2026-10-01T03:00:00Z'), date_filed: '2020-01-02' }));
-  assert.equal(cleared.citing.filed_after, '2026-09-30');
-  assert.equal(cleared.higherCourt.filed_after, '2026-09-30', 'the later of the filing date and the owner\'s day');
-  const early = screenQuestions(decision({ decided_at: '2019-05-01T16:00:00Z', date_filed: '2020-01-02' }));
-  assert.equal(early.higherCourt.filed_after, '2020-01-02');
-  assert.equal(screenQuestions(decision()).citing.filed_after, undefined, 'a decision the owner never decided has no date on its citing question');
+// A clear decision due again after the owner cleared its hold: the hold keeps the clusters the owner was shown.
+const clearedAfterHold = (hold, extra = {}) => decision({
+  screen_state: 'clear', screened_at: ago(40), screen_tried_at: ago(40), decided_at: ago(40), date_filed: '2020-01-02', hold, ...extra,
+});
+const hitOf = (id, extra = {}) => ({ cluster_id: id, absolute_url: `/opinion/${id}/hit-${id}/`, caseName: `Hit ${id} v. Case`, court_id: 'ny', dateFiled: '2024-01-01', opinions: [{ snippet: `the <mark>Party</mark> rule was <mark>overruled</mark> in ${id}` }], ...extra });
+
+test('a re-screen skips the clusters in hold.seen and asks without a date cut', async () => {
+  const row = clearedAfterHold({ found_at: ago(41), question: 'citing', later: null, passage: 'p', hits: 2, seen: [501, 502] });
+  const { citing, higherCourt } = screenQuestions(row);
+  assert.equal(citing.filed_after, undefined, 'the citing question has no date');
+  assert.equal(higherCourt.filed_after, '2020-01-02', 'the higher court question keeps the filing date alone');
+
+  const db = fakeLibrary([row]);
+  const { search, asked } = answering(db, params => (params.q.startsWith('cites') ? { status: 200, body: { count: 3, results: [hitOf(501), hitOf(502), hitOf(503)] } } : { status: 200, body: { count: 0, results: [] } }));
+  const { result, mail } = await run({ db, search });
+  assert.equal(asked.length, 1, 'a citing hit was found, so the higher court question was not asked');
+  assert.equal(asked[0].filed_after, undefined);
+  assert.equal(result.held, 1);
+  const { hold } = db.row(row.cluster_id);
+  assert.equal(hold.later.url, 'https://www.courtlistener.com/opinion/503/hit-503/', 'the owner is shown the cluster not seen before');
+  assert.equal(hold.hits, 1, 'the clusters seen before are not counted');
+  assert.match(mail.sent[0].html, /1 later decision was found\. It is shown below\./);
+
+  // Every result was seen before: nothing is a hit, and the decision clears.
+  const seenAll = clearedAfterHold({ found_at: ago(41), question: 'citing', later: null, passage: 'p', hits: 2, seen: [501, 502] }, { court_id: 'ny', court: 'New York Court of Appeals' });
+  const db2 = fakeLibrary([seenAll]);
+  const second = await run({ db: db2, search: answering(db2, () => ({ status: 200, body: { count: 2, results: [hitOf(501), hitOf(502)] } })).search });
+  assert.deepEqual([second.result.cleared, db2.row(seenAll.cluster_id).screen_state], [1, 'clear']);
+});
+
+test('a hold keeps the clusters of every hit of its answer, at most 20, and the email says how many were found', async () => {
+  const row = courtOfAppeals();
+  const db = fakeLibrary([row]);
+  const results = Array.from({ length: 25 }, (_, i) => hitOf(600 + i, i === 0 ? { opinions: [{ snippet: 'no mark' }] } : {}));
+  const { search } = answering(db, () => ({ status: 200, body: { count: 25, results: [{ cluster_id: Number(row.cluster_id), caseName: 'Itself' }, ...results] } }));
+  const { mail } = await run({ db, search });
+  const { hold } = db.row(row.cluster_id);
+  assert.equal(hold.hits, 25);
+  assert.deepEqual(hold.seen, results.slice(0, 20).map(result => result.cluster_id), 'the first 20 hits, the decision itself left out');
+  assert.match(mail.sent[0].html, /<p>25 later decisions were found\. The first is shown below\.<\/p><h3>The later decision<\/h3>/);
+  assert.doesNotMatch(mail.sent[0].html, /matched/i);
+});
+
+test('a held-again row keeps the union of what each hold saw, at most 200', async () => {
+  const row = clearedAfterHold({ found_at: ago(41), question: 'citing', later: null, passage: 'p', hits: 2, seen: [501, 502] }, { court_id: 'ny', court: 'New York Court of Appeals' });
+  const db = fakeLibrary([row]);
+  await run({ db, search: answering(db, () => ({ status: 200, body: { count: 3, results: [hitOf(502), hitOf(503), hitOf(504)] } })).search });
+  assert.deepEqual(db.row(row.cluster_id).hold.seen, [501, 502, 503, 504]);
+
+  const full = Array.from({ length: 200 }, (_, i) => 1000 + i);
+  const crowded = clearedAfterHold({ found_at: ago(41), question: 'citing', later: null, passage: 'p', hits: 20, seen: full }, { court_id: 'ny', court: 'New York Court of Appeals' });
+  const db2 = fakeLibrary([crowded]);
+  await run({ db: db2, search: answering(db2, () => ({ status: 200, body: { count: 1, results: [hitOf(77)] } })).search });
+  const { seen } = db2.row(crowded.cluster_id).hold;
+  assert.equal(seen.length, 200);
+  assert.equal(seen.at(-1), 77, 'the clusters just shown are kept');
+  assert.ok(!seen.includes(1000), 'the oldest gives way');
+
+  // A re-hold as unreadable keeps what the earlier holds saw.
+  const failing = clearedAfterHold({ found_at: ago(41), question: 'citing', later: null, passage: 'p', hits: 2, seen: [501, 502] }, { court_id: 'ny', court: 'New York Court of Appeals' });
+  const db3 = fakeLibrary([failing]);
+  await run({ db: db3, search: answering(db3, () => ({ status: 400, body: { detail: 'bad query' } })).search });
+  assert.deepEqual(db3.row(failing.cluster_id).hold.seen, [501, 502]);
+  assert.equal(db3.row(failing.cluster_id).hold.question, 'unreadable');
+});
+
+test('the higher court question is asked after a citing hold is cleared, and the citing hits seen do not count on it', async () => {
+  const row = clearedAfterHold({ found_at: ago(41), question: 'citing', later: null, passage: 'p', hits: 1, seen: [501] });
+  const db = fakeLibrary([row]);
+  const { search, asked } = answering(db, params => (params.q.startsWith('cites')
+    ? { status: 200, body: { count: 1, results: [hitOf(501)] } }
+    : { status: 200, body: { count: 2, results: [hitOf(501), hitOf(505, { caseName: row.case_name })] } }));
+  const { result } = await run({ db, search });
+  assert.deepEqual(asked.map(params => params.q.split(':')[0]), ['cites', 'caseName']);
+  assert.equal(asked[1].filed_after, '2020-01-02');
+  assert.equal(result.held, 1);
+  const { hold } = db.row(row.cluster_id);
+  assert.equal(hold.question, 'higher-court');
+  assert.equal(hold.later.url, 'https://www.courtlistener.com/opinion/505/hit-505/');
+  assert.deepEqual([hold.hits, hold.seen], [1, [501, 505]]);
 });
 
 test('a result that is the decision itself is not a hit, whether it names its cluster by id or only by its address', async () => {
@@ -285,7 +357,8 @@ test('a hit on the citing question holds the decision without asking the higher 
   assert.equal(asked.length, 1);
   assert.deepEqual(result, { screened: 1, cleared: 0, held: 1, requests: 1, notifyFailed: 0, stoppedBecause: null });
   const { hold } = db.row(row.cluster_id);
-  assert.deepEqual(Object.keys(hold), ['found_at', 'question', 'later', 'passage']);
+  assert.deepEqual(Object.keys(hold), ['found_at', 'question', 'later', 'passage', 'hits', 'seen']);
+  assert.deepEqual([hold.hits, hold.seen], [1, [999]]);
   assert.deepEqual(hold.later, { case_name: 'Later v. Case', url: 'https://www.courtlistener.com/opinion/999/later-v-case/', court: APPELLATE, date_filed: '2024-02-03' });
   assert.ok(hold.passage.startsWith('the Party rule was overruled z'), hold.passage);
   assert.equal(hold.passage.length, 600);
@@ -451,7 +524,7 @@ test('no answer or a 5xx on a decision whose last try failed holds it as unreada
     assert.deepEqual(result, { screened: 2, cleared: 1, held: 1, requests: 2, notifyFailed: 0, stoppedBecause: null });
     const { hold, screen_state: state } = db.row(repeat.cluster_id);
     assert.equal(state, 'held');
-    assert.deepEqual({ ...hold, found_at: 'x' }, { found_at: 'x', question: 'unreadable', status, later: null, passage: null });
+    assert.deepEqual({ ...hold, found_at: 'x' }, { found_at: 'x', question: 'unreadable', status, later: null, passage: null, seen: [] });
     assert.equal(mail.sent.length, 1);
     assert.match(mail.sent[0].html, /could not read/);
     assert.equal(db.row(next.cluster_id).screen_state, 'clear');
@@ -470,6 +543,32 @@ test('in an outage where every due decision\'s last try failed, one is held and 
   assert.equal(mail.sent.length, 1);
   assert.equal(db.row(rows[1].cluster_id).screen_tried_at, new Date(NIGHT + 13000).toISOString(), 'the second row\'s try time is set');
   assert.equal(db.row(rows[2].cluster_id).screen_tried_at, ago(1));
+});
+
+test('when every search answers 400, one decision is held and emailed, and the next stops the run with its try recorded', async () => {
+  const rows = [courtOfAppeals(), courtOfAppeals(), courtOfAppeals()];
+  const db = fakeLibrary(rows);
+  const { search, asked } = answering(db, () => ({ status: 400, body: { detail: 'bad query' } }));
+  const mail = fakeMail();
+  await rejectsQuietly(run({ db, search, mail }), new RegExp(`^Error: CourtListener answered 400 to the screen of ${rows[1].cluster_id}; the run stopped$`));
+  assert.equal(asked.length, 2);
+  assert.deepEqual(rows.map(row => db.row(row.cluster_id).screen_state), ['held', 'unscreened', 'unscreened']);
+  assert.deepEqual([db.row(rows[0].cluster_id).hold.question, db.row(rows[0].cluster_id).hold.status], ['unreadable', 400]);
+  assert.equal(mail.sent.length, 1);
+  assert.equal(db.row(rows[1].cluster_id).screen_tried_at, new Date(NIGHT + 13000).toISOString(), 'the second row\'s try time is set');
+  assert.equal(db.row(rows[2].cluster_id).screen_tried_at, null);
+});
+
+test('one unreadable hold a run, whatever the status: a 400 held first makes a repeat 503 stop the run', async () => {
+  const first = courtOfAppeals();
+  const repeat = courtOfAppeals({ screen_tried_at: ago(1) });
+  const db = fakeLibrary([first, repeat]);
+  const { search } = answering(db, params => (params.q.includes(`(${first.opinion_id})`) ? { status: 400, body: null } : { status: 503, body: null }));
+  const mail = fakeMail();
+  await rejectsQuietly(run({ db, search, mail }), new RegExp(`^Error: CourtListener answered 503 to the screen of ${repeat.cluster_id}; the run stopped$`));
+  assert.deepEqual([db.row(first.cluster_id).screen_state, db.row(repeat.cluster_id).screen_state], ['held', 'unscreened']);
+  assert.equal(db.row(repeat.cluster_id).screen_tried_at, new Date(NIGHT + 13000).toISOString());
+  assert.equal(mail.sent.length, 1);
 });
 
 test('the next night, a decision whose screen failed waits behind one never tried', async () => {
@@ -496,7 +595,7 @@ test('an answer the screen cannot read holds the decision as unreadable, emails 
     assert.deepEqual(result, { screened: 2, cleared: 1, held: 1, requests: 2, notifyFailed: 0, stoppedBecause: null });
     const { hold, screen_state: state } = db.row(unreadable.cluster_id);
     assert.equal(state, 'held');
-    assert.deepEqual({ ...hold, found_at: 'x' }, { found_at: 'x', question: 'unreadable', status: answer.status, later: null, passage: null });
+    assert.deepEqual({ ...hold, found_at: 'x' }, { found_at: 'x', question: 'unreadable', status: answer.status, later: null, passage: null, seen: [] });
     assert.equal(mail.sent.length, 1);
     assert.match(mail.sent[0].html, /could not read/);
   }

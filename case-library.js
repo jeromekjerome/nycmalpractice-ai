@@ -108,11 +108,12 @@ export async function pinnedCitations(sqlClient) {
   return rows.flatMap(row => (Array.isArray(row.citations) ? row.citations.map(String) : []));
 }
 
-// Deletes the rows not found for this many days, except pinned and banned ones. Returns how many went.
+// Deletes the rows not found for this many days, except pinned, banned and held ones (a held row waits for the owner).
+// Returns how many went.
 export async function dropStale(sqlClient, { days = 90 } = {}) {
   const gone = await sqlClient`
     DELETE FROM case_library
-    WHERE pinned = FALSE AND screen_state <> 'banned' AND last_found < NOW() - make_interval(days => ${days})
+    WHERE pinned = FALSE AND screen_state <> 'banned' AND screen_state <> 'held' AND last_found < NOW() - make_interval(days => ${days})
     RETURNING cluster_id
   `;
   return gone.length;
@@ -206,11 +207,12 @@ export function shownScreen(entry) {
 // first, then the first found; then the clear rows last screened a month or more before `now`, longest-untried first. Held
 // and banned rows are never due. A row whose screen failed has a new try time, so it waits behind the others next night.
 // `last_try_failed` is true when the row was tried after its last finished screen (or tried and never screened): a clear or
-// a hold writes both times equal, so a finished screen resets it.
+// a hold writes both times equal, so a finished screen resets it. `hold` is the row's last hold, or null: the screen skips the
+// later decisions it lists as seen.
 export async function dueForScreen(sqlClient, { limit, now = new Date() } = {}) {
   return sqlClient`
     SELECT cluster_id, opinion_id, case_name, citations, court, court_id, to_char(date_filed, 'YYYY-MM-DD') AS date_filed, url,
-           screen_state, decided_at,
+           screen_state, decided_at, hold,
            (screen_tried_at IS NOT NULL AND (screened_at IS NULL OR screen_tried_at > screened_at)) AS last_try_failed
     FROM case_library
     WHERE opinion_id IS NOT NULL
@@ -273,11 +275,17 @@ export async function heldDecisions(sqlClient) {
 // The owner's decision on a held decision: 'clear' (it may be offered to replies again, as of `at`) or 'banned' (never offered,
 // never screened again). Written only over a held row, so a decision already made, or a row the screen is still working on,
 // is left as it is. The hold stays as the record of what the owner saw. Returns whether a row changed.
+// A clear of a hold that answered no question (the screen could not read CourtListener's answer, or the hold names no
+// question) sends the decision back to be screened instead: unscreened, with no screening or decision time. Its try time
+// stays, so it waits behind the decisions never tried, and a further failure is held once more while the run goes on.
 export async function decideHeld(sqlClient, clusterId, decision, at) {
   if (decision !== 'clear' && decision !== 'banned') throw new Error(`decideHeld takes 'clear' or 'banned', not ${String(decision)}`);
   const rows = decision === 'clear'
     ? await sqlClient`
-        UPDATE case_library SET screen_state = 'clear', screened_at = ${at}::timestamptz, decided_at = ${at}::timestamptz
+        UPDATE case_library SET
+          screen_state = CASE WHEN COALESCE(hold->>'question', 'unreadable') = 'unreadable' THEN 'unscreened' ELSE 'clear' END,
+          screened_at = CASE WHEN COALESCE(hold->>'question', 'unreadable') = 'unreadable' THEN NULL ELSE ${at}::timestamptz END,
+          decided_at = CASE WHEN COALESCE(hold->>'question', 'unreadable') = 'unreadable' THEN NULL ELSE ${at}::timestamptz END
         WHERE cluster_id = ${clusterId} AND screen_state = 'held'
         RETURNING cluster_id
       `
@@ -300,13 +308,12 @@ export async function libraryCounts(sqlClient) {
     GROUP BY t, screen_state
   `;
   const allStates = await sqlClient`SELECT screen_state, pinned, COUNT(*)::int AS n FROM case_library GROUP BY screen_state, pinned`;
-  const perState = allStates;
   const pinned = allStates.filter(row => row.pinned).reduce((sum, row) => sum + Number(row.n), 0);
   const byType = {};
   for (const row of perType) {
     const entry = byType[row.case_type] ||= { clear: 0, unscreened: 0, held: 0 };
     if (row.screen_state in entry) entry[row.screen_state] += Number(row.n);
   }
-  const count = state => perState.filter(row => row.screen_state === state).reduce((sum, row) => sum + Number(row.n), 0);
-  return { byType, held: count('held'), banned: count('banned'), total: perState.reduce((sum, row) => sum + Number(row.n), 0), pinned };
+  const count = state => allStates.filter(row => row.screen_state === state).reduce((sum, row) => sum + Number(row.n), 0);
+  return { byType, held: count('held'), banned: count('banned'), total: allStates.reduce((sum, row) => sum + Number(row.n), 0), pinned };
 }

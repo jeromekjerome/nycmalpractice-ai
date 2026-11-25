@@ -438,7 +438,8 @@ function findForbiddenMatches(text, check) {
  * @param {number} turn
  * @param {string} mode  one of the modes in gate-config.js
  * @param {Array} retrievedCases  CourtListener cases retrieved for this turn
- * @param {{enableCourtListener?: boolean, fetchImpl?: Function, rubric?: object}} [options]
+ * @param {{enableCourtListener?: boolean, fetchImpl?: Function, rubric?: object, lookupCache?: Map, countLookup?: Function}} [options]
+ *   countLookup is handed to the citation audit (citator.js), which awaits it before each CourtListener lookup it sends.
  */
 export async function enforceDeterministicGate(report, draftText, turn, mode, retrievedCases = [], options = {}) {
   const gateMode = normalizeMode(mode);
@@ -483,6 +484,7 @@ export async function enforceDeterministicGate(report, draftText, turn, mode, re
     enableCourtListener: options.enableCourtListener === true,
     fetchImpl: options.fetchImpl,
     lookupCache: options.lookupCache,
+    countLookup: options.countLookup,
   });
   const offending = report.citation_audit.filter(
     item => item.status === 'UNANCHORED' || item.courtlistener_status === 'NOT_FOUND_404'
@@ -1017,6 +1019,7 @@ async function evaluateDraft(ctx, draftText, { carriedVerdicts = null, carriedGr
     enableCourtListener: ctx.enableCourtListener,
     fetchImpl: ctx.fetchImpl,
     lookupCache: ctx.lookupCache,
+    countLookup: ctx.countLookup,
     rubric: ctx.rubric,
   });
 
@@ -1243,6 +1246,7 @@ function courtListenerLookupEnabled() {
  * @param {Array} [params.retrievedCases]
  * @param {boolean} [params.deterministicOnly]  override the mode switch (tests)
  * @param {Function} [params.fetchImpl]         injected fetch for the CourtListener lookup (tests)
+ * @param {Function} [params.countLookup]       () => Promise, awaited before each CourtListener lookup is sent (the caller counts it)
  * @param {object} [params.deps]                handed on to runJob (providers.js): tests pass fake adapters
  * @param {object|null} [params.clock]          the reply's clock (replyClock in providers.js), handed on to runJob
  * @returns {Promise<{finalText: string, evaluation: object}>}
@@ -1258,6 +1262,7 @@ export async function evaluateAndRemediateDraft({
   retrievedCases = [],
   deterministicOnly,
   fetchImpl,
+  countLookup,
   deps = {},
   clock = null,
 }) {
@@ -1279,6 +1284,7 @@ export async function evaluateAndRemediateDraft({
     rubric,
     retrievedCases: Array.isArray(retrievedCases) ? retrievedCases : [],
     fetchImpl,
+    countLookup,
     enableCourtListener: courtListenerLookupEnabled(),
     // What CourtListener said about a citation holds for every attempt at this reply: a second
     // lookup that is throttled must not turn "no such citation" back into "not checked".

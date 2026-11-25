@@ -26,9 +26,15 @@ function fakeLibrary(rows = []) {
     // The owner's list and decisions: the held rows (their order is the real database's, checked by the PGlite check), and a
     // write that changes a row only while it is held.
     if (/FROM case_library\s+WHERE screen_state = 'held'/.test(text)) return rows.filter(r => r.screen_state === 'held');
-    if (/^\s*UPDATE case_library SET screen_state = '(clear|banned)'.*AND screen_state = 'held'/s.test(text)) {
+    // The owner's clear sends a hold with no answered question (unreadable, or none named) back to be screened.
+    const decided = /^\s*UPDATE case_library SET\s+screen_state = (?:'(banned)'|CASE WHEN COALESCE\(hold->>'question', 'unreadable'\) = 'unreadable' THEN 'unscreened' ELSE 'clear' END).*AND screen_state = 'held'/s.exec(text);
+    if (decided) {
       const found = rows.find(r => Number(r.cluster_id) === Number(values.at(-1)));
-      return found && found.screen_state === 'held' ? [{ cluster_id: String(found.cluster_id) }] : [];
+      if (!found || found.screen_state !== 'held') return [];
+      if (decided[1]) Object.assign(found, { screen_state: 'banned', decided_at: values[0] });
+      else if ((found.hold?.question ?? 'unreadable') === 'unreadable') Object.assign(found, { screen_state: 'unscreened', screened_at: null, decided_at: null });
+      else Object.assign(found, { screen_state: 'clear', screened_at: values[0], decided_at: values[1] });
+      return [{ cluster_id: String(found.cluster_id) }];
     }
     if (/FROM case_library\s+WHERE opinion_id IS NOT NULL/.test(text)) return rows.slice(0, values.at(-1));
     if (/^\s*UPDATE case_library SET screen_tried_at/.test(text)) return [];
@@ -63,7 +69,8 @@ function fakeLibrary(rows = []) {
       return [];
     }
     if (/DELETE FROM case_library/.test(text)) {
-      const gone = rows.filter(r => !r.pinned && r.screen_state !== 'banned' && r.stale);
+      const keepsHeld = /screen_state <> 'held'/.test(text);
+      const gone = rows.filter(r => !r.pinned && r.screen_state !== 'banned' && !(keepsHeld && r.screen_state === 'held') && r.stale);
       for (const row of gone) rows.splice(rows.indexOf(row), 1);
       return gone.map(r => ({ cluster_id: r.cluster_id }));
     }
@@ -188,18 +195,20 @@ test('saving nothing sends nothing', async () => {
   assert.equal(world.queries.length, 0);
 });
 
-test('stale rows are dropped but pinned and banned rows are kept', async () => {
+test('stale rows are dropped but pinned, banned and held rows are kept', async () => {
   const world = fakeLibrary([
     clearRow(1, 'Old one', '2020-01-01', { stale: true }),
     clearRow(2, 'Old pinned', '2020-01-01', { stale: true, pinned: true }),
     clearRow(3, 'Old banned', '2020-01-01', { stale: true, screen_state: 'banned' }),
     clearRow(4, 'Recent', '2020-01-01'),
+    clearRow(5, 'Old held', '2020-01-01', { stale: true, screen_state: 'held' }),
   ]);
   assert.equal(await dropStale(world.sql, { days: 90 }), 1);
-  assert.deepEqual(world.rows.map(r => r.cluster_id), ['2', '3', '4']);
+  assert.deepEqual(world.rows.map(r => r.cluster_id), ['2', '3', '4', '5']);
   const text = world.queries[0].text;
   assert.match(text, /pinned = FALSE/);
   assert.match(text, /screen_state <> 'banned'/);
+  assert.match(text, /screen_state <> 'held'/);
   assert.equal(world.queries[0].values[0], 90);
 });
 
@@ -282,7 +291,7 @@ test('the decisions due for the screen: those with an opinion id, never-screened
   assert.deepEqual(due.map(row => row.cluster_id), ['1', '2']);
   const { values } = world.queries[0];
   const text = flat(world.queries[0].text);
-  for (const column of ['cluster_id', 'opinion_id', 'case_name', 'citations', 'court', 'court_id', 'date_filed', 'url', 'screen_state', 'decided_at']) {
+  for (const column of ['cluster_id', 'opinion_id', 'case_name', 'citations', 'court', 'court_id', 'date_filed', 'url', 'screen_state', 'decided_at', 'hold']) {
     assert.match(text.split('FROM')[0], new RegExp(`\\b${column}\\b`), column);
   }
   assert.match(text, /to_char\(date_filed, 'YYYY-MM-DD'\) AS date_filed/);
@@ -347,7 +356,11 @@ test('the owner clears or bans a held decision, writing only over a held row; an
   const at = '2026-11-26T14:00:00.000Z';
   assert.equal(await decideHeld(world.sql, 1, 'clear', at), true);
   const clear = world.queries[0];
-  assert.equal(flat(clear.text), "UPDATE case_library SET screen_state = 'clear', screened_at = ?::timestamptz, decided_at = ?::timestamptz WHERE cluster_id = ? AND screen_state = 'held' RETURNING cluster_id");
+  const unanswered = "COALESCE(hold->>'question', 'unreadable') = 'unreadable'";
+  assert.equal(flat(clear.text), `UPDATE case_library SET screen_state = CASE WHEN ${unanswered} THEN 'unscreened' ELSE 'clear' END, `
+    + `screened_at = CASE WHEN ${unanswered} THEN NULL ELSE ?::timestamptz END, decided_at = CASE WHEN ${unanswered} THEN NULL ELSE ?::timestamptz END `
+    + "WHERE cluster_id = ? AND screen_state = 'held' RETURNING cluster_id");
+  assert.doesNotMatch(clear.text, /screen_tried_at/, 'a clear keeps the try time');
   assert.deepEqual(clear.values, [at, at, 1]);
   assert.equal(await decideHeld(world.sql, 2, 'banned', at), true);
   const ban = world.queries[1];
@@ -359,4 +372,21 @@ test('the owner clears or bans a held decision, writing only over a held row; an
   await assert.rejects(() => decideHeld(world.sql, 1, 'hold', at), /clear|banned/);
   await assert.rejects(() => decideHeld(world.sql, 1, undefined, at));
   assert.equal(world.queries.length, before, 'a query was sent for an unknown decision');
+});
+
+test('clearing a hold the screen could not read, or one that names no question, sends the decision back to be screened with its try time and its hold; any other hold clears', async () => {
+  const tried = '2026-11-24T23:00:13.000Z';
+  const unreadable = { found_at: tried, question: 'unreadable', status: 0, later: null, passage: null, seen: [] };
+  const citing = { found_at: tried, question: 'citing', later: null, passage: 'p', seen: [77] };
+  const held = (id, hold) => clearRow(id, `Held ${id}`, '2024-01-01', { screen_state: 'held', hold, screened_at: tried, screen_tried_at: tried, decided_at: null });
+  const world = fakeLibrary([held(1, unreadable), held(2, null), held(3, { found_at: tried }), held(4, citing), held(5, { ...citing, question: 'higher-court' })]);
+  const at = '2026-11-26T14:00:00.000Z';
+  for (const id of [1, 2, 3, 4, 5]) assert.equal(await decideHeld(world.sql, id, 'clear', at), true, String(id));
+  const row = id => world.rows.find(r => Number(r.cluster_id) === id);
+  for (const id of [1, 2, 3]) {
+    assert.deepEqual([row(id).screen_state, row(id).screened_at, row(id).decided_at, row(id).screen_tried_at], ['unscreened', null, null, tried], String(id));
+  }
+  assert.deepEqual(row(1).hold, unreadable, 'the hold stays as the record');
+  for (const id of [4, 5]) assert.deepEqual([row(id).screen_state, row(id).screened_at, row(id).decided_at, row(id).screen_tried_at], ['clear', at, at, tried], String(id));
+  assert.ok(world.queries.every(query => query.values.length === 3 && query.values[0] === at && query.values[1] === at), 'one query each, the same for every hold');
 });

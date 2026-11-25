@@ -974,6 +974,23 @@ test('a section with a note and a requirement lists both', async () => {
   await watch(night(0));
   assert.ok(mail.sent[0].html.includes('The notes that rest on it'));
   assert.ok(mail.sent[0].html.includes('The requirements that rest on it'));
+  assert.ok(!mail.sent[0].html.includes('case notice'), 'no case notice rests on it');
+});
+
+test('a changed section names each case notice that rests on it, with its id and case types', async () => {
+  const law = {
+    ...listingLaw(),
+    case_notices: [
+      { id: 'NOTICE-<b>ONE</b>', case_types: ['auto', 'slip'], text: 'A sentence.', sources: ['CPLR-214'] },
+      { id: 'NOTICE-OTHER', case_types: ['medical'], text: 'Another sentence.', sources: ['BY-HAND-ONE'] },
+    ],
+  };
+  const { mail, watch } = world({ law, answers: { 'CPLR-214': CHANGED_214 } });
+  await watch(night(0));
+  const { html } = mail.sent[0];
+  assert.ok(html.includes('<p>The case notices that rest on it, each shown with the decisions of its case types. Read each one again:</p>'), html);
+  assert.ok(html.includes('<li>NOTICE-&lt;b&gt;ONE&lt;/b&gt; (case types: auto, slip)</li>'), html);
+  assert.ok(!html.includes('<b>ONE</b>') && !html.includes('NOTICE-OTHER'), html);
 });
 
 test('the summary counts sections and bills only, and says when new opinions have waited', async () => {

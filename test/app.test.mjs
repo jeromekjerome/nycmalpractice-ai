@@ -8407,11 +8407,15 @@ test('the admin routes answer 500 with the generic message when the database fai
   }
 });
 
-test("the daily summary carries a case library section: counts by type, the types short of clear decisions, the day's requests and replies, and what is left of the allowance", async () => {
+test("the daily summary carries a case library section: counts by type, the types short of clear decisions, the previous New York day's requests and replies, and what is left of the allowance", async () => {
   const { sendDailyDigest } = await import('../operations.js');
   const { CASE_TOPICS } = await import('../case-topics.js');
   let state = 'ok';
   const queries = [];
+  // The summary runs after midnight in New York, so it reads the day before: the New York day of 24 hours ago.
+  const newYorkDayOf = ms => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ms));
+  const dayAskedBefore = newYorkDayOf(Date.now() - 24 * 60 * 60 * 1000);
+  const usageDays = [];
   const handler = async (url, init = {}) => {
     if (url.includes('/api-usage/')) return state === 'no-allowance' ? jsonResponse({ detail: 'no' }, 500) : jsonResponse(usageReportWith({ day: 90, hour: 40 }));
     if (!url.endsWith('/sql')) throw new Error(`Unexpected outbound request in test: ${url}`);
@@ -8426,7 +8430,10 @@ test("the daily summary carries a case library section: counts by type, the type
       const held = state === 'none-held' ? [] : state === 'ok' ? [['held', 'f', '2']] : [['held', 'f', '1']];
       return rowsResponse([['screen_state', TEXT], ['pinned', BOOL], ['n', INT]], [['clear', 'f', '10'], ['unscreened', 'f', '2'], ...held]);
     }
-    if (/FROM courtlistener_usage WHERE day/.test(query)) return rowsResponse([['job', TEXT], ['requests', INT]], [['chat-search', '4'], ['library', '10'], ['replies-library', '7'], ['replies-live', '3']]);
+    if (/FROM courtlistener_usage WHERE day/.test(query)) {
+      usageDays.push(JSON.parse(init.body).params[0]);
+      return rowsResponse([['job', TEXT], ['requests', INT]], [['chat-search', '4'], ['library', '10'], ['replies-library', '7'], ['replies-live', '3']]);
+    }
     return jsonResponse(EMPTY_ROWS);
   };
   const summaries = [];
@@ -8456,9 +8463,12 @@ test("the daily summary carries a case library section: counts by type, the type
   assert.equal((full.match(/<li>[a-z_]+: \d+ clear/g) || []).length, Object.keys(CASE_TOPICS).length, 'every case type has its line');
   const short = Object.keys(CASE_TOPICS).filter(type => type !== 'surgical_error').join(', ');
   assert.ok(full.includes(`<p>Types with fewer than 5 clear decisions: ${short}.</p>`), full);
-  assert.ok(full.includes('<p>CourtListener requests today: chat-search 4, library 10.</p>'), full);
-  assert.ok(full.includes('<p>Replies today: 7 from the library, 3 live.</p>'), full);
+  assert.ok(full.includes('<p>CourtListener requests yesterday (New York day): chat-search 4, library 10.</p>'), full);
+  assert.ok(full.includes('<p>Replies yesterday: 7 from the library, 3 live.</p>'), full);
   assert.ok(full.includes('<p>CourtListener allowance left: 90 today, 40 this hour.</p>'), full);
+  const dayAskedAfter = newYorkDayOf(Date.now() - 24 * 60 * 60 * 1000);
+  assert.ok(usageDays.length >= 3, `the usage counts were read ${usageDays.length} times`);
+  assert.ok(usageDays.every(day => day === dayAskedBefore || day === dayAskedAfter), `the summary asked for ${usageDays.join(', ')}, not the previous New York day ${dayAskedBefore}`);
   // This app has no pinned decisions: the summary has no line for them, and asks for none.
   assert.ok(!full.includes('Pinned'), full);
   assert.ok(!queries.some(query => /pinned = TRUE/.test(query)), 'the pinned decisions were looked up');

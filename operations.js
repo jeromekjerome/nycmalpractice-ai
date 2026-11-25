@@ -220,7 +220,7 @@ const ALLOWANCE_READ_MS = 5000;
 
 async function caseLibrarySection() {
   try {
-    const [counts, usage] = await Promise.all([libraryCounts(sql), usageToday(sql)]);
+    const [counts, usage] = await Promise.all([libraryCounts(sql), usageToday(sql, new Date(Date.now() - 24 * 60 * 60 * 1000))]);
     const token = process.env.COURTLISTENER_TOKEN;
     const allowance = token ? await timeLimit(readAllowance({ token }), ALLOWANCE_READ_MS, 'The usage report').catch(() => null) : null;
     const types = Object.keys(CASE_TOPICS);
@@ -232,8 +232,8 @@ async function caseLibrarySection() {
     return `<ul>${types.map(type => `<li>${escapeHtml(type)}: ${of(type).clear} clear, ${of(type).unscreened} unscreened, ${of(type).held} held</li>`).join('')}</ul>` +
       `<p>Held for your decision: ${counts.held}.${counts.held > 0 ? ` Clear or ban them on the <a href="${escapeHtml(APP_URL)}/admin.html">admin page</a>.` : ''}</p>` +
       `<p>Types with fewer than ${MIN_CLEAR_DECISIONS} clear decisions: ${few.length ? few.map(escapeHtml).join(', ') : 'none'}.</p>` +
-      `<p>CourtListener requests today: ${requests.length ? requests.map(row => `${escapeHtml(row.job)} ${row.requests}`).join(', ') : 'none'}.</p>` +
-      `<p>Replies today: ${repliesOf(REPLIES_FROM_LIBRARY)} from the library, ${repliesOf(REPLIES_LIVE)} live.</p>` +
+      `<p>CourtListener requests yesterday (New York day): ${requests.length ? requests.map(row => `${escapeHtml(row.job)} ${row.requests}`).join(', ') : 'none'}.</p>` +
+      `<p>Replies yesterday: ${repliesOf(REPLIES_FROM_LIBRARY)} from the library, ${repliesOf(REPLIES_LIVE)} live.</p>` +
       `<p>${allowance ? `CourtListener allowance left: ${allowance.day} today, ${allowance.hour} this hour.` : 'The CourtListener allowance left could not be read.'}</p>`;
   } catch (err) {
     console.error('[digest] The case library could not be read, so the summary says so:', withoutKeys(err?.message ?? err));

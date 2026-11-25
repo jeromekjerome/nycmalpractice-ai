@@ -1,0 +1,52 @@
+{
+  "params": {
+    "type": "o",
+    "q": "caseName:(Perl AND Meher)",
+    "court": "ny",
+    "filed_after": "2010-06-08",
+    "order_by": "dateFiled desc"
+  },
+  "status": 200,
+  "count": 3,
+  "results": [
+    {
+      "cluster_id": 2522412,
+      "absolute_url": "/opinion/2522412/perl-v-meher/",
+      "caseName": "Perl v. Meher",
+      "court": "New York Court of Appeals",
+      "court_id": "ny",
+      "dateFiled": "2011-11-22",
+      "opinions": [
+        {
+          "snippet": "\n18 N.Y.3d 208 (2011)\n960 N.E.2d 424\n936 N.Y.S.2d 655\nJOSEPH PERL, et al., Appellants,\nv.\nMEHMOOD MEHER et al., Respondents.\nDAVID ADLER et al., Appellants,\nv.\nPINCUS BAYER et al., Respondents.\nSHEILA TRAVIS, Appellant, et al., Plaintiffs,\nv.\nNASSIROU M. BATCHI et al., Respondents.\nNos. 206, 207, 208.\nCourt of Appeals of New York.</"
+        }
+      ]
+    },
+    {
+      "cluster_id": 5641054,
+      "absolute_url": "/opinion/5641054/perl-v-meher/",
+      "caseName": "Perl v. Meher",
+      "court": "New York Court of Appeals",
+      "court_id": "ny",
+      "dateFiled": "2011-04-28",
+      "opinions": [
+        {
+          "snippet": "\nMotion by New York State Trial Lawyers Association for leave to file a brief amicus curiae on the appeal herein granted and the proposed brief is accepted as filed. Two copies of the brief must be served and 24 copies filed within seven days.\n"
+        }
+      ]
+    },
+    {
+      "cluster_id": 5641053,
+      "absolute_url": "/opinion/5641053/perl-v-meher/",
+      "caseName": "Perl v. Meher",
+      "court": "New York Court of Appeals",
+      "court_id": "ny",
+      "dateFiled": "2011-04-28",
+      "opinions": [
+        {
+          "snippet": "\nMotion by New Yorkers for Fair Automobile Insurance Reform for leave to file a brief amicus curiae on the appeal herein granted and the proposed brief is accepted as filed. Two copies of the brief must be served and 24 copies filed within seven days.\n"
+        }
+      ]
+    }
+  ]
+}

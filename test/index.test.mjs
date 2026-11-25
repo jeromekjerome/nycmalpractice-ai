@@ -1,6 +1,8 @@
 import './test-settings.mjs';
 import './app.test.mjs';
 import './requirements.test.mjs';
+import './courtlistener-usage.test.mjs';
+import './case-library.test.mjs';
 import './statute-watch.test.mjs';
 import './opinion-list.test.mjs';
 import './law-file.test.mjs';
@@ -25,6 +27,8 @@ import './measure-tools.test.mjs';
 import './probe-shapes.test.mjs';
 import './measure-app.test.mjs';
 import './test-settings.test.mjs';
+import './library-refresh.test.mjs';
+import './case-screen.test.mjs';
 
 import { run } from './runner.mjs';
 

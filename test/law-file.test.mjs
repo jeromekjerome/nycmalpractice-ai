@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
-  readLawFile, formatLawFile, writeLawFile, checkLawFile, earliestSourceDate, notesResting, registeredPlaces, requirementsResting, snapshotReader,
+  readLawFile, formatLawFile, writeLawFile, checkLawFile, earliestSourceDate, notesResting, registeredPlaces, requirementsResting, snapshotReader, caseNoticeFor,
 } from '../law-file.js';
 import { NO_NEW_OPINIONS } from '../opinion-list.js';
 import { renderCurrentLawForPrompt } from '../gatekeeper.js';
@@ -208,4 +208,50 @@ test('checkLawFile wants the key reviewed_on on a listing, null allowed', () => 
 
 test('checkLawFile accepts a register entry that names a listing', () => {
   assert.deepEqual(withListing((law) => { law.register.push({ file: 'ask.js', states: '90 days', count: 1, sources: ['OPS-1'], about: 'a listing' }); }), []);
+});
+
+const notice = () => ({ id: 'C1', case_types: ['auto'], text: 'A sentence about these decisions.', sources: ['CPLR-214'] });
+const withNotices = (list, change = () => {}) => problemsOf((law) => { law.case_notices = list; change(law); });
+
+test('checkLawFile accepts a file with no case_notices, an empty list and a sound notice', () => {
+  assert.deepEqual(checkLawFile(sound(), { snapshotOf }), []);
+  assert.deepEqual(withNotices([]), []);
+  assert.deepEqual(withNotices([notice()]), []);
+  assert.deepEqual(withNotices([notice(), { ...notice(), id: 'C2', case_types: ['slip', 'dog_bite'], sources: ['CPLR-214', 'NYCRR-1'] }]), []);
+});
+
+test('checkLawFile gives one problem for each defect of a case notice', () => {
+  const cases = [
+    ['an unknown source', () => [{ ...notice(), sources: ['NOPE-4'] }], undefined, /C1.*NOPE-4.*no source defines/],
+    ['a listing as a source', () => [{ ...notice(), sources: ['OPS-1'] }], law => law.sources.push(listing()), /C1.*OPS-1.*listing/],
+    ['no sources', () => [{ ...notice(), sources: [] }], undefined, /C1.*no sources/],
+    ['an empty text', () => [{ ...notice(), text: '  ' }], undefined, /C1.*text/],
+    ['no text', () => [{ ...notice(), text: undefined }], undefined, /C1.*text/],
+    ['an empty case_types', () => [{ ...notice(), case_types: [] }], undefined, /C1.*case_types/],
+    ['a blank case type', () => [{ ...notice(), case_types: ['auto', ''] }], undefined, /C1.*case_types/],
+    ['a repeated id', () => [notice(), notice()], undefined, /C1.*more than once/],
+    ['no id', () => [{ ...notice(), id: '' }], undefined, /no id/],
+  ];
+  for (const [name, list, change, expected] of cases) {
+    const problems = withNotices(list(), change);
+    assert.equal(problems.length, 1, `${name}: ${problems.join(' | ')}`);
+    assert.match(problems[0], expected, name);
+  }
+});
+
+test('caseNoticeFor gives the text of the first notice for the type, and null when there is none', () => {
+  const law = { case_notices: [{ ...notice(), id: 'C1', case_types: ['auto'], text: 'First.' }, { ...notice(), id: 'C2', case_types: ['auto', 'slip'], text: 'Second.' }] };
+  assert.equal(caseNoticeFor(law, 'auto'), 'First.');
+  assert.equal(caseNoticeFor(law, 'slip'), 'Second.');
+  assert.equal(caseNoticeFor(law, 'medical'), null);
+  assert.equal(caseNoticeFor({}, 'auto'), null);
+  assert.equal(caseNoticeFor({ case_notices: 'x' }, 'auto'), null);
+  assert.equal(caseNoticeFor(null, 'auto'), null);
+});
+
+test('a file with case_notices is written back exactly as formatLawFile gives it', () => {
+  const law = { ...sound(), case_notices: [notice()] };
+  const written = formatLawFile(law);
+  assert.equal(formatLawFile(JSON.parse(written)), written);
+  assert.deepEqual(checkLawFile(JSON.parse(written), { snapshotOf }), []);
 });

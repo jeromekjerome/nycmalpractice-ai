@@ -1,0 +1,11 @@
+{
+  "params": {
+    "type": "o",
+    "q": "cites:(9393674) AND (\"Bello overrule\"~15 OR \"Bello overrules\"~15 OR \"Bello overruled\"~15 OR \"Bello overruling\"~15 OR \"Bello abrogate\"~15 OR \"Bello abrogates\"~15 OR \"Bello abrogated\"~15 OR \"Bello abrogating\"~15 OR \"Bello supersede\"~15 OR \"Bello supersedes\"~15 OR \"Bello superseded\"~15 OR \"Bello superseding\"~15 OR \"Bello good law\"~15)",
+    "highlight": "on",
+    "order_by": "dateFiled desc"
+  },
+  "status": 200,
+  "count": 0,
+  "results": []
+}

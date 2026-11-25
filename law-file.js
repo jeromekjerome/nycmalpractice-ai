@@ -34,6 +34,12 @@ export function notesResting(law, id) {
   return listOf(law?.notes).filter(note => listOf(note?.sources).includes(id));
 }
 
+// The text of the first case notice for a case type, or null when there is none.
+export function caseNoticeFor(law, caseType) {
+  const found = listOf(law?.case_notices).find(item => listOf(item?.case_types).includes(caseType));
+  return typeof found?.text === 'string' && found.text ? found.text : null;
+}
+
 export function registeredPlaces(law, id) {
   return listOf(law?.register).filter(entry => listOf(entry?.sources).includes(id));
 }
@@ -122,6 +128,29 @@ export function checkLawFile(law, { snapshotOf } = {}) {
       if (!source) problems.push(`The note ${note.id} rests on ${id}, which no source defines.`);
       else if (source.kind === 'listing') problems.push(`The note ${note.id} rests on ${id}, which is a listing; a note rests only on a section, a bill or a source kept by hand.`);
       else if (source.kind === 'by_hand' && source.reviewed_on === null) problems.push(`The note ${note.id} rests on ${id}, which has not been reviewed.`);
+    }
+  }
+
+  const seenNotices = new Set();
+  for (const item of listOf(law?.case_notices)) {
+    const id = item?.id;
+    if (!present(id)) {
+      problems.push('A case notice has no id.');
+      continue;
+    }
+    if (seenNotices.has(id)) {
+      problems.push(`The case notice id ${id} is used more than once.`);
+      continue;
+    }
+    seenNotices.add(id);
+    if (typeof item.text !== 'string' || !item.text.trim()) problems.push(`The case notice ${id} says nothing in text.`);
+    const types = listOf(item.case_types);
+    if (!types.length || !types.every(type => typeof type === 'string' && type.trim())) problems.push(`The case notice ${id} needs a case_types list of non-empty case types.`);
+    if (!listOf(item.sources).length) problems.push(`The case notice ${id} names no sources.`);
+    for (const sourceId of listOf(item.sources)) {
+      const source = known.get(sourceId);
+      if (!source) problems.push(`The case notice ${id} rests on ${sourceId}, which no source defines.`);
+      else if (source.kind === 'listing') problems.push(`The case notice ${id} rests on ${sourceId}, which is a listing; a notice rests only on a section, a bill or a source kept by hand.`);
     }
   }
 

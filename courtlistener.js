@@ -2,6 +2,8 @@
 
 import { runJob } from './providers.js';
 import { chains } from './model-settings.js';
+import sql from './db.js';
+import { countRequests } from './courtlistener-usage.js';
 
 const CL_BASE = 'https://www.courtlistener.com/api/rest/v4';
 
@@ -17,6 +19,14 @@ const SEARCH_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const SEARCH_CACHE_MAX_ENTRIES = 200;
 const MAX_SPECIFIC_TERMS = 8;
 const searchCache = new Map();
+
+// The counts of requests sent that have not finished saving. A reply waits for them before it ends, so a function
+// that freezes after replying has not lost them.
+const countsInFlight = new Set();
+
+export function pendingCounts() {
+  return Promise.allSettled([...countsInFlight]);
+}
 
 export function clearSearchCache() {
   searchCache.clear();
@@ -127,6 +137,11 @@ async function runSearch(paramsObject, limit, scope, deadline, { cacheOnly = fal
   if (timeout <= 0) return { cases: [], stop: true };
 
   try {
+    // A request is counted before it is sent, so a failed or timed-out one counts, as CourtListener counts it.
+    // The count never throws; the reply waits for it through pendingCounts().
+    const counting = countRequests(sql, 'chat-search', 1);
+    countsInFlight.add(counting);
+    counting.finally(() => countsInFlight.delete(counting));
     const res = await fetch(url, {
       headers: getHeaders(),
       signal: AbortSignal.timeout(timeout),
@@ -173,6 +188,74 @@ async function runSearch(paramsObject, limit, scope, deadline, { cacheOnly = fal
     // A request that ran out of time may just have been a slow query: the simpler one on the next
     // rung can still fit in what is left of the budget. A connection failure will not.
     return { cases: [], stop: err?.name !== 'TimeoutError' };
+  }
+}
+
+// ─── The case library's requests ──────────────────────────────────────────────
+// Each is one request with no ladder, no second try and no cache. The refresh's two are counted here under the job `library`
+// before they are sent (the count is awaited, so a function that stops after the job has lost nothing); the screen's search
+// is counted by the screen. None throws: status 0 is a network error or a timeout.
+const LIBRARY_TIMEOUT_MS = 20_000;
+
+// One topic search: precedential New York decisions since 2015, best match first. Returns { results, status }.
+export async function searchTopic({ q, fetchImpl = fetch } = {}) {
+  const params = new URLSearchParams({
+    q: String(q ?? ''), type: 'o', order_by: 'score desc', filed_after: '2015-01-01', stat_Precedential: 'on',
+    court: process.env.COURTLISTENER_COURTS || DEFAULT_NY_COURTS,
+  });
+  await countRequests(sql, 'library', 1);
+  try {
+    const res = await fetchImpl(`${CL_BASE}/search/?${params}`, { headers: getHeaders(), signal: AbortSignal.timeout(LIBRARY_TIMEOUT_MS) });
+    if (!res.ok) {
+      console.error('CourtListener topic search failed:', res.status, res.statusText);
+      return { results: [], status: res.status };
+    }
+    const data = await res.json();
+    return { results: Array.isArray(data?.results) ? data.results : [], status: res.status };
+  } catch (err) {
+    console.error('CourtListener topic search error:', err.message);
+    return { results: [], status: 0 };
+  }
+}
+
+// One citation lookup of the text given (citations separated by line breaks). Returns { status, body }, the body being the
+// list of citations the lookup found, each with its clusters.
+export async function lookupCitations({ text, fetchImpl = fetch } = {}) {
+  await countRequests(sql, 'library', 1);
+  try {
+    const res = await fetchImpl(`${CL_BASE}/citation-lookup/`, {
+      method: 'POST',
+      headers: { ...getHeaders(), 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ text: String(text ?? '') }).toString(),
+      signal: AbortSignal.timeout(LIBRARY_TIMEOUT_MS),
+    });
+    if (!res.ok) {
+      console.error('CourtListener citation lookup failed:', res.status, res.statusText);
+      return { status: res.status, body: null };
+    }
+    return { status: res.status, body: await res.json() };
+  } catch (err) {
+    console.error('CourtListener citation lookup error:', err.message);
+    return { status: 0, body: null };
+  }
+}
+
+// One search for the nightly screen (case-screen.js), with the parameters it gives. The screen counts the request under the
+// job `screen` before it calls this, so it is not counted here. Returns { status, body }; never throws. Its timeout goes with
+// the screen's time budget (case-screen.js): the last request starts by 235 s and so ends by 280 s, inside the 300 s of the
+// jobs function (api/jobs.js). A heavily cited decision's question took 25 s when the words were tuned.
+const SCREEN_TIMEOUT_MS = 45_000;
+export async function searchForScreen({ params, fetchImpl = fetch } = {}) {
+  try {
+    const res = await fetchImpl(`${CL_BASE}/search/?${new URLSearchParams(params || {})}`, { headers: getHeaders(), signal: AbortSignal.timeout(SCREEN_TIMEOUT_MS) });
+    if (!res.ok) {
+      console.error('CourtListener screen search failed:', res.status, res.statusText);
+      return { status: res.status, body: null };
+    }
+    return { status: res.status, body: await res.json() };
+  } catch (err) {
+    console.error('CourtListener screen search error:', err.message);
+    return { status: 0, body: null };
   }
 }
 

@@ -1,0 +1,11 @@
+{
+  "params": {
+    "type": "o",
+    "q": "cites:(7084086) AND (\"Rodriguez overrule\"~15 OR \"Rodriguez overrules\"~15 OR \"Rodriguez overruled\"~15 OR \"Rodriguez overruling\"~15 OR \"Rodriguez abrogate\"~15 OR \"Rodriguez abrogates\"~15 OR \"Rodriguez abrogated\"~15 OR \"Rodriguez abrogating\"~15 OR \"Rodriguez supersede\"~15 OR \"Rodriguez supersedes\"~15 OR \"Rodriguez superseded\"~15 OR \"Rodriguez superseding\"~15 OR \"Rodriguez good law\"~15)",
+    "highlight": "on",
+    "order_by": "dateFiled desc"
+  },
+  "status": 200,
+  "count": 0,
+  "results": []
+}

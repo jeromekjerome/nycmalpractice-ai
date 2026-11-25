@@ -1,0 +1,272 @@
+{
+  "params": {
+    "type": "o",
+    "q": "cites:(3588600) AND (\"Mitchell overrule\"~15 OR \"Mitchell overrules\"~15 OR \"Mitchell overruled\"~15 OR \"Mitchell overruling\"~15 OR \"Mitchell abrogate\"~15 OR \"Mitchell abrogates\"~15 OR \"Mitchell abrogated\"~15 OR \"Mitchell abrogating\"~15 OR \"Mitchell supersede\"~15 OR \"Mitchell supersedes\"~15 OR \"Mitchell superseded\"~15 OR \"Mitchell superseding\"~15 OR \"Mitchell good law\"~15)",
+    "highlight": "on",
+    "order_by": "dateFiled desc"
+  },
+  "status": 200,
+  "count": 34,
+  "results": [
+    {
+      "cluster_id": 10717771,
+      "absolute_url": "/opinion/10717771/sanmiguel-v-grimaldi/",
+      "caseName": "SanMiguel v. Grimaldi",
+      "court": "New York Court of Appeals",
+      "court_id": "ny",
+      "dateFiled": "2025-10-21",
+      "opinions": [
+        {
+          "snippet": "Comstock, 257 NY at 239; <mark>Mitchell</mark> v Rochester Ry. Co., 151 NY 107, 110 [1896], <mark>overruled</mark> by Battalla v State"
+        }
+      ]
+    },
+    {
+      "cluster_id": 9382716,
+      "absolute_url": "/opinion/9382716/brown-v-new-york-design-ctr-inc/",
+      "caseName": "Brown v. New York Design Ctr., Inc.",
+      "court": "Appellate Division of the Supreme Court of the State of New York",
+      "court_id": "nyappdiv",
+      "dateFiled": "2023-03-09",
+      "opinions": [
+        {
+          "snippet": "emotional distress (<mark>Mitchell</mark> v Rochester Ry. Co., 151 NY 107, 110 [1896]), the Court <mark>overruled</mark> Mitchell, stating"
+        }
+      ]
+    },
+    {
+      "cluster_id": 4857354,
+      "absolute_url": "/opinion/4857354/stacy-greene-v-esplanade-venture-partnership/",
+      "caseName": "Stacy Greene v. Esplanade Venture Partnership",
+      "court": "New York Court of Appeals",
+      "court_id": "ny",
+      "dateFiled": "2021-02-18",
+      "opinions": [
+        {
+          "snippet": "State of New York                                                      OPINION\nCourt of Appeals                                        This opinion is uncorrected and subject to revision\n                                                          before publication in the New York Reports.\n\n\n\n\n No. 6\n Stacy Greene, &amp;c., et al.,\n          Appellants,\n       v.\n Esplanade Venture Partnership, et\n al.,\n          Respondents,\n et al.,\n          Defendant.\n\n\n\n\n Ben B. Rubinowitz, for appellants.\n Jonathan"
+        }
+      ]
+    },
+    {
+      "cluster_id": 2811297,
+      "absolute_url": "/opinion/2811297/taggart-v-costabile/",
+      "caseName": "Taggart v. Costabile",
+      "court": "Appellate Division of the Supreme Court of the State of New York",
+      "court_id": "nyappdiv",
+      "dateFiled": "2015-06-24",
+      "opinions": [
+        {
+          "snippet": "\n\n\n  OPINION OF THE COURT\n \n\n  Miller, J.\n \n\n  Among the issues presented for our review on this appeal is whether the plaintiffs have stated a cause of action alleging negligent infliction of emotional distress. In order to evaluate this issue it is necessary to consider whether an allegation of extreme and outrageous conduct is an essential element of that cause of action. Although decisions of this Court have, on occasion, included language indicating that it is, we now clarify that extreme and"
+        }
+      ]
+    },
+    {
+      "cluster_id": 6344136,
+      "absolute_url": "/opinion/6344136/gerson-v-giorgio-santangelo-collectibles-inc/",
+      "caseName": "Gerson v. Giorgio Sant'Angelo Collectibles, Inc.",
+      "court": "New York Supreme Court",
+      "court_id": "nysupct",
+      "dateFiled": "1998-04-03",
+      "opinions": [
+        {
+          "snippet": "\n*389OPINION OF THE COURT\nLorraine S. Miller, J.\nPlaintiff is a female employee of defendant, Giorgio Sant’Angelo Collectibles, Inc. (Giorgio), which operates a garment center clothing business. She is seeking to hold Giorgio and its president and chief executive officer, Nathan Shapiro (Shapiro), liable for sex discrimination pursuant to Executive Law § 296 (1) (a), known as the Human Rights Law of the State of New York, unlawful gender discrimination under Administrative Code of the City of New"
+        }
+      ]
+    },
+    {
+      "cluster_id": 2468758,
+      "absolute_url": "/opinion/2468758/camper-v-minor/",
+      "caseName": "Camper v. Minor",
+      "court": "Tennessee Supreme Court",
+      "court_id": "tenn",
+      "dateFiled": "1996-01-29",
+      "opinions": [
+        {
+          "snippet": "\n915 S.W.2d 437 (1996)\nBobby L. CAMPER, III, Plaintiff-Appellant,\nv.\nDaniel B. MINOR, Administrator ad litem of the Estate of Jennifer L. Taylor, and Sharon R. Barnett, Defendants-Appellees.\nSupreme Court of Tennessee, at Knoxville.\nJanuary 29, 1996.\n*438 John P. Chiles, Eilers & Chiles, Kingsport, Thomas F. Bloom, Nashville, for Plaintiff-Appellant.\nJack M. Vaughn, Fuller & Vaughn, Kingsport, for Defendants-Appellees.\n\nOPINION\nDROWOTA, Justice.\nIn this negligent infliction of emotional distress"
+        }
+      ]
+    },
+    {
+      "cluster_id": 1442329,
+      "absolute_url": "/opinion/1442329/hassanein-v-avianca-airlines/",
+      "caseName": "Hassanein v. Avianca Airlines",
+      "court": "District Court, E.D. New York",
+      "court_id": "nyed",
+      "dateFiled": "1995-01-10",
+      "opinions": [
+        {
+          "snippet": "\n872 F.Supp. 1183 (1995)\nAdrienne King HASSANEIN and Richard C. Hassanein, Plaintiffs,\nv.\nAVIANCA AIRLINES, Defendant.\nNo. 90-CV-2069 (TCP).\nUnited States District Court, E.D. New York.\nJanuary 10, 1995.\n*1184 *1185 E. Kevin Agoglia, Agoglia, Fassberg, Magee & Crowe, P.C., Mineola, NY, for plaintiffs Adrienne King Hassanein and Richard C. Hassanein.\nMichael J. Holland, Condon & Forsyth, New York City, for defendant Avianca Airlines.\n\nMEMORANDUM AND ORDER\nPLATT, Chief Judge.\nPlaintiffs Adrienne King"
+        }
+      ]
+    },
+    {
+      "cluster_id": 6080472,
+      "absolute_url": "/opinion/6080472/ferrara-v-bernstein/",
+      "caseName": "Ferrara v. Bernstein",
+      "court": "Appellate Division of the Supreme Court of the State of New York",
+      "court_id": "nyappdiv",
+      "dateFiled": "1992-04-02",
+      "opinions": [
+        {
+          "snippet": "\nMurphy, P. J.\n(concurring). While I agree with the majority that plaintiff’s damage claim for psychic injury meets the current standards for such recovery, I cannot agree with the majority’s reasoning in applying that standard. Therefore, I write separately to address the issue of when damages may be recovered for psychic injuries under existing law.\nThe emerging body of law governing when damages for psychic injury may be recovered has eliminated the former \"bright line” requirement that in all"
+        }
+      ]
+    },
+    {
+      "cluster_id": 1939494,
+      "absolute_url": "/opinion/1939494/williams-v-baker/",
+      "caseName": "Williams v. Baker",
+      "court": "District of Columbia Court of Appeals",
+      "court_id": "dc",
+      "dateFiled": "1990-04-09",
+      "opinions": [
+        {
+          "snippet": "A.2d 84 (1970); <mark>Mitchell</mark> v. Rochester Ry., 151 N.Y. 107, 45 N.E. 354 (1896), <mark>overruled</mark> by Battalla v."
+        }
+      ]
+    },
+    {
+      "cluster_id": 1675989,
+      "absolute_url": "/opinion/1675989/st-elizabeth-hospital-v-garrard/",
+      "caseName": "St. Elizabeth Hospital v. Garrard",
+      "court": "Texas Supreme Court",
+      "court_id": "tex",
+      "dateFiled": "1987-06-24",
+      "opinions": [
+        {
+          "snippet": "\nOPINION\nRAY, Justice.\nThe question presented in this personal injury case is whether the physical manifestation requirement remains an element of claims for negligent infliction of mental anguish. The trial court dismissed the plaintiffs’ case because their petition sought recovery for mental anguish damages, negligently inflicted, which were not alleged to have resulted in physical injury. The court of appeals held that this court had previously eliminated the physical manifestation requirement"
+        }
+      ]
+    },
+    {
+      "cluster_id": 6336345,
+      "absolute_url": "/opinion/6336345/fusco-v-general-motors-corp/",
+      "caseName": "Fusco v. General Motors Corp.",
+      "court": "New York County Courts",
+      "court_id": "nycountyct",
+      "dateFiled": "1984-12-13",
+      "opinions": [
+        {
+          "snippet": "\nOPINION OF THE COURT\nKenneth H. Lange, J.\nThis action to recover damages for emotional and economic harm allegedly occasioned as the result of the malfunction of a General Motors automobile presents two significant questions. First, can the plaintiff state a cause of action for emotional injuries in the absence of any physical symptoms? Second, is the exclusion of consequential damages from the General Motors limited warranty (and specifically the cost of renting a replacement vehicle) unconscionable"
+        }
+      ]
+    },
+    {
+      "cluster_id": 5686236,
+      "absolute_url": "/opinion/5686236/kennedy-v-mckesson-co/",
+      "caseName": "Kennedy v. McKesson Co.",
+      "court": "New York Court of Appeals",
+      "court_id": "ny",
+      "dateFiled": "1983-03-31",
+      "opinions": [
+        {
+          "snippet": "noted the theoretical flaws in <mark>Mitchell</mark> (supra), but declined to <mark>overrule</mark> it. Instead, the court held that"
+        }
+      ]
+    },
+    {
+      "cluster_id": 6331004,
+      "absolute_url": "/opinion/6331004/vaccaro-v-squibb-corp/",
+      "caseName": "Vaccaro v. Squibb Corp.",
+      "court": "New York Supreme Court",
+      "court_id": "nysupct",
+      "dateFiled": "1978-11-01",
+      "opinions": [
+        {
+          "snippet": "\n*908OPINION OF THE COURT\nAlfred M. Ascione, J.\nThis is a motion and cross motion by certain of the defendants to dismiss specified causes of action of plaintiffs’ complaint in Action No. 2 of this consolidated medical malpractice action.\nThe plaintiffs in Action No. 1, Martha Vaccaro, an infant, by her father and natural guardian, Juan Vaccaro, and Juan Vaccaro, individually, have sued the defendants Squibb Corporation, E. R. Squibb & Sons, Inc. (the Squibb defendants), Emil E. Maffucci (the physician)"
+        }
+      ]
+    },
+    {
+      "cluster_id": 5965464,
+      "absolute_url": "/opinion/5965464/cohen-v-varig-airlines/",
+      "caseName": "Cohen v. Varig Airlines",
+      "court": "Appellate Division of the Supreme Court of the State of New York",
+      "court_id": "nyappdiv",
+      "dateFiled": "1978-05-02",
+      "opinions": [
+        {
+          "snippet": "\nOPINION OF THE COURT\nSullivan, J.\nThe only issue presented on this appeal is the amount of damages to which plaintiffs are entitled. Plaintiffs, airline passengers, sued for and recovered the full value of luggage checked with and subsequently lost by the defendant, Varig airlines, as well as consequential damages for the mental and emotional suffering, physical discomfort and inconvenience resulting therefrom. Both parties concede that inasmuch as an international flight was involved the Warsaw"
+        }
+      ]
+    },
+    {
+      "cluster_id": 1267888,
+      "absolute_url": "/opinion/1267888/hunsley-v-giard/",
+      "caseName": "Hunsley v. Giard",
+      "court": "Washington Supreme Court",
+      "court_id": "wash",
+      "dateFiled": "1976-08-19",
+      "opinions": [
+        {
+          "snippet": "speculative claims.\nThe <mark>Mitchell</mark> rule survived in New York until 1961 when it was <mark>overruled</mark> in Battalla v. State"
+        }
+      ]
+    },
+    {
+      "cluster_id": 1854719,
+      "absolute_url": "/opinion/1854719/first-national-bank-v-langley/",
+      "caseName": "First National Bank v. Langley",
+      "court": "Mississippi Supreme Court",
+      "court_id": "miss",
+      "dateFiled": "1975-05-05",
+      "opinions": [
+        {
+          "snippet": "\n314 So.2d 324 (1975)\nFIRST NATIONAL BANK\nv.\nJames LANGLEY.\nNo. 47996.\nSupreme Court of Mississippi.\nMay 5, 1975.\nRehearing Denied July 7, 1975.\n*325 Watkins & Eager, W.F. Goodman, Jr., Thomas M. Murphree, Jr., Jackson, for appellant.\nDavey L. Tucker, Jackson, for appellee.\nBefore RODGERS, INZER and WALKER, JJ.\nRODGERS, Presiding Justice.\nThe plaintiff James Langley brought suit in the Circuit Court of the First Judicial District of Hinds County, Mississippi, against the First National Bank of Jackson"
+        }
+      ]
+    },
+    {
+      "cluster_id": 6327139,
+      "absolute_url": "/opinion/6327139/herman-v-state/",
+      "caseName": "Herman v. State",
+      "court": "New York Court of Claims",
+      "court_id": "nyclaimsct",
+      "dateFiled": "1974-06-25",
+      "opinions": [
+        {
+          "snippet": "\nEdward J. Amann, Jr., J.\nThis is a claim for damages for personal injuries and property damages allegedly sustained by the claimants as a result of the negligence of the New York State Police.\nThe claim was filed with the Clerk of the Court of Claims on September 29, 1972 and was thereafter served on the office of the Attorney-General. The claim has neither been assigned nor submitted to any other court or tribunal for audit or determination.\nIn the early morning hours of September 20, 1972, the"
+        }
+      ]
+    },
+    {
+      "cluster_id": 1756857,
+      "absolute_url": "/opinion/1756857/gilliam-v-stewart/",
+      "caseName": "Gilliam v. Stewart",
+      "court": "Supreme Court of Florida",
+      "court_id": "fla",
+      "dateFiled": "1974-01-10",
+      "opinions": [
+        {
+          "snippet": "Court stated:\n\"It is our opinion that <mark>Mitchell</mark> should be <mark>overruled</mark>. It is undisputed that a rigorous application"
+        }
+      ]
+    },
+    {
+      "cluster_id": 1222247,
+      "absolute_url": "/opinion/1222247/hughes-v-moore/",
+      "caseName": "Hughes v. Moore",
+      "court": "Supreme Court of Virginia",
+      "court_id": "va",
+      "dateFiled": "1973-06-11",
+      "opinions": [
+        {
+          "snippet": "\n214 Va. 27 (1973)\nTOY E. HUGHES\nv.\nSUE ETTA MOORE.\nRecord No. 8100.\nSupreme Court of Virginia.\nJune 11, 1973.\nPresent, All the Justices.\n1.  Moore was standing inside her home looking through a picture window when she heard and saw Hughes' car crash into front porch of house and, after initial collision, move back and forth several times.  There may be a recovery for negligent conduct, notwithstanding lack of physical impact, provided injured party pleads and proves by clear and convincing evidence"
+        }
+      ]
+    },
+    {
+      "cluster_id": 6324052,
+      "absolute_url": "/opinion/6324052/blair-v-union-free-school-district-no-6/",
+      "caseName": "Blair v. Union Free School District No. 6",
+      "court": "Suffolk County District Court",
+      "court_id": "nydistctsuffolk",
+      "dateFiled": "1971-07-27",
+      "opinions": [
+        {
+          "snippet": "\nLawrence Newmark, J.\nDefendants move for an order dismissing the complaint on the ground that it does not set forth a cause of action.\nThe complaint would appear to be grounded on invasion of privacy and intentional or negligent infliction of emotional distress. For the purpose of this motion, it makes no difference whether the alleged emotional distress was intentional or not. In addition, the complaint seeks to reinforce whatever duty the defendants may have to respect the confidence by alleging"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,116 @@
+{
+  "params": {
+    "type": "o",
+    "q": "cites:(5481237) AND (\"Campo overrule\"~15 OR \"Campo overrules\"~15 OR \"Campo overruled\"~15 OR \"Campo overruling\"~15 OR \"Campo abrogate\"~15 OR \"Campo abrogates\"~15 OR \"Campo abrogated\"~15 OR \"Campo abrogating\"~15 OR \"Campo supersede\"~15 OR \"Campo supersedes\"~15 OR \"Campo superseded\"~15 OR \"Campo superseding\"~15 OR \"Campo good law\"~15)",
+    "highlight": "on",
+    "order_by": "dateFiled desc"
+  },
+  "status": 200,
+  "count": 8,
+  "results": [
+    {
+      "cluster_id": 1467978,
+      "absolute_url": "/opinion/1467978/andrulonis-v-united-states/",
+      "caseName": "Andrulonis v. United States",
+      "court": "District Court, N.D. New York",
+      "court_id": "nynd",
+      "dateFiled": "1989-12-15",
+      "opinions": [
+        {
+          "snippet": "\n724 F.Supp. 1421 (1989)\nJoanna ANDRULONIS, Individually, and as Conservator of the Property of Jerome Andrulonis, Plaintiffs,\nv.\nUNITED STATES of America; Glatt Air Techniques, Inc.; Glatt GmbH; Wisconsin Alumni Research Foundation, Inc.; WARF Institute, Inc.; Raltech Scientific Services, Inc.; Ralston Purina Company; Eli Lilly and Company; and John L. Thompson and Sons and Company, Defendants.\nUNITED STATES of America, Third-Party Plaintiff,\nv.\nNEW YORK STATE DEPARTMENT OF HEALTH, Third-Party Defendant"
+        }
+      ]
+    },
+    {
+      "cluster_id": 5632959,
+      "absolute_url": "/opinion/5632959/arbegast-v-board-of-education/",
+      "caseName": "Arbegast v. Board of Education",
+      "court": "New York Court of Appeals",
+      "court_id": "ny",
+      "dateFiled": "1985-06-06",
+      "opinions": [
+        {
+          "snippet": "examples see, 1 NY PJI2d 193-195.\n\n\n. The <mark>Campo</mark> case was <mark>overruled</mark> in Micallef v Miehle Co. (39 NY2d 376"
+        }
+      ]
+    },
+    {
+      "cluster_id": 438795,
+      "absolute_url": "/opinion/438795/james-pressley-v-sears-roebuck-and-company-and-roper-corporation/",
+      "caseName": "James Pressley v. Sears-Roebuck and Company and Roper Corporation",
+      "court": "Court of Appeals for the Eleventh Circuit",
+      "court_id": "ca11",
+      "dateFiled": "1984-08-13",
+      "opinions": [
+        {
+          "snippet": "cases:\n  \n   <mark>Campo</mark> v. Scofield,\n  \n  301 N.Y. 468, 95 N.E.2d 802 (1950), which was <mark>overruled</mark> in\n  \n   Micallef"
+        }
+      ]
+    },
+    {
+      "cluster_id": 6007738,
+      "absolute_url": "/opinion/6007738/roberts-v-macfarland-construction-companies/",
+      "caseName": "Roberts v. MacFarland Construction Companies",
+      "court": "Appellate Division of the Supreme Court of the State of New York",
+      "court_id": "nyappdiv",
+      "dateFiled": "1984-06-21",
+      "opinions": [
+        {
+          "snippet": "\n— Appeal from an order of the Supreme Court at Special Term (Torraca, J.), entered June 2, 1983 in Albany County, which, inter alia, denied defendant’s motion for summary judgment dismissing the complaint, f The issue presented in this case is whether, in a negligence action to recover damages for personal injuries sustained in a fall on water accumulated on a warehouse floor due to the alleged negligence of the builder, it is necessary to allege in the complaint and to prove the existence of a"
+        }
+      ]
+    },
+    {
+      "cluster_id": 1580062,
+      "absolute_url": "/opinion/1580062/holm-v-sponco-mfg-inc/",
+      "caseName": "Holm v. Sponco Mfg., Inc.",
+      "court": "Supreme Court of Minnesota",
+      "court_id": "minn",
+      "dateFiled": "1982-08-31",
+      "opinions": [
+        {
+          "snippet": "existence of a latent defect was not alleged. <mark>Campo</mark> was <mark>overruled</mark> by that same court within a matter of weeks"
+        }
+      ]
+    },
+    {
+      "cluster_id": 1607323,
+      "absolute_url": "/opinion/1607323/auburn-mach-works-co-inc-v-jones/",
+      "caseName": "AUBURN MACH. WORKS, CO., INC. v. Jones",
+      "court": "Supreme Court of Florida",
+      "court_id": "fla",
+      "dateFiled": "1979-01-18",
+      "opinions": [
+        {
+          "snippet": "\n366 So.2d 1167 (1979)\nAUBURN MACHINE WORKS CO., INC., etc., Petitioner,\nv.\nClyde Pete JONES and Irma Jean Jones, His Wife, Respondents.\nNo. 53526.\nSupreme Court of Florida.\nJanuary 18, 1979.\nJacqueline R. Griffin, of Wells, Gattis & Hallowes, Orlando, for petitioner.\nRobert Orseck, Walter H. Beckham, Jr., Robert L. Parks and Joel D. Eaton, of Podhurst, Orseck & Parks, Miami, for respondents.\nALDERMAN, Justice.\nWe have for review the decision in Jones v. Auburn Machine Works Co., 353 So.2d 917 (Fla"
+        }
+      ]
+    },
+    {
+      "cluster_id": 5967394,
+      "absolute_url": "/opinion/5967394/bonito-v-peekskill-ford-motors-inc/",
+      "caseName": "Bonito v. Peekskill Ford Motors, Inc.",
+      "court": "Appellate Division of the Supreme Court of the State of New York",
+      "court_id": "nyappdiv",
+      "dateFiled": "1978-07-31",
+      "opinions": [
+        {
+          "snippet": "rule enunciated in <mark>Campo</mark> v Scofield (301 NY 468). This doctrine was expressly <mark>overruled</mark> in Micallef v Miehle"
+        }
+      ]
+    },
+    {
+      "cluster_id": 8911151,
+      "absolute_url": "/opinion/8911151/merced-v-auto-pak-co/",
+      "caseName": "Merced v. Auto Pak Co.",
+      "court": "Court of Appeals for the Second Circuit",
+      "court_id": "ca2",
+      "dateFiled": "1976-04-02",
+      "opinions": [
+        {
+          "snippet": "of some of the language in Bolm, that <mark>Campo</mark> is no longer <mark>good law</mark> in New York. Donnelly, 1972 Survey, supra"
+        }
+      ]
+    }
+  ]
+}

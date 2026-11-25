@@ -1,0 +1,87 @@
+{
+  "current_usage": [
+    {
+      "scope": "api_usage",
+      "rate": "10/min",
+      "used": 1,
+      "limit": 10,
+      "remaining": 9,
+      "window_seconds": 60,
+      "reset_at": "2026-11-24T17:59:56.647378+00:00",
+      "blocked": false
+    },
+    {
+      "scope": "api_usage",
+      "rate": "120/hour",
+      "used": 1,
+      "limit": 120,
+      "remaining": 119,
+      "window_seconds": 3600,
+      "reset_at": "2026-11-24T18:58:56.647378+00:00",
+      "blocked": false
+    },
+    {
+      "scope": "user",
+      "rate": "5/min",
+      "used": 0,
+      "limit": 5,
+      "remaining": 5,
+      "window_seconds": 60,
+      "reset_at": null,
+      "blocked": false
+    },
+    {
+      "scope": "user",
+      "rate": "50/hour",
+      "used": 0,
+      "limit": 50,
+      "remaining": 50,
+      "window_seconds": 3600,
+      "reset_at": null,
+      "blocked": false
+    },
+    {
+      "scope": "user",
+      "rate": "125/day",
+      "used": 0,
+      "limit": 125,
+      "remaining": 125,
+      "window_seconds": 86400,
+      "reset_at": null,
+      "blocked": false
+    },
+    {
+      "scope": "citations",
+      "rate": "60/min",
+      "used": 0,
+      "limit": 60,
+      "remaining": 60,
+      "window_seconds": 60,
+      "reset_at": null,
+      "blocked": false
+    },
+    {
+      "scope": "fetch",
+      "rate": "30/min",
+      "used": 0,
+      "limit": 30,
+      "remaining": 30,
+      "window_seconds": 60,
+      "reset_at": null,
+      "blocked": false
+    }
+  ],
+  "historical_usage": {
+    "2026-11-12": 33,
+    "2026-11-13": 34,
+    "2026-11-14": 18,
+    "2026-11-15": 1,
+    "2026-11-17": 13,
+    "2026-11-18": 11,
+    "2026-11-20": 51,
+    "2026-11-21": 5,
+    "2026-11-22": 2,
+    "total": 168
+  },
+  "membership": null
+}

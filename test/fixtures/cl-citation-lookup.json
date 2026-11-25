@@ -1,0 +1,34 @@
+[
+  {"citation": "31 N.Y.3d 312", "normalized_citations": ["31 N.Y.3d 312"], "status": 200, "clusters": [
+    {"id": 7173717, "absolute_url": "/opinion/7173717/rodriguez-v-city-of-ny/", "docket_id": 64162082, "case_name": "Rodriguez v. City of N.Y.", "date_filed": "2018-04-03",
+     "citations": [{"volume": "101", "reporter": "N.E.3d", "page": "366"}, {"volume": "31", "reporter": "N.Y.3d", "page": "312"}, {"volume": "76", "reporter": "N.Y.S.3d", "page": "898"}],
+     "sub_opinions": ["https://www.courtlistener.com/api/rest/v4/opinions/7084086/", "https://www.courtlistener.com/api/rest/v4/opinions/7084087/"]}]},
+  {"citation": "57 N.Y.2d 230", "normalized_citations": ["57 N.Y.2d 230"], "status": 200, "clusters": [
+    {"id": 5685956, "absolute_url": "/opinion/5685956/licari-v-elliott/", "docket_id": 62039383, "case_name": "Licari v. Elliott", "date_filed": "1982-10-14",
+     "citations": [{"volume": "57", "reporter": "N.Y.2d", "page": "230"}, {"volume": "441", "reporter": "N.E.2d", "page": "1088"}, {"volume": "455", "reporter": "N.Y.S.2d", "page": "570"}, {"volume": "33", "reporter": "A.L.R. 4th", "page": "759"}, {"volume": "1982", "reporter": "N.Y. LEXIS", "page": "3699"}],
+     "sub_opinions": ["https://www.courtlistener.com/api/rest/v4/opinions/5534961/"]}]},
+  {"citation": "98 N.Y.2d 345", "normalized_citations": ["98 N.Y.2d 345"], "status": 200, "clusters": [
+    {"id": 2057079, "absolute_url": "/opinion/2057079/toure-v-avis-rent-a-car-systems-inc/", "docket_id": 29625, "case_name": "Toure v. Avis Rent a Car Systems, Inc.", "date_filed": "2002-07-09",
+     "citations": [{"volume": "774", "reporter": "N.E.2d", "page": "1197"}, {"volume": "98", "reporter": "N.Y.2d", "page": "345"}, {"volume": "746", "reporter": "N.Y.S.2d", "page": "865"}],
+     "sub_opinions": ["https://www.courtlistener.com/api/rest/v4/opinions/2057079/"]}]},
+  {"citation": "4 N.Y.3d 566", "normalized_citations": ["4 N.Y.3d 566"], "status": 200, "clusters": [
+    {"id": 2058897, "absolute_url": "/opinion/2058897/pommells-v-perez/", "docket_id": 1902696, "case_name": "Pommells v. Perez", "date_filed": "2005-04-28",
+     "citations": [{"volume": "830", "reporter": "N.E.2d", "page": "278"}, {"volume": "4", "reporter": "N.Y.3d", "page": "566"}, {"volume": "797", "reporter": "N.Y.S.2d", "page": "380"}, {"volume": "2005", "reporter": "N.Y. LEXIS", "page": "1041"}],
+     "sub_opinions": ["https://www.courtlistener.com/api/rest/v4/opinions/2058897/"]}]},
+  {"citation": "18 N.Y.3d 208", "normalized_citations": ["18 N.Y.3d 208"], "status": 200, "clusters": [
+    {"id": 2522412, "absolute_url": "/opinion/2522412/perl-v-meher/", "docket_id": 1923438, "case_name": "Perl v. Meher", "date_filed": "2011-11-22",
+     "citations": [{"volume": "960", "reporter": "N.E.2d", "page": "424"}, {"volume": "18", "reporter": "N.Y.3d", "page": "208"}, {"volume": "936", "reporter": "N.Y.S.2d", "page": "655"}],
+     "sub_opinions": ["https://www.courtlistener.com/api/rest/v4/opinions/2522412/"]}]},
+  {"citation": "67 N.Y.2d 836", "normalized_citations": ["67 N.Y.2d 836"], "status": 200, "clusters": [
+    {"id": 5688271, "absolute_url": "/opinion/5688271/gordon-v-american-museum-of-natural-history/", "docket_id": 62041715, "case_name": "Gordon v. American Museum of Natural History", "date_filed": "1986-03-25",
+     "citations": [{"volume": "67", "reporter": "N.Y.2d", "page": "836"}, {"volume": "492", "reporter": "N.E.2d", "page": "774"}, {"volume": "501", "reporter": "N.Y.S.2d", "page": "646"}, {"volume": "1986", "reporter": "N.Y. LEXIS", "page": "17586"}],
+     "sub_opinions": ["https://www.courtlistener.com/api/rest/v4/opinions/5537442/"]}]},
+  {"citation": "10 N.Y.3d 517", "normalized_citations": ["10 N.Y.3d 517"], "status": 200, "clusters": [
+    {"id": 2042633, "absolute_url": "/opinion/2042633/vucetovic-v-epsom-downs/", "docket_id": 1876566, "case_name": "Vucetovic v. Epsom Downs", "date_filed": "2008-06-03",
+     "citations": [{"volume": "890", "reporter": "N.E.2d", "page": "191"}, {"volume": "10", "reporter": "N.Y.3d", "page": "517"}, {"volume": "860", "reporter": "N.Y.S.2d", "page": "429"}],
+     "sub_opinions": ["https://www.courtlistener.com/api/rest/v4/opinions/2042633/"]}]},
+  {"citation": "93 N.Y.2d 471", "normalized_citations": ["93 N.Y.2d 471"], "status": 200, "clusters": [
+    {"id": 2228481, "absolute_url": "/opinion/2228481/amabile-v-city-of-buffalo/", "docket_id": 2125952, "case_name": "Amabile v. City of Buffalo", "date_filed": "1999-06-08",
+     "citations": [{"volume": "715", "reporter": "N.E.2d", "page": "104"}, {"volume": "93", "reporter": "N.Y.2d", "page": "471"}, {"volume": "693", "reporter": "N.Y.S.2d", "page": "77"}, {"volume": "1999", "reporter": "N.Y. LEXIS", "page": "1300"}],
+     "sub_opinions": ["https://www.courtlistener.com/api/rest/v4/opinions/2228481/"]}]}
+]

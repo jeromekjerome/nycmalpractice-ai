@@ -1,0 +1,11 @@
+{
+  "params": {
+    "type": "o",
+    "q": "cites:(5534961) AND (\"Licari overrule\"~15 OR \"Licari overrules\"~15 OR \"Licari overruled\"~15 OR \"Licari overruling\"~15 OR \"Licari abrogate\"~15 OR \"Licari abrogates\"~15 OR \"Licari abrogated\"~15 OR \"Licari abrogating\"~15 OR \"Licari supersede\"~15 OR \"Licari supersedes\"~15 OR \"Licari superseded\"~15 OR \"Licari superseding\"~15 OR \"Licari good law\"~15)",
+    "highlight": "on",
+    "order_by": "dateFiled desc"
+  },
+  "status": 200,
+  "count": 0,
+  "results": []
+}

@@ -1,0 +1,12 @@
+{
+  "params": {
+    "type": "o",
+    "q": "caseName:(Bello AND Masters)",
+    "court": "ny",
+    "filed_after": "2023-05-10",
+    "order_by": "dateFiled desc"
+  },
+  "status": 200,
+  "count": 0,
+  "results": []
+}

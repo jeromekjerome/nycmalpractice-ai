@@ -63,7 +63,7 @@ async function withModelSettings(options, fn) {
   }
 }
 
-const { clearSearchCache, extractCaseType, searchMalpracticeCases } = await import('../courtlistener.js');
+const { clearSearchCache, extractCaseType, searchMalpracticeCases, searchTopic, lookupCitations, searchForScreen } = await import('../courtlistener.js');
 const { openaiAdapter } = await import('../provider-openai.js');
 // The chains the app runs with in these tests, the built-in ones, as the jobs read them (model-settings.js): a test of
 // what the app calls repeats no model's name. The embedding chain is no setting.
@@ -267,12 +267,22 @@ function throughEveryProvider(client) {
   return { adapters: { openai: adapter, anthropic: adapter, google: adapter } };
 }
 
+const usageInserts = [];
+let usageInsertDelayMs = 0;
+
 /** Run fn with every outbound request answered by handler(url, init). The local test server passes through. */
 async function withOutboundHttp(handler, fn) {
   const previous = activeFetch;
   activeFetch = async (input, init = {}) => {
     const url = typeof input === 'string' ? input : (input?.url ?? String(input));
     if (url.startsWith('http://127.0.0.1')) return realFetch(input, init);
+    // The count of CourtListener requests is kept apart, so that a test's own list of outbound requests holds only what it asks about.
+    if (url.endsWith('/sql') && typeof init.body === 'string' && /^\s*INSERT INTO courtlistener_usage/.test(JSON.parse(init.body).query)) {
+      const { params } = JSON.parse(init.body);
+      if (usageInsertDelayMs) await new Promise(resolve => setTimeout(resolve, usageInsertDelayMs));
+      usageInserts.push(params);   // recorded when the insert has finished
+      return jsonResponse(EMPTY_ROWS);
+    }
     return handler(url, init);
   };
   try {
@@ -972,6 +982,113 @@ test('searchMalpracticeCases stops sending requests once CourtListener throttles
     assert.deepEqual(await searchMalpracticeCases({ query: 'retained sponge after surgery', caseType: 'surgical_error' }), []);
   });
   assert.equal(requests.length, 1, 'a throttled token was asked again');
+});
+
+test('a chat message\'s live search counts each CourtListener request it sends, under chat-search', async () => {
+  clearSearchCache();
+  usageInserts.length = 0;
+  usageInsertDelayMs = 150;   // slow enough that a reply which did not wait for the count would end first
+  const world = fakeWorld({ nyResults: [CL_RESULT] });
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(world.handler, async () => {
+      const { response } = await postJson(server.baseUrl, '/api/ask', { question: 'My radiologist missed a tumor.', mode: 'personal', sessionId: 'sess-count-1', history: [] });
+      assert.equal(response.status, 200);
+    });
+    const sent = world.calls.courtListener.length;
+    assert.ok(sent >= 1);
+    assert.equal(usageInserts.length, sent, 'one count for each request sent, saved before the reply ended');
+    for (const params of usageInserts) assert.deepEqual(params.slice(1), ['chat-search', '1']);
+  } finally {
+    usageInsertDelayMs = 0;
+    await server.close();
+  }
+});
+
+test("a topic search is one request with the library's own parameters, counted under library before it is sent, and it never throws", async () => {
+  usageInserts.length = 0;
+  usageInsertDelayMs = 100;
+  const sent = [];
+  const answers = [() => jsonResponse({ results: [{ cluster_id: 5 }] }), () => jsonResponse({ detail: 'Request was throttled.' }, 429), () => { throw new Error('connection reset'); }, () => jsonResponse({ detail: 'nothing' })];
+  const fetchImpl = async (url, init) => {
+    sent.push({ url, init, counted: usageInserts.length });
+    return answers[sent.length - 1]();
+  };
+  try {
+    await capturingLogs(() => withOutboundHttp(async () => jsonResponse(EMPTY_ROWS), async () => {
+      assert.deepEqual(await searchTopic({ q: 'retained sponge', fetchImpl }), { results: [{ cluster_id: 5 }], status: 200 });
+      assert.deepEqual(await searchTopic({ q: 'retained sponge', fetchImpl }), { results: [], status: 429 });
+      assert.deepEqual(await searchTopic({ q: 'retained sponge', fetchImpl }), { results: [], status: 0 });
+      assert.deepEqual(await searchTopic({ q: 'retained sponge', fetchImpl }), { results: [], status: 200 });
+    }));
+    const url = new URL(sent[0].url);
+    assert.equal(url.origin + url.pathname, 'https://www.courtlistener.com/api/rest/v4/search/');
+    assert.deepEqual(Object.fromEntries(url.searchParams), {
+      q: 'retained sponge', type: 'o', order_by: 'score desc', filed_after: '2015-01-01', stat_Precedential: 'on', court: 'ny nysupct nyappdiv',
+    });
+    assert.equal(sent[0].init.headers.Authorization, 'Token cl-test-token');
+    assert.deepEqual(sent.map(call => call.counted), [1, 2, 3, 4], 'each request was counted before it was sent');
+    assert.equal(usageInserts.length, 4);
+    for (const params of usageInserts) assert.deepEqual(params.slice(1), ['library', '1']);
+  } finally {
+    usageInsertDelayMs = 0;
+  }
+});
+
+test('a citation lookup is one form POST counted under library, answers its status and body, and never throws', async () => {
+  usageInserts.length = 0;
+  const sent = [];
+  const answers = [() => jsonResponse([{ citation: '31 N.Y.3d 312', status: 200, clusters: [] }]), () => jsonResponse({ detail: 'Request was throttled.' }, 429), () => { throw new Error('connection reset'); }];
+  const fetchImpl = async (url, init) => {
+    sent.push({ url, init });
+    return answers[sent.length - 1]();
+  };
+  await capturingLogs(() => withOutboundHttp(async () => jsonResponse(EMPTY_ROWS), async () => {
+    assert.deepEqual(await lookupCitations({ text: '31 N.Y.3d 312\n57 N.Y.2d 230', fetchImpl }), { status: 200, body: [{ citation: '31 N.Y.3d 312', status: 200, clusters: [] }] });
+    assert.deepEqual(await lookupCitations({ text: 'x', fetchImpl }), { status: 429, body: null });
+    assert.deepEqual(await lookupCitations({ text: 'x', fetchImpl }), { status: 0, body: null });
+  }));
+  assert.equal(sent[0].url, 'https://www.courtlistener.com/api/rest/v4/citation-lookup/');
+  assert.equal(sent[0].init.method, 'POST');
+  assert.equal(sent[0].init.headers['Content-Type'], 'application/x-www-form-urlencoded');
+  assert.equal(sent[0].init.headers.Authorization, 'Token cl-test-token');
+  assert.equal(new URLSearchParams(sent[0].init.body).get('text'), '31 N.Y.3d 312\n57 N.Y.2d 230');
+  assert.equal(usageInserts.length, 3);
+  for (const params of usageInserts) assert.deepEqual(params.slice(1), ['library', '1']);
+});
+
+test("the screen's search is one request with the parameters it is given, not counted here, with a 45 second timeout, and it never throws", async () => {
+  usageInserts.length = 0;
+  const sent = [];
+  const answers = [() => jsonResponse({ count: 1, results: [{ cluster_id: 9 }] }), () => jsonResponse({ detail: 'Request was throttled.' }, 429), () => { throw new Error('connection reset'); }];
+  const fetchImpl = async (url, init) => {
+    sent.push({ url, init });
+    return answers[sent.length - 1]();
+  };
+  const params = { q: 'cites:(123)', type: 'o', highlight: 'on' };
+  await capturingLogs(() => withOutboundHttp(async () => jsonResponse(EMPTY_ROWS), async () => {
+    assert.deepEqual(await searchForScreen({ params, fetchImpl }), { status: 200, body: { count: 1, results: [{ cluster_id: 9 }] } });
+    assert.deepEqual(await searchForScreen({ params, fetchImpl }), { status: 429, body: null });
+    assert.deepEqual(await searchForScreen({ params, fetchImpl }), { status: 0, body: null });
+  }));
+  const url = new URL(sent[0].url);
+  assert.equal(url.origin + url.pathname, 'https://www.courtlistener.com/api/rest/v4/search/');
+  assert.deepEqual(Object.fromEntries(url.searchParams), params);
+  assert.equal(sent[0].init.headers.Authorization, 'Token cl-test-token');
+  assert.equal(usageInserts.length, 0, 'the screen counts its own requests');
+  const source = readFileSync(new URL('../courtlistener.js', import.meta.url), 'utf8');
+  assert.match(source, /SCREEN_TIMEOUT_MS = 45_000;/);
+});
+
+test('the case library, its usage and its topics are made by npm run setup-db, and the health check looks for their columns', () => {
+  const setup = readFileSync(new URL('../setup-db.js', import.meta.url), 'utf8').replace(/\s+/g, ' ');
+  assert.match(setup, /CREATE TABLE IF NOT EXISTS courtlistener_usage \( day DATE NOT NULL, job TEXT NOT NULL, requests INTEGER NOT NULL DEFAULT 0, PRIMARY KEY \(day, job\) \)/);
+  assert.match(setup, /CREATE TABLE IF NOT EXISTS case_library \( cluster_id BIGINT PRIMARY KEY, opinion_id BIGINT, docket_id BIGINT, case_name TEXT NOT NULL, citations JSONB NOT NULL DEFAULT '\[\]', court TEXT, court_id TEXT, date_filed DATE, snippet TEXT, url TEXT, case_types TEXT\[\] NOT NULL DEFAULT '\{\}', topics TEXT\[\] NOT NULL DEFAULT '\{\}', pinned BOOLEAN NOT NULL DEFAULT FALSE, first_found TIMESTAMPTZ NOT NULL DEFAULT NOW\(\), last_found TIMESTAMPTZ NOT NULL DEFAULT NOW\(\), screen_state TEXT NOT NULL DEFAULT 'unscreened',[^)]*screened_at TIMESTAMPTZ, hold JSONB, decided_at TIMESTAMPTZ, screen_tried_at TIMESTAMPTZ \)/);
+  assert.match(setup, /ALTER TABLE case_library ADD COLUMN IF NOT EXISTS screen_tried_at TIMESTAMPTZ/);
+  assert.match(setup, /CREATE INDEX IF NOT EXISTS idx_case_library_screen_state ON case_library\(screen_state\)/);
+  assert.match(setup, /CREATE TABLE IF NOT EXISTS library_topics \( topic_id TEXT PRIMARY KEY, last_run_at TIMESTAMPTZ, last_found INTEGER \)/);
+  const operations = readFileSync(new URL('../operations.js', import.meta.url), 'utf8').replace(/\s+/g, ' ');
+  assert.match(operations, /'courtlistener_usage\.requests', 'case_library\.screen_tried_at', 'library_topics\.last_found'\]/);
 });
 
 test('extractCaseType uses the small-job chain with failover', async () => {
@@ -5248,7 +5365,7 @@ test('/health/deep reports the database, its columns and the nightly job, for an
   const previous = process.env.HEALTH_DEEP_CACHE_MS;
   process.env.HEALTH_DEEP_CACHE_MS = '0';
   const columns = ['firms.card_declined_at', 'leads.decline_reason', 'user_interactions.outcome', 'job_runs.ran_at', 'ai_usage.created_at', 'auctions.reminder_sent_at',
-    'ai_provider_state.failed_replies', 'app_settings.value', 'model_measurements.bar_ok', 'provider_model_lists.models', 'statute_watch.unread_emailed_at', 'unconfirmed_charges.firm_id'];
+    'ai_provider_state.failed_replies', 'app_settings.value', 'model_measurements.bar_ok', 'provider_model_lists.models', 'statute_watch.unread_emailed_at', 'unconfirmed_charges.firm_id', 'courtlistener_usage.requests', 'case_library.screen_tried_at', 'library_topics.last_found'];
   const pgTime = ms => new Date(ms).toISOString().replace('T', ' ').replace('Z', '+00');
   let world = {};
   const handler = async (url, init) => {
@@ -5286,7 +5403,7 @@ test('/health/deep reports the database, its columns and the nightly job, for an
 test("/health/deep fails a database that lacks the provider state's table, the model settings' two or the model watch's, and names the columns it looked for", async () => {
   const previous = process.env.HEALTH_DEEP_CACHE_MS;
   process.env.HEALTH_DEEP_CACHE_MS = '0';
-  // Every column the check looks for except those of the five newest tables, as in a deploy whose npm run setup-db
+  // Every column the check looks for except those of the newest tables, as in a deploy whose npm run setup-db
   // was not run.
   const older = ['firms.card_declined_at', 'leads.decline_reason', 'user_interactions.outcome', 'job_runs.ran_at', 'ai_usage.created_at', 'auctions.reminder_sent_at'];
   const asked = [];
@@ -5306,8 +5423,8 @@ test("/health/deep fails a database that lacks the provider state's table, the m
   try {
     const { result, logs } = await capturingLogs(() => withOutboundHttp(handler, async () => (await fetch(`${server.baseUrl}/health/deep`)).json()));
     assert.deepEqual(result, { ok: false, database: 'ok', schema: 'missing columns', nightlyJob: 'ok', statuteWatch: 'not run yet', statuteWatchLastOk: null });
-    for (const table of ['ai_provider_state', 'app_settings', 'model_measurements', 'provider_model_lists', 'statute_watch', 'unconfirmed_charges']) assert.ok(asked.includes(table), `${table} was not looked for`);
-    assert.ok(logs.includes('[health] the database is missing columns the code uses: ai_provider_state.failed_replies, app_settings.value, model_measurements.bar_ok, provider_model_lists.models, statute_watch.unread_emailed_at, unconfirmed_charges.firm_id'), logs.join('\n'));
+    for (const table of ['ai_provider_state', 'app_settings', 'model_measurements', 'provider_model_lists', 'statute_watch', 'unconfirmed_charges', 'courtlistener_usage', 'case_library', 'library_topics']) assert.ok(asked.includes(table), `${table} was not looked for`);
+    assert.ok(logs.includes('[health] the database is missing columns the code uses: ai_provider_state.failed_replies, app_settings.value, model_measurements.bar_ok, provider_model_lists.models, statute_watch.unread_emailed_at, unconfirmed_charges.firm_id, courtlistener_usage.requests, case_library.screen_tried_at, library_topics.last_found'), logs.join('\n'));
   } finally {
     if (previous === undefined) delete process.env.HEALTH_DEEP_CACHE_MS; else process.env.HEALTH_DEEP_CACHE_MS = previous;
     await server.close();
@@ -7289,7 +7406,7 @@ test('/health/deep reports the statute watch: not run yet is healthy, failed and
   const previous = process.env.HEALTH_DEEP_CACHE_MS;
   process.env.HEALTH_DEEP_CACHE_MS = '0';
   const columns = ['firms.card_declined_at', 'leads.decline_reason', 'user_interactions.outcome', 'job_runs.ran_at', 'ai_usage.created_at', 'auctions.reminder_sent_at',
-    'ai_provider_state.failed_replies', 'app_settings.value', 'model_measurements.bar_ok', 'provider_model_lists.models', 'statute_watch.unread_emailed_at', 'unconfirmed_charges.firm_id'];
+    'ai_provider_state.failed_replies', 'app_settings.value', 'model_measurements.bar_ok', 'provider_model_lists.models', 'statute_watch.unread_emailed_at', 'unconfirmed_charges.firm_id', 'courtlistener_usage.requests', 'case_library.screen_tried_at', 'library_topics.last_found'];
   const pgTime = ms => new Date(ms).toISOString().replace('T', ' ').replace('Z', '+00');
   const now = Math.floor(Date.now() / 1000) * 1000;
   const lastGood = now - 3 * 3600_000;

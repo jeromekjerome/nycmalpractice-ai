@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Jerome W. Dewald. All rights reserved.
 
-import { searchMalpracticeCases, extractCaseType } from './courtlistener.js';
+import { searchMalpracticeCases, extractCaseType, pendingCounts } from './courtlistener.js';
 import { rememberCases, recallCases } from './case-memory.js';
 import { scoreLead } from './auction.js';
 import { runJob, withoutKeys } from './providers.js';
@@ -197,6 +197,7 @@ export async function answerUserQuestion({ question, mode = 'personal', sessionI
     console.error('[Gatekeeper] UNAVAILABLE — reply served UNGATED:', err);
   }
   await remembering;
+  await pendingCounts();
 
   return { answer, cases, caseType, leadScore, caseAnalysis, turn, evaluation };
 }

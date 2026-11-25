@@ -1,0 +1,11 @@
+{
+  "params": {
+    "type": "o",
+    "q": "cites:(5802405) AND (\"Perl overrule\"~15 OR \"Perl overrules\"~15 OR \"Perl overruled\"~15 OR \"Perl overruling\"~15 OR \"Perl abrogate\"~15 OR \"Perl abrogates\"~15 OR \"Perl abrogated\"~15 OR \"Perl abrogating\"~15 OR \"Perl supersede\"~15 OR \"Perl supersedes\"~15 OR \"Perl superseded\"~15 OR \"Perl superseding\"~15 OR \"Perl good law\"~15)",
+    "highlight": "on",
+    "order_by": "dateFiled desc"
+  },
+  "status": 200,
+  "count": 0,
+  "results": []
+}

@@ -267,6 +267,53 @@ async function setup() {
   `;
   console.log('✅ unconfirmed_charges');
 
+  // The requests each job sent to CourtListener on a New York day (courtlistener-usage.js).
+  await sql`
+    CREATE TABLE IF NOT EXISTS courtlistener_usage (
+      day      DATE NOT NULL,
+      job      TEXT NOT NULL,
+      requests INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (day, job)
+    )
+  `;
+
+  // The court decisions found on CourtListener, one row a decision, with the screen state that decides whether a reply may be given it (case-library.js).
+  await sql`
+    CREATE TABLE IF NOT EXISTS case_library (
+      cluster_id   BIGINT PRIMARY KEY,
+      opinion_id   BIGINT,
+      docket_id    BIGINT,
+      case_name    TEXT NOT NULL,
+      citations    JSONB NOT NULL DEFAULT '[]',
+      court        TEXT,
+      court_id     TEXT,
+      date_filed   DATE,
+      snippet      TEXT,
+      url          TEXT,
+      case_types   TEXT[] NOT NULL DEFAULT '{}',
+      topics       TEXT[] NOT NULL DEFAULT '{}',
+      pinned       BOOLEAN NOT NULL DEFAULT FALSE,
+      first_found  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_found   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      screen_state TEXT NOT NULL DEFAULT 'unscreened',  -- unscreened | clear | held | banned
+      screened_at  TIMESTAMPTZ,
+      hold         JSONB,
+      decided_at   TIMESTAMPTZ,
+      screen_tried_at TIMESTAMPTZ
+    )
+  `;
+  await sql`ALTER TABLE case_library ADD COLUMN IF NOT EXISTS screen_tried_at TIMESTAMPTZ`;  // the screen's last attempt on the row, answered or not
+  await sql`CREATE INDEX IF NOT EXISTS idx_case_library_screen_state ON case_library(screen_state)`;
+
+  // When each library topic was last searched and how many decisions that found.
+  await sql`
+    CREATE TABLE IF NOT EXISTS library_topics (
+      topic_id    TEXT PRIMARY KEY,
+      last_run_at TIMESTAMPTZ,
+      last_found  INTEGER
+    )
+  `;
+
   // The last decisions found for each case type, used when CourtListener cannot be searched (case-memory.js).
   await sql`
     CREATE TABLE IF NOT EXISTS search_cache (

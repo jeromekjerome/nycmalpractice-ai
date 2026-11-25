@@ -222,7 +222,8 @@ function repliesLine({ rows, first }) {
 // the built-in chains, so only this check shows that npm run setup-db was not run.
 const REQUIRED_COLUMNS = ['firms.card_declined_at', 'leads.decline_reason', 'user_interactions.outcome', 'job_runs.ran_at', 'ai_usage.created_at', 'auctions.reminder_sent_at',
   'ai_provider_state.failed_replies', 'app_settings.value', 'model_measurements.bar_ok', 'provider_model_lists.models',
-  'statute_watch.unread_emailed_at', 'unconfirmed_charges.firm_id'];
+  'statute_watch.unread_emailed_at', 'unconfirmed_charges.firm_id', 'courtlistener_usage.requests',
+  'case_library.screen_tried_at', 'library_topics.last_found'];
 let deepHealthCache = { at: 0, value: null };
 
 // For an uptime monitor: is the database reachable, does it have the columns the code uses, and did the nightly job

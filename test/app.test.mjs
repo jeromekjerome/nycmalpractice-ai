@@ -7859,6 +7859,102 @@ test('a refused or unanswered screen question makes the route answer 500 and rec
   }
 });
 
+// ─── The owner's decisions held: the admin routes ───
+const TEXT_ARRAY = 1009;
+
+test('the owner lists the held decisions, then clears or bans one; a decision that is not held answers 409', async () => {
+  const HELD_FIELDS = [['cluster_id', TEXT], ['case_name', TEXT], ['citations', JSONB], ['court', TEXT], ['date_filed', TEXT], ['url', TEXT], ['hold', JSONB], ['case_types', TEXT_ARRAY], ['pinned', BOOL]];
+  const hold = { found_at: '2026-11-25T23:00:13.000Z', question: 'citing', later: { case_name: 'Later v. Case', url: 'https://www.courtlistener.com/opinion/9/later-v-case/', court: 'New York Court of Appeals', date_filed: '2025-10-21' }, passage: 'a made-up passage' };
+  const heldRow = ['5685956', 'Licari v. Elliott', JSON.stringify(['57 N.Y.2d 230']), 'New York Court of Appeals', '1982-10-14', 'https://www.courtlistener.com/opinion/5685956/licari-v-elliott/', JSON.stringify(hold), '{surgical_error,misdiagnosis}', 'f'];
+  const states = new Map([['5685956', 'held'], ['5685957', 'clear'], ['5685958', 'held']]);   // the database's screen state of each decision
+  const sql = [];
+  const handler = async (url, init = {}) => {
+    if (!url.endsWith('/sql')) throw new Error(`Unexpected outbound request in test: ${url}`);
+    const { query, params } = JSON.parse(init.body);
+    const q = query.replace(/\s+/g, ' ').trim();
+    sql.push({ query: q, params });
+    if (/FROM case_library WHERE screen_state = 'held'/.test(q)) return rowsResponse(HELD_FIELDS, [heldRow]);
+    const write = /^UPDATE case_library SET screen_state = '(clear|banned)'/.exec(q);
+    if (write && /AND screen_state = 'held' RETURNING/.test(q)) {
+      const id = String(params.at(-1));
+      if (states.get(id) !== 'held') return rowsResponse([], [], 'UPDATE');
+      states.set(id, write[1]);
+      return rowsResponse([['cluster_id', TEXT]], [[id]], 'UPDATE');
+    }
+    return jsonResponse(EMPTY_ROWS);
+  };
+  const server = await startServer(app);
+  try {
+    await capturingLogs(() => withOutboundHttp(handler, async () => {
+      const admin = { 'x-admin-secret': process.env.ADMIN_SECRET };
+      const call = (method, path, headers = admin) => fetch(server.baseUrl + path, { method, headers }).then(async response => ({ status: response.status, body: await response.json() }));
+      for (const [method, path] of [['GET', '/api/admin/decisions'], ['POST', '/api/admin/decisions/5685956/clear'], ['POST', '/api/admin/decisions/5685956/ban']]) {
+        assert.equal((await call(method, path, {})).status, 401, path);
+        assert.equal((await call(method, path, { 'x-admin-secret': 'not-the-secret' })).status, 401, path);
+      }
+      assert.equal(sql.length, 0, 'the database was asked on a request without the secret');
+
+      for (const path of ['/api/admin/decisions', '/api/admin/decisions?state=held']) {
+        const list = await call('GET', path);
+        assert.equal(list.status, 200, path);
+        assert.equal(list.body.decisions.length, 1);
+        assert.deepEqual(list.body.decisions[0], { cluster_id: 5685956, case_name: 'Licari v. Elliott', citations: ['57 N.Y.2d 230'], court: 'New York Court of Appeals', date_filed: '1982-10-14', url: 'https://www.courtlistener.com/opinion/5685956/licari-v-elliott/', hold, case_types: ['misdiagnosis', 'surgical_error'], pinned: false });
+      }
+      const other = await call('GET', '/api/admin/decisions?state=clear');
+      assert.deepEqual([other.status, other.body], [400, { error: 'Only held decisions can be listed' }]);
+
+      for (const verb of ['clear', 'ban']) {
+        for (const id of ['abc', '12x', '-5', '1.5']) {
+          assert.equal((await call('POST', `/api/admin/decisions/${id}/${verb}`)).status, 400, `${verb} ${id}`);
+        }
+      }
+      const writes = () => sql.filter(entry => /^UPDATE case_library/.test(entry.query));
+      assert.equal(writes().length, 0, 'a bad id reached the database');
+
+      const cleared = await call('POST', '/api/admin/decisions/5685956/clear');
+      assert.deepEqual([cleared.status, cleared.body], [200, { ok: true, cluster_id: 5685956, screen_state: 'clear' }]);
+      assert.equal(states.get('5685956'), 'clear');
+      const again = await call('POST', '/api/admin/decisions/5685956/clear');
+      assert.deepEqual([again.status, again.body], [409, { error: 'That decision is not held' }]);
+      assert.equal((await call('POST', '/api/admin/decisions/5685956/ban')).status, 409, 'a cleared decision is not banned from this page');
+      assert.equal((await call('POST', '/api/admin/decisions/5685957/clear')).status, 409, 'a decision that was never held');
+
+      const banned = await call('POST', '/api/admin/decisions/5685958/ban');
+      assert.deepEqual([banned.status, banned.body], [200, { ok: true, cluster_id: 5685958, screen_state: 'banned' }]);
+      assert.equal(states.get('5685958'), 'banned');
+      assert.equal((await call('POST', '/api/admin/decisions/5685958/ban')).status, 409);
+      assert.equal((await call('POST', '/api/admin/decisions/5685958/clear')).status, 409, 'a banned decision is not cleared from this page');
+      for (const write of writes().filter(entry => /SET screen_state = 'clear'/.test(entry.query) && String(entry.params.at(-1)) === '5685956')) {
+        assert.equal(new Date(write.params[0]).toISOString(), write.params[0], 'the decision time is a timestamp');
+        assert.equal(write.params[0], write.params[1], 'a clear writes one time to both columns');
+      }
+    }));
+  } finally {
+    await server.close();
+  }
+});
+
+test('the admin routes answer 500 with the generic message when the database fails, and log no key', async () => {
+  const handler = async url => {
+    if (!url.endsWith('/sql')) throw new Error(`Unexpected outbound request in test: ${url}`);
+    return jsonResponse({ message: 'connection refused' }, 500);
+  };
+  const server = await startServer(app);
+  try {
+    const { logs } = await capturingLogs(() => withOutboundHttp(handler, async () => {
+      const admin = { 'x-admin-secret': process.env.ADMIN_SECRET };
+      for (const [method, path] of [['GET', '/api/admin/decisions'], ['POST', '/api/admin/decisions/5685956/clear'], ['POST', '/api/admin/decisions/5685956/ban']]) {
+        const response = await fetch(server.baseUrl + path, { method, headers: admin });
+        assert.equal(response.status, 500, path);
+        assert.deepEqual(await response.json(), { error: 'Something went wrong. Please try again.' }, path);
+      }
+    }));
+    assert.ok(!logs.join('\n').includes(process.env.ADMIN_SECRET), 'the admin secret is in the log');
+  } finally {
+    await server.close();
+  }
+});
+
 test("the daily summary carries a case library section: counts by type, the types short of clear decisions, the day's requests and replies, and what is left of the allowance", async () => {
   const { sendDailyDigest } = await import('../operations.js');
   const { CASE_TOPICS } = await import('../case-topics.js');
@@ -7873,7 +7969,11 @@ test("the daily summary carries a case library section: counts by type, the type
       if (state === 'broken') return jsonResponse({ message: 'relation "case_library" does not exist', code: '42P01' }, 400);
       return rowsResponse([['case_type', TEXT], ['screen_state', TEXT], ['n', INT]], [['surgical_error', 'clear', '6'], ['surgical_error', 'unscreened', '2'], ['misdiagnosis', 'clear', '4'], ['misdiagnosis', 'held', '1']]);
     }
-    if (/FROM case_library GROUP BY screen_state, pinned/.test(query)) return rowsResponse([['screen_state', TEXT], ['pinned', BOOL], ['n', INT]], [['clear', 'f', '10'], ['unscreened', 'f', '2'], ['held', 'f', '1']]);
+    if (/FROM case_library GROUP BY screen_state, pinned/.test(query)) {
+      // Two decisions held, one, or none.
+      const held = state === 'none-held' ? [] : state === 'ok' ? [['held', 'f', '2']] : [['held', 'f', '1']];
+      return rowsResponse([['screen_state', TEXT], ['pinned', BOOL], ['n', INT]], [['clear', 'f', '10'], ['unscreened', 'f', '2'], ...held]);
+    }
     if (/FROM courtlistener_usage WHERE day/.test(query)) return rowsResponse([['job', TEXT], ['requests', INT]], [['chat-search', '4'], ['library', '10'], ['replies-library', '7'], ['replies-live', '3']]);
     return jsonResponse(EMPTY_ROWS);
   };
@@ -7885,12 +7985,19 @@ test("the daily summary carries a case library section: counts by type, the type
       await sendDailyDigest();
       state = 'broken';
       await sendDailyDigest();
+      state = 'none-held';
+      await sendDailyDigest();
     });
     summaries.push(...sent.map(mail => String(mail.html)));
   })));
-  assert.equal(summaries.length, 3);
-  const [full, noAllowance, broken] = summaries;
+  assert.equal(summaries.length, 4);
+  const [full, noAllowance, broken, noneHeld] = summaries;
   assert.ok(full.includes('Case library'));
+  assert.ok(full.includes(`<p>Held for your decision: 2. Clear or ban them on the <a href="${process.env.APP_URL}/admin.html">admin page</a>.</p>`), full);
+  assert.ok(full.includes('</ul><p>Held for your decision'), 'the line follows the per-type list');
+  assert.ok(noAllowance.includes(`<p>Held for your decision: 1. Clear or ban them on the <a href="${process.env.APP_URL}/admin.html">admin page</a>.</p>`), noAllowance);
+  assert.ok(noneHeld.includes('<p>Held for your decision: 0.</p>'), noneHeld);
+  assert.ok(!noneHeld.includes('Clear or ban them'), 'a link to nothing to decide');
   assert.ok(full.includes('<li>surgical_error: 6 clear, 2 unscreened, 0 held</li>'), full);
   assert.ok(full.includes('<li>misdiagnosis: 4 clear, 0 unscreened, 1 held</li>'), full);
   assert.ok(full.includes('<li>other: 0 clear, 0 unscreened, 0 held</li>'), 'a type with no rows counts as 0');

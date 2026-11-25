@@ -230,6 +230,7 @@ async function caseLibrarySection() {
     const requests = usage.filter(row => !isReply(row));
     const repliesOf = job => usage.find(row => row.job === job)?.requests ?? 0;
     return `<ul>${types.map(type => `<li>${escapeHtml(type)}: ${of(type).clear} clear, ${of(type).unscreened} unscreened, ${of(type).held} held</li>`).join('')}</ul>` +
+      `<p>Held for your decision: ${counts.held}.${counts.held > 0 ? ` Clear or ban them on the <a href="${escapeHtml(APP_URL)}/admin.html">admin page</a>.` : ''}</p>` +
       `<p>Types with fewer than ${MIN_CLEAR_DECISIONS} clear decisions: ${few.length ? few.map(escapeHtml).join(', ') : 'none'}.</p>` +
       `<p>CourtListener requests today: ${requests.length ? requests.map(row => `${escapeHtml(row.job)} ${row.requests}`).join(', ') : 'none'}.</p>` +
       `<p>Replies today: ${repliesOf(REPLIES_FROM_LIBRARY)} from the library, ${repliesOf(REPLIES_LIVE)} live.</p>` +

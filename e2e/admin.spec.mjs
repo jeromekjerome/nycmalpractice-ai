@@ -17,9 +17,10 @@ const HOSTILE = {
   active: true, phone_verified: true, subscription_active: true, created_at: '2026-11-13T10:00:00Z',
 };
 
-// The requests, auctions, leads and models sections, quiet unless a test fills them.
-async function mockOperations(page, { requests = [], auctions = [], leads = [], models = { chains: { answer: [], small: [] }, source: 'defaults', override: null, providers: {}, measurements: [], registry: [] } } = {}) {
+// The requests, auctions, leads, decisions held and models sections, quiet unless a test fills them.
+async function mockOperations(page, { requests = [], auctions = [], leads = [], decisions = [], models = { chains: { answer: [], small: [] }, source: 'defaults', override: null, providers: {}, measurements: [], registry: [] } } = {}) {
   const reasons = { unreachable: 'Could not reach the client (wrong or disconnected number)', conflict: 'Conflict of interest' };
+  await page.route(url => url.pathname === '/api/admin/decisions', route => route.fulfill(json({ decisions })));
   await page.route('**/api/admin/requests', route => route.fulfill(json({ requests, declineReasons: reasons })));
   await page.route('**/api/admin/auctions', route => route.fulfill(json({ auctions })));
   await page.route('**/api/admin/leads', route => route.fulfill(json({ leads, declineReasons: reasons })));
@@ -194,6 +195,110 @@ test('the Models section shows the chains and refuses to save an unmeasured mode
   await expect(page.locator('#modelsResult')).toContainText('Under the override, the reply chain names gpt-6.2-sol');
   expect(saves.at(-1)).toEqual({ answer: ['gpt-6-luna', 'gpt-6.2-sol'], small: ['gpt-6-luna'], override: true });
   expect(await page.evaluate(() => window.__xss)).toBeUndefined();
+});
+
+const heldDecision = (id, extra = {}) => ({
+  cluster_id: id, case_name: `Party${id} v. Other`, citations: [`${id} N.Y.2d 1`, `${id} N.E.2d 2`], court: 'New York Court of Appeals', date_filed: '1982-10-14',
+  url: `https://www.courtlistener.com/opinion/${id}/x/`, case_types: ['misdiagnosis', 'surgical_error'], pinned: false,
+  hold: { found_at: '2026-11-25T23:00:13.000Z', question: 'citing', later: { case_name: `Later${id} v. Case`, url: `https://www.courtlistener.com/opinion/9${id}/later/`, court: 'Appellate Division', date_filed: '2025-10-21' }, passage: `a made-up passage ${id}` },
+  ...extra,
+});
+
+test('the Decisions held section shows what the screen found as text, and the owner clears or bans a decision from it', async ({ page }) => {
+  const XSS = '<img src=x onerror="window.__xss=4">';
+  const dialogs = [];
+  const posted = [];
+  let list = [
+    heldDecision(11, { case_name: XSS, pinned: true, hold: { ...heldDecision(11).hold, later: { case_name: XSS, url: 'javascript:window.__xss=5', court: XSS, date_filed: '2025-10-21' }, passage: `${XSS} was "overruled" & <b>more</b>` } }),
+    heldDecision(12, { url: 'http://insecure.test/x', hold: { found_at: '2026-11-24T23:00:00.000Z', question: 'higher-court', later: { case_name: 'Higher v. Court', url: 'https://www.courtlistener.com/opinion/99/higher/', court: 'New York Court of Appeals', date_filed: '2025-11-01' }, passage: 'the same party names' } }),
+    heldDecision(13, { hold: { found_at: '2026-11-23T23:00:00.000Z', question: 'unreadable', status: 502, later: null, passage: null } }),
+  ];
+  await page.route('**/api/admin/firms', route => route.fulfill(json({ firms: [], counts: { total: 0, active: 0 }, leadCounts: { total: 0 } })));
+  await mockOperations(page);
+  await page.route(url => url.pathname === '/api/admin/decisions', route => route.fulfill(json({ decisions: list })));
+  await page.route(url => /^\/api\/admin\/decisions\/\d+\/(clear|ban)$/.test(url.pathname), async route => {
+    const [, id, verb] = /decisions\/(\d+)\/(clear|ban)$/.exec(new URL(route.request().url()).pathname);
+    posted.push(`${route.request().method()} ${id}/${verb}`);
+    list = list.filter(row => String(row.cluster_id) !== id);
+    await route.fulfill(json({ ok: true, cluster_id: Number(id), screen_state: verb === 'ban' ? 'banned' : 'clear' }));
+  });
+  page.on('dialog', dialog => { dialogs.push(dialog.message()); dialog.accept(); });
+
+  await page.goto('/admin.html');
+  await page.locator('#secretInput').fill('secret');
+  await page.locator('button.admin-btn').click();
+
+  // The section comes straight after Contact Requests.
+  const titles = await page.locator('.section-title').allTextContents();
+  expect(titles.indexOf('Decisions held')).toBe(titles.indexOf('Contact Requests') + 1);
+
+  const body = page.locator('#decisionsBody');
+  const hostile = body.locator('.decision-row', { hasText: 'Cited in the blog' });
+  await expect(hostile).toContainText('A later decision that cites it:');
+  await expect(hostile).toContainText(XSS);
+  await expect(hostile).toContainText('was "overruled" & <b>more</b>');
+  await expect(hostile.locator('img, b')).toHaveCount(0);
+  await expect(hostile.locator('a[href^="javascript"]')).toHaveCount(0);
+  await expect(hostile.locator('a[href^="https://www.courtlistener.com/opinion/11/"]')).toHaveCount(1);
+  await expect(hostile).toContainText('misdiagnosis, surgical_error');
+
+  const higher = body.locator('.decision-row', { hasText: 'Party12 v. Other' });
+  await expect(higher).toContainText('A later decision in a higher court with the same party names:');
+  await expect(higher).toContainText('Higher v. Court');
+  await expect(higher).toContainText('the same party names');
+  await expect(higher).toContainText('12 N.Y.2d 1');
+  await expect(higher.locator('a[href^="http://"]')).toHaveCount(0);
+  await expect(higher).not.toContainText('Cited in the blog');
+
+  const unreadable = body.locator('.decision-row', { hasText: 'Party13 v. Other' });
+  await expect(unreadable).toContainText("The screen could not read CourtListener's answer for this decision (status 502).");
+  await expect(unreadable).not.toContainText('Later13');
+  await expect(unreadable.locator('blockquote, .decision-passage')).toHaveCount(0);
+
+  await higher.getByRole('button', { name: 'Clear' }).click();
+  await expect.poll(() => posted).toEqual(['POST 12/clear']);
+  expect(dialogs).toEqual([]);
+  await expect(page.locator('#adminMsg')).toContainText('cleared');
+  await expect(body.locator('.decision-row')).toHaveCount(2);
+
+  await unreadable.getByRole('button', { name: 'Ban' }).click();
+  await expect.poll(() => posted).toEqual(['POST 12/clear', 'POST 13/ban']);
+  expect(dialogs).toEqual(['Ban Party13 v. Other? A banned decision is never offered to replies and is not screened again.']);
+  await expect(body.locator('.decision-row')).toHaveCount(1);
+  expect(await page.evaluate(() => window.__xss)).toBeUndefined();
+
+  list = [];
+  await page.evaluate(() => loadDecisions());
+  await expect(body).toContainText('No decisions are held.');
+});
+
+test('a ban the owner declines at the dialog sends nothing', async ({ page }) => {
+  const posted = [];
+  await page.route('**/api/admin/firms', route => route.fulfill(json({ firms: [], counts: { total: 0, active: 0 }, leadCounts: { total: 0 } })));
+  await mockOperations(page, { decisions: [heldDecision(21)] });
+  await page.route(url => /^\/api\/admin\/decisions\/\d+\//.test(url.pathname), async route => { posted.push(route.request().url()); await route.fulfill(json({ ok: true })); });
+  page.on('dialog', dialog => dialog.dismiss());
+  await page.goto('/admin.html');
+  await page.locator('#secretInput').fill('secret');
+  await page.locator('button.admin-btn').click();
+  await page.locator('#decisionsBody').getByRole('button', { name: 'Ban' }).click();
+  await page.waitForLoadState('networkidle');
+  expect(posted).toEqual([]);
+  await expect(page.locator('#decisionsBody .decision-row')).toHaveCount(1);
+});
+
+test('a clear the site refuses shows its error and leaves the decision on the page', async ({ page }) => {
+  await page.route('**/api/admin/firms', route => route.fulfill(json({ firms: [], counts: { total: 0, active: 0 }, leadCounts: { total: 0 } })));
+  await mockOperations(page, { decisions: [heldDecision(31)] });
+  await page.route(url => /^\/api\/admin\/decisions\/\d+\//.test(url.pathname), route => route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: 'That decision is not held' }) }));
+  await page.goto('/admin.html');
+  await page.locator('#secretInput').fill('secret');
+  await page.locator('button.admin-btn').click();
+  const clear = page.locator('#decisionsBody').getByRole('button', { name: 'Clear' });
+  await clear.click();
+  await expect(page.locator('#adminMsg')).toContainText('Failed: That decision is not held');
+  await expect(page.locator('#decisionsBody .decision-row')).toHaveCount(1);
+  await expect(clear).toBeEnabled();
 });
 
 test('after a failed delivery the admin page reloads, so the finish button shows without a refresh', async ({ page }) => {

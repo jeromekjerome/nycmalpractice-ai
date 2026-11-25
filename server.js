@@ -17,6 +17,7 @@ import { runJob, replyClock, MIN_TIME_LEFT_MS, configureProviders, withoutKeys, 
 import { modelWatch } from './model-watch.js';
 import { statuteWatch } from './statute-watch.js';
 import { refreshLibrary } from './library-refresh.js';
+import { heldDecisions, decideHeld } from './case-library.js';
 import { screenDecisions } from './case-screen.js';
 import { CASE_TOPICS } from './case-topics.js';
 import { searchTopic, lookupCitations, searchForScreen } from './courtlistener.js';
@@ -987,6 +988,29 @@ app.get('/api/admin/leads', async (req, res) => {
     res.json({ leads, declineReasons: DECLINE_REASONS });
   } catch (err) { serverError(req, res, err); }
 });
+
+// ─── Admin: the decisions held ───────────────────────────────────────────────
+// The "Decisions held" section of the admin page: the library decisions the nightly screen held for the owner, each cleared
+// or banned by hand. Only a held decision can be decided; a second click, or a decision the screen changed meanwhile, is a 409.
+app.get('/api/admin/decisions', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  if (req.query.state !== undefined && req.query.state !== 'held') return res.status(400).json({ error: 'Only held decisions can be listed' });
+  try {
+    res.json({ decisions: await heldDecisions(sql) });
+  } catch (err) { serverError(req, res, err); }
+});
+
+for (const [verb, decision, screenState] of [['clear', 'clear', 'clear'], ['ban', 'banned', 'banned']]) {
+  app.post(`/api/admin/decisions/:clusterId/${verb}`, async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    if (!/^\d{1,18}$/.test(req.params.clusterId)) return res.status(400).json({ error: 'Not a decision id' });
+    try {
+      const changed = await decideHeld(sql, req.params.clusterId, decision, new Date().toISOString());
+      if (!changed) return res.status(409).json({ error: 'That decision is not held' });
+      res.json({ ok: true, cluster_id: Number(req.params.clusterId), screen_state: screenState });
+    } catch (err) { serverError(req, res, err); }
+  });
+}
 
 // ─── Admin: the models ───────────────────────────────────────────────────────
 // The Models section of the admin page (admin.html): the chains each job runs with, the state of each provider, the

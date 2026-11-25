@@ -29,6 +29,7 @@
     .action-btn { font-size:0.75rem;padding:0.25rem 0.55rem;border-radius:5px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;transition:border-color 0.2s }
     .action-btn:hover { border-color:var(--accent);color:var(--text) }
     .action-btn.primary { border-color: var(--accent); color: var(--text); }
+    .action-btn.danger:hover { border-color: #f87171; color: #f87171; }
     .muted-note { color: var(--muted); font-size: 0.75rem; }
     .deliver-form { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; margin-top: 0.4rem; }
     .deliver-form select, .deliver-form input { padding: 4px 6px; background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-family: 'Inter', sans-serif; font-size: 0.75rem; }
@@ -94,6 +95,13 @@
         <thead><tr><th>Received</th><th>Case</th><th>Client</th><th>Score</th><th>What happened</th><th>Actions</th></tr></thead>
         <tbody id="requestsBody"></tbody>
       </table>
+    </div>
+
+    <!-- Decisions held: library decisions the nightly screen held for the owner -->
+    <div class="section-title">Decisions held</div>
+    <div class="glass-panel" id="decisionsSection" style="padding:1.25rem;overflow-x:auto">
+      <p class="muted-note" style="margin-bottom:0.75rem">The nightly screen holds a decision when it finds a later decision to look at. A held decision is not offered to replies. Clear puts it back in the library; Ban keeps it out and it is not screened again. <button class="action-btn" onclick="loadDecisions()">↻ Refresh</button></p>
+      <div id="decisionsBody"></div>
     </div>
 
     <div class="section-title">Auctions</div>
@@ -218,6 +226,7 @@
         </tr>
       `).join('');
       loadOperations();
+      loadDecisions();
       loadModels();
     }
 
@@ -372,6 +381,70 @@
         loadOperations();
       } catch (e) {
         showMessage('Failed: ' + e.message, true);
+      }
+    });
+
+    // ── Decisions held ────────────────────────────────────────────────────────
+    async function loadDecisions() {
+      try {
+        const { decisions } = await adminGet('/api/admin/decisions?state=held');
+        renderDecisions(decisions || []);
+      } catch (e) {
+        showMessage('Could not load the held decisions: ' + e.message, true);
+      }
+    }
+
+    // A link only for an https address; anything else shows as text.
+    const linkTo = (url, text) => (/^https:\/\//.test(url || '') ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(text)}</a>` : esc(text));
+
+    function laterOf(later) {
+      if (!later) return '';
+      const facts = [later.court, later.date_filed].filter(Boolean).map(esc).join(', ');
+      return `<div>${linkTo(later.url, later.case_name || 'A later decision')}${facts ? ` <span class="muted-note">${facts}</span>` : ''}</div>`;
+    }
+
+    function foundOf(hold) {
+      const found = hold || {};
+      if (found.question === 'unreadable') return `<div>The screen could not read CourtListener's answer for this decision (status ${esc(found.status ?? 'unknown')}).</div>`;
+      const lead = found.question === 'higher-court' ? 'A later decision in a higher court with the same party names:' : 'A later decision that cites it:';
+      return `<div>${lead}</div>${laterOf(found.later)}${found.passage ? `<div class="decision-passage muted-note">${esc(found.passage)}</div>` : ''}`;
+    }
+
+    function renderDecisions(decisions) {
+      const body = document.getElementById('decisionsBody');
+      if (!decisions.length) { body.innerHTML = '<p class="muted-note" style="text-align:center;padding:1rem">No decisions are held.</p>'; return; }
+      body.innerHTML = decisions.map(d => `
+        <div class="decision-row" style="border-top:1px solid var(--border);padding:0.75rem 0">
+          <div style="font-weight:600">${linkTo(d.url, d.case_name)}${d.pinned ? ' <span class="badge b-subscribed">Cited in the blog</span>' : ''}</div>
+          <div class="muted-note">${[(d.citations || [])[0], d.court, d.date_filed].filter(Boolean).map(esc).join(' · ')}</div>
+          ${(d.case_types || []).length ? `<div class="muted-note">Case types: ${d.case_types.map(esc).join(', ')}</div>` : ''}
+          <div style="margin-top:0.5rem;font-size:0.85rem">${foundOf(d.hold)}</div>
+          ${d.hold?.found_at ? `<div class="muted-note">Found ${esc(when(d.hold.found_at))}</div>` : ''}
+          <div style="display:flex;gap:0.35rem;margin-top:0.5rem">
+            <button class="action-btn" data-action="clear-decision" data-cluster="${Number(d.cluster_id)}" data-name="${esc(d.case_name)}">Clear</button>
+            <button class="action-btn danger" data-action="ban-decision" data-cluster="${Number(d.cluster_id)}" data-name="${esc(d.case_name)}">Ban</button>
+          </div>
+        </div>`).join('');
+    }
+
+    // Buttons carry the decision's id in a data attribute, never in inline script.
+    document.getElementById('decisionsBody').addEventListener('click', async event => {
+      const btn = event.target.closest('button[data-action]');
+      if (!btn || !['clear-decision', 'ban-decision'].includes(btn.dataset.action)) return;
+      const ban = btn.dataset.action === 'ban-decision';
+      const id = Number(btn.dataset.cluster);
+      const name = btn.dataset.name || `decision ${id}`;
+      if (ban && !confirm(`Ban ${name}? A banned decision is never offered to replies and is not screened again.`)) return;
+      btn.disabled = true;
+      try {
+        const res = await fetch(`/api/admin/decisions/${id}/${ban ? 'ban' : 'clear'}`, { method: 'POST', headers: { 'x-admin-secret': adminSecret } });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || (ban ? 'Ban failed' : 'Clear failed'));
+        showMessage(`${name} ${ban ? 'banned' : 'cleared'}`);
+        loadDecisions();
+      } catch (e) {
+        showMessage('Failed: ' + e.message, true);
+        btn.disabled = false;
       }
     });
 

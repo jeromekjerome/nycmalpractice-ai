@@ -114,6 +114,58 @@ test('before a reply brings decisions there is no cases section, in the page as 
   await expect(page.locator('body')).not.toContainText('Relevant NY Cases');
 });
 
+const DECISIONS_SENTENCE = 'These decisions come from CourtListener and are shown as examples. They have not been checked against every later decision or change in the law.';
+
+test('each decision in the list says whether it was screened, and a sentence under the list says what the decisions are', async ({ page }) => {
+  await mockSession(page);
+  await mockCaseTypes(page);
+  await page.route('**/api/ask', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      answer: 'The timeline and provider records will matter.',
+      cases: [
+        { caseName: 'Patient v. Hospital', court: 'Appellate Division', dateFiled: '2025-02-20', snippet: 'Delayed diagnosis increased harm.', screen: { state: 'clear', on: '2026-11-24' } },
+        { caseName: 'Walker v. Clinic', court: 'Appellate Division', dateFiled: '2024-05-01', snippet: 'A missed fracture.', screen: { state: 'unscreened', on: null } },
+        { caseName: 'Older v. Reply', court: 'Appellate Division', dateFiled: '2023-05-01' },
+        { caseName: 'Odd v. Date', court: 'Appellate Division', dateFiled: '2023-06-01', screen: { state: 'clear', on: '<img src=x onerror="window.__xss=1">' } },
+      ],
+    }),
+  }));
+  await page.goto('/');
+  await expect(page.locator('#casesCard .cases-note')).toHaveCount(0);
+  await page.locator('#userInput').fill('My doctor ignored repeated symptoms for months.');
+  await page.locator('#userInput').press('Enter');
+
+  const items = page.locator('#casesList .case-item');
+  await expect(items).toHaveCount(4);
+  await expect(items.nth(0).locator('.case-screen')).toHaveText('Screened Nov 24, 2026');
+  await expect(items.nth(1).locator('.case-screen')).toHaveText('Not screened');
+  await expect(items.nth(2).locator('.case-screen')).toHaveText('Not screened');
+  await expect(items.nth(3).locator('.case-screen')).toHaveText('Not screened');
+  await expect(page.locator('#casesCard img')).toHaveCount(0);
+  expect(await page.evaluate(() => window.__xss)).toBeUndefined();
+  // The sentence sits under the list, inside the card.
+  await expect(page.locator('#casesCard .cases-note')).toHaveText(DECISIONS_SENTENCE);
+  expect(await page.locator('#casesCard').evaluate(card => [...card.children].map(child => child.id || child.className))).toEqual(['card-header', 'casesList', 'cases-note']);
+});
+
+test('with no decisions in a reply there is no sentence about them', async ({ page }) => {
+  await mockSession(page);
+  await mockCaseTypes(page);
+  await page.route('**/api/ask', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ answer: 'When did it happen?', cases: [] }),
+  }));
+  await page.goto('/');
+  await page.locator('#userInput').fill('A surgeon left a sponge inside me.');
+  await page.locator('#userInput').press('Enter');
+  await expect(page.locator('#conversation .msg-ai').last()).toContainText('When did it happen?');
+  await expect(page.locator('#casesCard .cases-note')).toHaveCount(0);
+  await expect(page.locator('body')).not.toContainText(DECISIONS_SENTENCE);
+});
+
 test('a visitor can email the assessment without putting the session in the return link', async ({ page }) => {
   await mockSession(page);
   await mockCaseTypes(page);

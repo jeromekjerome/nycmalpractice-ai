@@ -17,7 +17,7 @@ import { runJob, replyClock, MIN_TIME_LEFT_MS, configureProviders, withoutKeys, 
 import { modelWatch } from './model-watch.js';
 import { statuteWatch } from './statute-watch.js';
 import { refreshLibrary } from './library-refresh.js';
-import { heldDecisions, decideHeld } from './case-library.js';
+import { heldDecisions, decideHeld, screenStates, shownScreen } from './case-library.js';
 import { screenDecisions } from './case-screen.js';
 import { CASE_TOPICS } from './case-topics.js';
 import { searchTopic, lookupCitations, searchForScreen } from './courtlistener.js';
@@ -695,6 +695,29 @@ app.post('/api/auctions/:id/bid', async (req, res) => {
 });
 
 // ─── Leads ────────────────────────────────────────────────────────────────────
+// The lead's data with each anchored citation-audit row given the screen label its decision has now in the library
+// (`matched_case_screen`), worked out when the page is read and never written back. A failed lookup labels every row not screened.
+async function withScreenLabels(leadData) {
+  const audit = leadData?.evaluation?.citation_audit;
+  if (!Array.isArray(audit)) return leadData;
+  const idOf = row => {
+    const found = /\/opinion\/(\d+)\//.exec(String(row?.matched_case_url || ''));
+    return found ? Number(found[1]) : null;
+  };
+  const anchored = audit.filter(row => row && typeof row === 'object' && row.matched_case_url);
+  if (!anchored.length) return leadData;
+  let states = new Map();
+  try {
+    states = await screenStates(sql, anchored.map(idOf).filter(id => id !== null));
+  } catch (err) {
+    console.error('Could not read the screen states for a lead:', withoutKeys(err?.message || String(err)).slice(0, 300));
+  }
+  const labelled = audit.map(row => (anchored.includes(row)
+    ? { ...row, matched_case_screen: shownScreen(states.get(idOf(row))) }
+    : row));
+  return { ...leadData, evaluation: { ...leadData.evaluation, citation_audit: labelled } };
+}
+
 app.get('/api/leads/:id', async (req, res) => {
   const tokenData = await validateToken(req.query.token);
   if (!tokenData) return res.status(401).json({ error: 'Invalid or expired link' });
@@ -711,6 +734,7 @@ app.get('/api/leads/:id', async (req, res) => {
   }
   // Leads stored before deadlines travelled with them get theirs from the conversation.
   if (fullData && !fullData.deadlines && Array.isArray(fullData.history)) fullData.deadlines = deadlineNotices(fullData.history);
+  fullData = await withScreenLabels(fullData);
   const daysLeft     = Math.max(0, Math.ceil((new Date(lead.accept_deadline) - new Date()) / (1000 * 60 * 60 * 24)));
   // The same 30-day count declineLead uses, so the policy shown is the one applied.
   const recent       = await recentDeclineCounts(tokenData.firm_id);

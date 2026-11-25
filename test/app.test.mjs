@@ -902,6 +902,95 @@ test('GET /api/leads/:id shows a cold lead from the data kept on the lead', asyn
   }
 });
 
+// A lead whose stored audit has anchored rows for a held decision, a clear one, one the library does not hold, one with an
+// address that names no decision, and one with no anchor at all. `states` answers the library's lookup; `failing` breaks it.
+const AUDIT_STATE_FIELDS = [['cluster_id', TEXT], ['screen_state', TEXT], ['screened_at', TIMESTAMPTZ], ['screened_on', TEXT], ['question', TEXT]];
+const anchoredRow = (name, url) => ({ citation_text: name, status: 'ANCHORED', courtlistener_status: 'UNCHECKED', matched_case: name, matched_case_url: url });
+const AUDIT_LEAD_DATA = {
+  caseType: 'misdiagnosis', mode: 'personal', history: CONTACT_HISTORY, preview: 'Delayed cancer diagnosis.', score: 60,
+  evaluation: {
+    gate_status: 'PASSED',
+    citation_audit: [
+      anchoredRow('Held v. Case', 'https://www.courtlistener.com/opinion/5685956/held-v-case/'),
+      anchoredRow('Clear v. Case', 'https://www.courtlistener.com/opinion/5685957/clear-v-case/'),
+      anchoredRow('Absent v. Case', 'https://www.courtlistener.com/opinion/5685958/absent-v-case/'),
+      anchoredRow('Odd v. Case', 'https://www.courtlistener.com/?q=odd'),
+      { citation_text: 'Smith v. FakeCorp, 999 N.Y.3d 111', status: 'UNANCHORED', courtlistener_status: 'NOT_FOUND_404', courtlistener_url: null },
+    ],
+  },
+};
+function auditLeadHandler(leadData, { states = [], failing = false, asked = [] } = {}) {
+  return async (url, init) => {
+    const q = JSON.parse(init.body).query.replace(/\s+/g, ' ');
+    if (/FROM firm_tokens/.test(q)) return rowsResponse([['firm_id', INT], ['name', TEXT], ['cold_decline_count', INT], ['auction_decline_count', INT]], [['7', 'Test Firm', '0', '0']]);
+    if (/FROM leads WHERE id/.test(q)) {
+      return rowsResponse(
+        [['id', INT], ['status', TEXT], ['case_type', TEXT], ['tier', TEXT], ['price_paid', 1700], ['accept_deadline', TIMESTAMPTZ], ['auction_id', INT], ['lead_data', JSONB]],
+        [['501', 'pending', 'misdiagnosis', 'cold', '25.00', '2030-01-01 00:00:00+00', null, JSON.stringify(leadData)]],
+      );
+    }
+    if (/FROM case_library WHERE cluster_id = ANY/.test(q)) {
+      asked.push(JSON.parse(init.body).params);
+      return failing ? jsonResponse({ message: 'the library is down', code: '08006' }, 400) : rowsResponse(AUDIT_STATE_FIELDS, states);
+    }
+    return jsonResponse(EMPTY_ROWS);
+  };
+}
+const AUDIT_STATES = [
+  ['5685956', 'held', '2026-11-20T05:00:00Z', '2026-11-20', 'citing'],
+  ['5685957', 'clear', '2026-11-24T05:00:00Z', '2026-11-24', null],
+];
+const UNSCREENED = { state: 'unscreened', on: null };
+
+test('GET /api/leads/:id gives each anchored row its screen label from the library when the page is read', async () => {
+  const asked = [];
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(auditLeadHandler(AUDIT_LEAD_DATA, { states: AUDIT_STATES, asked }), async () => {
+      const response = await fetch(`${server.baseUrl}/api/leads/501?token=firm-token`);
+      assert.equal(response.status, 200);
+      const rows = (await response.json()).leadData.evaluation.citation_audit;
+      assert.deepEqual(rows.map(row => row.matched_case_screen), [{ state: 'held', on: null }, { state: 'clear', on: '2026-11-24' }, UNSCREENED, UNSCREENED, undefined]);
+      assert.equal(asked.length, 1, 'one lookup for every anchored row');
+      for (const id of ['5685956', '5685957', '5685958']) assert.ok(JSON.stringify(asked[0]).includes(id), id);
+    });
+  } finally {
+    await server.close();
+  }
+});
+
+test('GET /api/leads/:id still loads, with every anchored row not screened, when the library cannot be read', async () => {
+  const server = await startServer(app);
+  try {
+    const { logs } = await capturingLogs(() => withOutboundHttp(auditLeadHandler(AUDIT_LEAD_DATA, { failing: true }), async () => {
+      const response = await fetch(`${server.baseUrl}/api/leads/501?token=firm-token`);
+      assert.equal(response.status, 200);
+      const rows = (await response.json()).leadData.evaluation.citation_audit;
+      assert.deepEqual(rows.map(row => row.matched_case_screen), [UNSCREENED, UNSCREENED, UNSCREENED, UNSCREENED, undefined]);
+    }));
+    assert.ok(logs.some(line => /screen states/i.test(line)), logs.join('\n'));
+  } finally {
+    await server.close();
+  }
+});
+
+test('GET /api/leads/:id leaves an evaluation with no anchored row, or no audit, as it was stored', async () => {
+  const asked = [];
+  const server = await startServer(app);
+  try {
+    for (const evaluation of [{ gate_status: 'PASSED', citation_audit: [] }, { gate_status: 'PASSED' }, null]) {
+      await withOutboundHttp(auditLeadHandler({ ...AUDIT_LEAD_DATA, evaluation }, { asked }), async () => {
+        const response = await fetch(`${server.baseUrl}/api/leads/501?token=firm-token`);
+        assert.equal(response.status, 200);
+        assert.deepEqual((await response.json()).leadData.evaluation, evaluation);
+      });
+    }
+    assert.equal(asked.length, 0, 'the library was asked with nothing to look up');
+  } finally {
+    await server.close();
+  }
+});
+
 test('the contact form shows the consent text the server stores, and the policy matches the flow', () => {
   const page = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
   assert.ok(page.includes(CONTACT_CONSENT_TEXT), 'the page shows different consent wording from the one stored');
@@ -1301,7 +1390,10 @@ test('the privacy policy describes the analytics and outside services the pages 
   // The statements the code contradicted are gone.
   assert.doesNotMatch(policy, /We use a single session cookie/);
   assert.doesNotMatch(policy, /No personal data is sent to CourtListener/);
-  assert.match(policy, /our server sends CourtListener a few search keywords based on your conversation/);
+  assert.match(policy, /To find court decisions, our server searches CourtListener each night with search words we write, never words from a conversation, and each reply chooses from the decisions found\. While our collection for a type of case is still being built, a reply may instead send CourtListener a few search keywords based on your conversation, which can include words you typed\./);
+  assert.doesNotMatch(policy, /To find relevant cases/);
+  assert.match(policy, /Case law searches use the CourtListener API \(Free Law Project\)\. To find court decisions/);
+  assert.match(policy, /which can include words you typed\. It does not send your IP address or the conversation itself\./);
 });
 
 // ─── Conversation steps ───────────────────────────────────────────────────────

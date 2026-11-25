@@ -75,6 +75,8 @@
     .chip-placeholder { background: rgba(201,168,76,0.15); color: #c9a84c; border: 1px solid rgba(201,168,76,0.35); }
     .chip-unanchored  { background: rgba(229,92,92,0.13); color: #e55c5c; border: 1px solid rgba(229,92,92,0.4); }
     .chip-unknown     { background: rgba(107,122,148,0.15); color: var(--muted); border: 1px solid var(--border); }
+    .cite-chips { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.35rem; flex-shrink: 0; }
+    .cite-screen { flex-shrink: 0; padding: 2px 9px; border-radius: 99px; font-size: 0.66rem; color: var(--muted); border: 1px solid var(--border); }
     .cite-detail { margin-top: 0.25rem; font-size: 0.78rem; color: var(--muted); overflow-wrap: anywhere; }
     .cite-detail a { color: var(--accent); }
     .cl-verified, .cl-verified a { color: #5cc98f; }
@@ -523,6 +525,19 @@
       return `<ul class="cite-list">${ev.citation_audit.map(citationRowHtml).join('')}</ul>`;
     }
 
+    // The label for what the library knows of an anchored decision. A row the server gave no label shows none.
+    function screenChipHtml(screen) {
+      if (!isObj(screen)) return '';
+      let label = 'Not screened';
+      if (screen.state === 'held') {
+        label = 'Held for review: later history found';
+      } else if (screen.state === 'clear' && /^\d{4}-\d{2}-\d{2}$/.test(String(screen.on))) {
+        const day = new Date(screen.on + 'T12:00:00Z');
+        if (!Number.isNaN(day.getTime())) label = 'Screened ' + day.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+      }
+      return `<span class="cite-screen">${escHtml(label)}</span>`;
+    }
+
     function citationRowHtml(entry) {
       const item = isObj(entry) ? entry : { citation_text: entry };
       const status = plain(item.status);
@@ -530,14 +545,15 @@
       let detail = '';
       if (lookup === 'VERIFIED') {
         const caseName = plain(item.courtlistener_case_name);
-        detail = `<div class="cite-detail cl-verified">${linkOrText(`CourtListener: VERIFIED${caseName ? ` — ${caseName}` : ''}`, item.courtlistener_url)}</div>`;
+        detail = `<div class="cite-detail cl-verified">${linkOrText(`Found in CourtListener${caseName ? ` — ${caseName}` : ''}`, item.courtlistener_url)}</div>`;
       } else if (lookup === 'NOT_FOUND_404') {
-        detail = '<div class="cite-detail cl-notfound">CourtListener: NOT FOUND</div>';
+        detail = '<div class="cite-detail cl-notfound">Not found in CourtListener</div>';
       } else if (plain(item.matched_case)) {
         detail = `<div class="cite-detail">${linkOrText(`Matches a case the search returned: ${plain(item.matched_case)}`, item.matched_case_url)}</div>`;
       }
       return `<li class="cite-row"><div class="cite-head"><span class="cite-text">${escHtml(plain(item.citation_text) || 'Citation text not recorded')}</span>` +
-        `<span class="cite-chip ${CITATION_CHIPS.get(status) || 'chip-unknown'}">${escHtml(status || 'UNKNOWN')}</span></div>${detail}</li>`;
+        `<span class="cite-chips"><span class="cite-chip ${CITATION_CHIPS.get(status) || 'chip-unknown'}">${escHtml(status || 'UNKNOWN')}</span>` +
+        `${screenChipHtml(item.matched_case_screen)}</span></div>${detail}</li>`;
     }
 
     function gateChecksHtml(ev) {

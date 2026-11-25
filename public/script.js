@@ -303,8 +303,19 @@ function appendThinking() {
   return div;
 }
 
+const CASES_NOTE = 'These decisions come from CourtListener and are shown as examples. They have not been checked against every later decision or change in the law.';
+
+// What a decision's screen says: the day of its last screen when it is clear and the day is a plain date, else "Not screened".
+function screenLabel(screen) {
+  if (screen?.state === 'clear' && /^\d{4}-\d{2}-\d{2}$/.test(String(screen.on))) {
+    const day = new Date(screen.on + 'T12:00:00Z');
+    if (!Number.isNaN(day.getTime())) return 'Screened ' + day.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+  }
+  return 'Not screened';
+}
+
 // The cited-decisions card is built whole, heading and list together, and only when a reply brings decisions:
-// index.html carries no cases section, so nothing reads as an empty one.
+// index.html carries no cases section, so nothing reads as an empty one. The sentence about the decisions sits under the list.
 function renderCases(cases) {
   const card = document.getElementById('casesCard');
   const items = cases.map(c => `
@@ -313,6 +324,7 @@ function renderCases(cases) {
         ${c.absoluteUrl ? `<a href="${escHtml(c.absoluteUrl)}" target="_blank" rel="noopener">${escHtml(c.caseName)}</a>` : escHtml(c.caseName)}
       </div>
       <div class="case-meta">${escHtml(c.court || '')}${c.dateFiled ? ' · ' + escHtml(c.dateFiled) : ''}${c.citation ? ' · ' + escHtml(c.citation) : ''}</div>
+      <div class="case-screen">${escHtml(screenLabel(c.screen))}</div>
       ${c.snippet ? `<div class="case-snippet">${escHtml(c.snippet)}</div>` : ''}
     </div>
   `).join('');
@@ -321,7 +333,7 @@ function renderCases(cases) {
       <span class="card-icon">📋</span>
       <span class="card-title">Relevant NY Cases</span>
     </div>
-    <div class="cases-list" id="casesList">${items}</div>`;
+    <div class="cases-list" id="casesList">${items}</div>${cases.length ? `<p class="cases-note">${escHtml(CASES_NOTE)}</p>` : ''}`;
   card.style.display = 'block';
 }
 

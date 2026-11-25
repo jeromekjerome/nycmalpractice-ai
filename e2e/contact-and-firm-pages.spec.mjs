@@ -139,6 +139,56 @@ test('the lead page shows the contact details and the conversation, and accepts 
   expect(accepted).toEqual({ token: 'abc', hitlVerification: { sol_and_notice_verified: true, conflict_check_completed: true, case_quality_reviewed: true } });
 });
 
+// The lead with its stored audit replaced by these rows.
+const leadWithAudit = citationAudit => ({ ...LEAD, leadData: { ...LEAD.leadData, evaluation: { ...LEAD.leadData.evaluation, citation_audit: citationAudit } } });
+
+test('the lead page says Found in CourtListener and Not found in CourtListener, never the old wording', async ({ page }) => {
+  await page.route(url => url.pathname === '/api/leads/501', route => route.fulfill(json(leadWithAudit([
+    { citation_text: 'Patient v. General Hospital, 200 A.D.3d 100', status: 'UNANCHORED', courtlistener_status: 'VERIFIED', courtlistener_case_name: 'Patient v. General Hospital', courtlistener_url: 'https://www.courtlistener.com/opinion/1/patient-v-general-hospital/' },
+    { citation_text: 'Smith v. FakeCorp, 999 N.Y.3d 111', status: 'UNANCHORED', courtlistener_status: 'NOT_FOUND_404', courtlistener_url: null },
+  ]))));
+  await page.goto('/lead.html?id=501&token=abc');
+  const audit = page.locator('#citationAudit');
+  const row = text => audit.locator('li', { hasText: text });
+  await expect(row('Patient v. General Hospital').getByRole('link')).toHaveText('Found in CourtListener — Patient v. General Hospital');
+  await expect(row('Patient v. General Hospital').getByRole('link')).toHaveAttribute('href', 'https://www.courtlistener.com/opinion/1/patient-v-general-hospital/');
+  await expect(row('Smith v. FakeCorp')).toContainText('Not found in CourtListener');
+  await expect(row('Smith v. FakeCorp').locator('a')).toHaveCount(0);
+  await expect(audit).not.toContainText('CourtListener: VERIFIED');
+  await expect(audit).not.toContainText('CourtListener: NOT FOUND');
+});
+
+test('each anchored decision on the lead page shows its screen label, and a hostile date stays text and reads Not screened', async ({ page }) => {
+  const anchored = (name, id, screen) => ({
+    citation_text: name, status: 'ANCHORED', courtlistener_status: 'UNCHECKED', matched_case: name,
+    matched_case_url: `https://www.courtlistener.com/opinion/${id}/x/`, ...(screen ? { matched_case_screen: screen } : {}),
+  });
+  await page.route(url => url.pathname === '/api/leads/501', route => route.fulfill(json(leadWithAudit([
+    anchored('Clear v. Case', 1, { state: 'clear', on: '2026-11-24' }),
+    anchored('Held v. Case', 2, { state: 'held', on: null }),
+    anchored('Plain v. Case', 3, { state: 'unscreened', on: null }),
+    anchored('Hostile v. Case', 4, { state: 'clear', on: '<img src=x onerror="window.__screen=1">' }),
+    anchored('Short v. Case', 5, { state: 'clear', on: '2026-11-4' }),
+    anchored('Missing v. Case', 6, null),
+    { citation_text: 'Smith v. FakeCorp, 999 N.Y.3d 111', status: 'UNANCHORED', courtlistener_status: 'NOT_FOUND_404', courtlistener_url: null },
+  ]))));
+  await page.goto('/lead.html?id=501&token=abc');
+
+  const row = text => page.locator('#citationAudit li', { hasText: text });
+  await expect(row('Clear v. Case').locator('.cite-screen')).toHaveText('Screened Nov 24, 2026');
+  await expect(row('Held v. Case').locator('.cite-screen')).toHaveText('Held for review: later history found');
+  await expect(row('Plain v. Case').locator('.cite-screen')).toHaveText('Not screened');
+  await expect(row('Hostile v. Case').locator('.cite-screen')).toHaveText('Not screened');
+  await expect(row('Short v. Case').locator('.cite-screen')).toHaveText('Not screened');
+  // A row with no label from the server shows none, and the status chips are unchanged by the labels.
+  await expect(row('Missing v. Case').locator('.cite-screen')).toHaveCount(0);
+  await expect(row('Smith v. FakeCorp').locator('.cite-screen')).toHaveCount(0);
+  await expect(page.locator('#citationAudit .cite-chip')).toHaveText(['ANCHORED', 'ANCHORED', 'ANCHORED', 'ANCHORED', 'ANCHORED', 'ANCHORED', 'UNANCHORED']);
+  await expect(page.locator('#citationAudit img')).toHaveCount(0);
+  expect(await page.evaluate(() => window.__screen)).toBeUndefined();
+  await expect(page.locator('#citationAudit')).not.toContainText('Shepardized');
+});
+
 test('declining a lead shows the refund policy before it is sent', async ({ page }) => {
   await page.route(url => url.pathname === '/api/leads/501', route => route.fulfill(json(LEAD)));
   let declined = null;

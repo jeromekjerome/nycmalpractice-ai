@@ -148,11 +148,22 @@ const clusterIdOf = url => {
   return found ? Number(found[1]) : null;
 };
 
+// Postgres's code for a table that does not exist.
+const UNDEFINED_TABLE = '42P01';
+
 // What the library says about each live or recalled decision: a banned or held one is dropped, a clear one carries
-// the day it was screened, and every other one is labelled as not screened. Throws when the library cannot be read.
+// the day it was screened, and every other one is labelled as not screened. Throws when the library cannot be read,
+// except when its table is not made yet: with no library nothing is held or banned, so every decision is not screened.
 async function labelledByLibrary(cases) {
   const withIds = cases.map(c => ({ ...c, clusterId: clusterIdOf(c.url) }));
-  const states = await screenStates(sql, withIds.map(c => c.clusterId).filter(id => id !== null));
+  let states;
+  try {
+    states = await screenStates(sql, withIds.map(c => c.clusterId).filter(id => id !== null));
+  } catch (err) {
+    if (err?.code !== UNDEFINED_TABLE) throw err;
+    console.error('The case library has no tables yet, so every decision is labelled not screened:', withoutKeys(err.message));
+    states = new Map();
+  }
   return withIds
     .filter(c => !['banned', 'held'].includes(states.get(c.clusterId)?.state))
     .map(c => {

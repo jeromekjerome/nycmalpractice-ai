@@ -1966,6 +1966,8 @@ function libraryHandler(world, { clear = 0, picks = [], states = [], failing = n
     if (!url.endsWith('/sql')) return response;
     const query = JSON.parse(init.body).query.replace(/\s+/g, ' ').trim();
     const broken = () => jsonResponse({ message: 'the library is down', code: '08006' }, 400);
+    // The tables are not made yet (setup-db has not run): Postgres answers 42P01 to every library query.
+    if (failing === 'no-table' && /case_library/.test(query)) return jsonResponse({ message: 'relation "case_library" does not exist', code: '42P01' }, 400);
     if (/^SELECT COUNT\(\*\)::int AS n FROM case_library/.test(query)) return failing === 'count' ? broken() : rowsResponse([['n', INT]], [[String(clear)]]);
     if (/FROM case_library WHERE screen_state = 'clear' AND pinned = FALSE/.test(query)) return rowsResponse(LIBRARY_PICK_FIELDS, picks);
     if (/FROM case_library WHERE cluster_id = ANY/.test(query)) return failing === 'states' ? broken() : rowsResponse(LIBRARY_STATE_FIELDS, states);
@@ -2133,6 +2135,30 @@ test('when the library cannot be read the reply searches live, and when the scre
     }));
     assert.ok(second.logs.some(line => /screen/i.test(line)), second.logs.join('\n'));
     assert.ok(!unchecked.calls.sql.some(call => /^INSERT INTO search_cache/.test(call.query)), 'unchecked decisions were saved');
+  } finally {
+    await server.close();
+  }
+});
+
+test('a library whose tables are not made yet reads as empty: the reply searches live and every decision is labelled not screened, none dropped', async () => {
+  clearSearchCache();
+  usageInserts.length = 0;
+  const world = fakeWorld({ answer: `The scan should have been reported. ${DISCLAIMER}`, nyResults: [resultWithCluster(7, 'First Name v. Other'), resultWithCluster(9, 'Second Name v. Other')] });
+  const server = await startServer(app);
+  try {
+    const { logs } = await capturingLogs(() => withOutboundHttp(libraryHandler(world, { failing: 'no-table' }), async () => {
+      const { response, body } = await postJson(server.baseUrl, '/api/ask', { question: 'My radiologist missed a tumor.', mode: 'personal', sessionId: 'sess-lib-8', history: [] });
+      assert.equal(response.status, 200);
+      assert.deepEqual(body.cases.map(c => [c.caseName, c.screen]), [
+        ['First Name v. Other', { state: 'unscreened', on: null }],
+        ['Second Name v. Other', { state: 'unscreened', on: null }],
+      ]);
+    }));
+    assert.ok(world.calls.courtListener.length >= 1, 'no live search was made');
+    assert.deepEqual(repliesCounted(), [['replies-live', '1']]);
+    const system = world.calls.openai.find(call => call.kind === 'answer').request.messages[0].content;
+    assert.ok(system.includes('Case: First Name v. Other') && system.includes('Screened: no'));
+    assert.ok(logs.some(line => /no tables/i.test(line)), logs.join('\n'));
   } finally {
     await server.close();
   }

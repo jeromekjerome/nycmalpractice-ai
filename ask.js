@@ -1,7 +1,10 @@
 // Copyright (c) 2026 Jerome W. Dewald. All rights reserved.
 
 import { searchMalpracticeCases, extractCaseType, pendingCounts } from './courtlistener.js';
+import sql from './db.js';
 import { rememberCases, recallCases } from './case-memory.js';
+import { clearCount, pickDecisions, screenStates } from './case-library.js';
+import { countRequests } from './courtlistener-usage.js';
 import { scoreLead } from './auction.js';
 import { runJob, withoutKeys } from './providers.js';
 import { chains } from './model-settings.js';
@@ -65,6 +68,7 @@ function buildCaseContext(cases, { recalled = false } = {}) {
       (citations.length ? `Citation: ${citations.join('; ')}\n` : '') +
       (c.court    ? `Court: ${c.court}\n`        : '') +
       (c.dateFiled? `Filed: ${c.dateFiled}\n`    : '') +
+      `Screened: ${c.screen?.state === 'clear' && c.screen.on ? c.screen.on : 'no'}\n` +
       (c.snippet  ? `Excerpt: ${c.snippet}`      : '')
     );
   }).join('\n\n');
@@ -95,30 +99,79 @@ export async function classifyConversation(history, question, clock = null) {
 // which records what this returns once and replays it for every model.
 export async function classifyAndSearch(history, question, clock = null) {
   const { caseType, terms } = await classifyConversation(history, question, clock);
-  // The classifier's terms only. The visitor's own message is never the query: it can hold a name
-  // or a phone number, and the query goes to a third party. Without terms, the search uses the
-  // case type's terms alone.
-  const cases = await searchMalpracticeCases({ query: terms, caseType, limit: 5 });
-  return { caseType, cases };
+  return { caseType, cases: await searchLive(caseType, terms) };
 }
 
-// What a visitor's reply is written from: the classification and the search, with the case memory behind them.
-async function findCases(history, question, clock) {
-  const found = await classifyAndSearch(history, question, clock);
-  const { caseType } = found;
-  let { cases } = found;
+// The live search, once for every caller. The classifier's terms only: the visitor's own message is never the
+// query, because it can hold a name or a phone number, and the query goes to a third party. Without terms, the
+// search uses the case type's terms alone.
+function searchLive(caseType, terms) {
+  return searchMalpracticeCases({ query: terms, caseType, limit: 5 });
+}
 
+// A type with this many clear decisions in the library is answered from it.
+const LIBRARY_MIN_CLEAR = 5;
+
+// The decisions the library holds for the type, or null when it has too few or cannot be read (the live search then runs).
+// Each carries absoluteUrl, the name the page links a decision from, as a live search's decisions do.
+async function libraryDecisions(caseType, terms) {
+  try {
+    if (await clearCount(sql, caseType) < LIBRARY_MIN_CLEAR) return null;
+    const picked = await pickDecisions(sql, { caseType, terms, limit: LIBRARY_MIN_CLEAR });
+    return picked.length > 0 ? picked.map(c => ({ ...c, absoluteUrl: c.url || null })) : null;
+  } catch (err) {
+    console.error('Could not read the case library:', err.message);
+    return null;
+  }
+}
+
+const clusterIdOf = url => {
+  const found = /\/opinion\/(\d+)\//.exec(String(url ?? ''));
+  return found ? Number(found[1]) : null;
+};
+
+// What the library says about each live or recalled decision: a banned or held one is dropped, a clear one carries
+// the day it was screened, and every other one is labelled as not screened. Throws when the library cannot be read.
+async function labelledByLibrary(cases) {
+  const withIds = cases.map(c => ({ ...c, clusterId: clusterIdOf(c.url) }));
+  const states = await screenStates(sql, withIds.map(c => c.clusterId).filter(id => id !== null));
+  return withIds
+    .filter(c => !['banned', 'held'].includes(states.get(c.clusterId)?.state))
+    .map(c => {
+      const known = states.get(c.clusterId);
+      return { ...c, screen: known?.state === 'clear' ? { state: 'clear', on: known.on } : { state: 'unscreened', on: null } };
+    });
+}
+
+// What a visitor's reply is written from: the classification, then the library when the type has enough clear
+// decisions, otherwise the live search with the case memory behind it.
+async function findCases(history, question, clock) {
+  const { caseType, terms } = await classifyConversation(history, question, clock);
+
+  // The count of the reply is started now and finished before the reply ends, with the saving of what was found.
+  const counting = job => countRequests(sql, job, 1).catch(err => console.error('Could not count the reply:', err.message));
+
+  const fromLibrary = await libraryDecisions(caseType, terms);
+  if (fromLibrary) return { caseType, cases: fromLibrary, recalled: false, remembering: counting('replies-library') };
+
+  const remembering = [counting('replies-live')];
+  let cases = await searchLive(caseType, terms);
+  let recalled = false;
+  const found = cases.length > 0;
   // Found decisions are saved for this case type while the reply is written; when the search found
   // nothing (CourtListener throttled, slow or down), the decisions saved last time are used instead.
-  let remembering = Promise.resolve();
-  let recalled = false;
-  if (cases.length > 0) {
-    remembering = rememberCases(caseType, cases).catch(err => console.error('Could not save the cases found:', err.message));
-  } else {
-    cases = await recallCases(caseType).catch(err => { console.error('Could not read the saved cases:', err.message); return []; });
-    recalled = cases.length > 0;
+  // Either way the library has the say first: what it holds as banned or held is never used or saved.
+  try {
+    if (!found) cases = await recallCases(caseType).catch(err => { console.error('Could not read the saved cases:', err.message); return []; });
+    cases = await labelledByLibrary(cases);
+    if (found) remembering.push(rememberCases(caseType, cases).catch(err => console.error('Could not save the cases found:', err.message)));
+    else recalled = cases.length > 0;
+  } catch (err) {
+    // What cannot be checked is not used.
+    console.error('Could not read the screen state of the decisions:', err.message);
+    cases = [];
   }
-  return { caseType, cases, recalled, remembering };
+  return { caseType, cases, recalled, remembering: Promise.all(remembering) };
 }
 
 // allowLeadScoring is false when the conversation could not be read from the server's record: a lead is

@@ -937,6 +937,8 @@ test('POST /api/ask searches New York courts first and falls back to a national 
       assert.equal(body.cases[0].scope, 'national');
       assert.equal(body.cases[0].snippet, 'The failure to diagnose was a departure from accepted practice.');
       assert.equal(body.cases[0].absoluteUrl, 'https://www.courtlistener.com/opinion/1/patient-v-general-hospital/');
+      assert.equal(body.cases[0].clusterId, 1);
+      assert.deepEqual(body.cases[0].screen, { state: 'unscreened', on: null });
       // The model is told the cases are not New York law, and is given every parallel citation.
       const system = world.calls.openai.find(call => call.kind === 'answer').request.messages[0].content;
       assert.ok(system.includes('persuasive authority only'));
@@ -997,8 +999,11 @@ test('a chat message\'s live search counts each CourtListener request it sends, 
     });
     const sent = world.calls.courtListener.length;
     assert.ok(sent >= 1);
-    assert.equal(usageInserts.length, sent, 'one count for each request sent, saved before the reply ended');
-    for (const params of usageInserts) assert.deepEqual(params.slice(1), ['chat-search', '1']);
+    const searches = usageInserts.filter(params => params[1] === 'chat-search');
+    assert.equal(searches.length, sent, 'one count for each request sent, saved before the reply ended');
+    for (const params of searches) assert.deepEqual(params.slice(1), ['chat-search', '1']);
+    assert.deepEqual(repliesCounted(), [['replies-live', '1']], 'the reply was counted once, after the delayed counts');
+    assert.equal(usageInserts.length, sent + 1, 'the reply ended before a count was saved');
   } finally {
     usageInsertDelayMs = 0;
     await server.close();
@@ -1853,9 +1858,222 @@ test('a lead is answered once: a second decline or a late accept changes nothing
   assert.ok(calls.some(call => /^UPDATE leads SET status = 'accepted', accepted_at = NOW\(\), hitl_verification = \$1 WHERE id = \$2 AND status = 'pending' RETURNING id/.test(call.query)));
 });
 
+// ─── Case law from the case library ───────────────────────────────────────────
+
+// The case library as the fake database holds it: a count of clear decisions, the five a pick returns, and the
+// screen state of the clusters a lookup asks about. `failing` names the query that answers with an error.
+const LIBRARY_PICK_FIELDS = [['cluster_id', TEXT], ['case_name', TEXT], ['citations', JSONB], ['court', TEXT], ['date_filed', TEXT], ['snippet', TEXT], ['url', TEXT], ['topics', JSONB], ['screen_state', TEXT], ['screened_on', TEXT]];
+const LIBRARY_STATE_FIELDS = [['cluster_id', TEXT], ['screen_state', TEXT], ['screened_at', TIMESTAMPTZ], ['screened_on', TEXT], ['question', TEXT]];
+const libraryPick = (id, name) => [String(id), name, JSON.stringify([`${id} A.D.3d 1`]), 'Appellate Division', '2025-03-04', `Excerpt of ${name}`, `https://www.courtlistener.com/opinion/${id}/${name.toLowerCase().replace(/\W+/g, '-')}/`, JSON.stringify([]), 'clear', '2026-11-24'];
+const LIBRARY_FIVE = [[101, 'Alpha v. Beta'], [102, 'Gamma v. Delta'], [103, 'Epsilon v. Zeta'], [104, 'Eta v. Theta'], [105, 'Iota v. Kappa']].map(([id, name]) => libraryPick(id, name));
+const resultWithCluster = (id, name) => ({ ...CL_RESULT, caseName: name, absolute_url: `/opinion/${id}/${name.toLowerCase().replace(/\W+/g, '-')}/` });
+
+function libraryHandler(world, { clear = 0, picks = [], states = [], failing = null } = {}) {
+  return async (url, init) => {
+    const response = await world.handler(url, init);
+    if (!url.endsWith('/sql')) return response;
+    const query = JSON.parse(init.body).query.replace(/\s+/g, ' ').trim();
+    const broken = () => jsonResponse({ message: 'the library is down', code: '08006' }, 400);
+    if (/^SELECT COUNT\(\*\)::int AS n FROM case_library/.test(query)) return failing === 'count' ? broken() : rowsResponse([['n', INT]], [[String(clear)]]);
+    if (/FROM case_library WHERE screen_state = 'clear' AND pinned = FALSE/.test(query)) return rowsResponse(LIBRARY_PICK_FIELDS, picks);
+    if (/FROM case_library WHERE cluster_id = ANY/.test(query)) return failing === 'states' ? broken() : rowsResponse(LIBRARY_STATE_FIELDS, states);
+    return response;
+  };
+}
+
+const repliesCounted = () => usageInserts.filter(params => String(params[1]).startsWith('replies-')).map(params => params.slice(1));
+const searchCacheTouched = world => world.calls.sql.some(call => /search_cache/.test(call.query));
+
+test('a type with five clear decisions is answered from the library, with no CourtListener request, and the reply is counted', async () => {
+  clearSearchCache();
+  usageInserts.length = 0;
+  const world = fakeWorld({ answer: `The scan should have been reported. ${DISCLAIMER}`, nyResults: [CL_RESULT] });
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(libraryHandler(world, { clear: 5, picks: LIBRARY_FIVE }), async () => {
+      const { response, body } = await postJson(server.baseUrl, '/api/ask', { question: 'My radiologist missed a tumor.', mode: 'personal', sessionId: 'sess-lib-1', history: [] });
+      assert.equal(response.status, 200);
+      assert.deepEqual(body.cases.map(c => c.caseName), ['Alpha v. Beta', 'Gamma v. Delta', 'Epsilon v. Zeta', 'Eta v. Theta', 'Iota v. Kappa']);
+      assert.deepEqual(body.cases[0].screen, { state: 'clear', on: '2026-11-24' });
+      assert.equal(body.cases[0].clusterId, 101);
+      // The page links a decision from absoluteUrl, as it does a decision from a live search.
+      assert.equal(body.cases[0].absoluteUrl, 'https://www.courtlistener.com/opinion/101/alpha-v-beta/');
+    });
+    assert.deepEqual(world.calls.courtListener, [], 'a request went to CourtListener');
+    assert.deepEqual(repliesCounted(), [['replies-library', '1']]);
+    assert.ok(!searchCacheTouched(world), 'the search memory was read or written');
+    const system = world.calls.openai.find(call => call.kind === 'answer').request.messages[0].content;
+    assert.ok(system.includes('Case: Alpha v. Beta'));
+    assert.ok(system.includes('Screened: 2026-11-24'));
+  } finally {
+    await server.close();
+  }
+});
+
+test('estate mode is given the same five library decisions', async () => {
+  clearSearchCache();
+  usageInserts.length = 0;
+  const world = fakeWorld({ answer: `I am so sorry for your loss. When did he pass away? ${DISCLAIMER}` });
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(libraryHandler(world, { clear: 5, picks: LIBRARY_FIVE }), async () => {
+      const { response, body } = await postJson(server.baseUrl, '/api/ask', { question: 'My father died after his doctor missed a tumor.', mode: 'estate', sessionId: 'sess-lib-estate', history: [] });
+      assert.equal(response.status, 200);
+      assert.deepEqual(body.cases.map(c => c.clusterId), [101, 102, 103, 104, 105]);
+    });
+    assert.deepEqual(world.calls.courtListener, []);
+    assert.deepEqual(repliesCounted(), [['replies-library', '1']]);
+    const system = world.calls.openai.find(call => call.kind === 'answer').request.messages[0].content;
+    for (const name of ['Alpha v. Beta', 'Gamma v. Delta', 'Epsilon v. Zeta', 'Eta v. Theta', 'Iota v. Kappa']) assert.ok(system.includes(`Case: ${name}`), name);
+    assert.equal(system.split('Screened: 2026-11-24').length - 1, 5);
+  } finally {
+    await server.close();
+  }
+});
+
+test('the case card is given the decisions the library picked for the reply', async () => {
+  clearSearchCache();
+  usageInserts.length = 0;
+  const world = fakeWorld({ answer: `The scan should have been reported. ${DISCLAIMER}` });
+  const history = [
+    { role: 'user', content: 'My radiologist missed a tumor on my scan.' }, { role: 'assistant', content: 'I am so sorry. When was the scan?' },
+    { role: 'user', content: 'In March.' }, { role: 'assistant', content: 'Are you still treated there?' },
+  ];
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(libraryHandler(world, { clear: 5, picks: LIBRARY_FIVE }), async () => {
+      const { response, body } = await postJson(server.baseUrl, '/api/ask', { question: 'No, I moved to another hospital.', mode: 'personal', sessionId: 'sess-lib-card', history });
+      assert.equal(response.status, 200);
+      assert.ok(body.caseAnalysis, 'the case card was not made');
+    });
+    assert.deepEqual(world.calls.courtListener, []);
+    const card = world.calls.openai.find(call => call.kind === 'caseAnalysis').request.messages[0].content;
+    assert.ok(card.includes('Alpha v. Beta: Excerpt of Alpha v. Beta'), card);
+    assert.ok(!card.includes('Patient v. General Hospital'), 'the case card was given a decision from a live search');
+  } finally {
+    await server.close();
+  }
+});
+
+test('a type with four clear decisions searches live, and each decision says whether it was screened', async () => {
+  clearSearchCache();
+  usageInserts.length = 0;
+  const world = fakeWorld({ answer: `The scan should have been reported. ${DISCLAIMER}`, nyResults: [resultWithCluster(7, 'Held Name v. Other'), resultWithCluster(8, 'Clear Name v. Other'), resultWithCluster(9, 'Unknown Name v. Other'), { ...CL_RESULT, caseName: 'No Link v. Other', absolute_url: undefined }] });
+  const server = await startServer(app);
+  const states = [['7', 'held', '2026-11-20T05:00:00Z', '2026-11-20', 'citing'], ['8', 'clear', '2026-11-24T05:00:00Z', '2026-11-24', null]];
+  try {
+    await withOutboundHttp(libraryHandler(world, { clear: 4, states }), async () => {
+      const { response, body } = await postJson(server.baseUrl, '/api/ask', { question: 'My radiologist missed a tumor.', mode: 'personal', sessionId: 'sess-lib-2', history: [] });
+      assert.equal(response.status, 200);
+      assert.deepEqual(body.cases.map(c => [c.caseName, c.clusterId, c.screen]), [
+        ['Clear Name v. Other', 8, { state: 'clear', on: '2026-11-24' }],
+        ['Unknown Name v. Other', 9, { state: 'unscreened', on: null }],
+        ['No Link v. Other', null, { state: 'unscreened', on: null }],
+      ]);
+    });
+    assert.ok(world.calls.courtListener.length >= 1, 'no live search was made');
+    assert.deepEqual(repliesCounted(), [['replies-live', '1']]);
+    const system = world.calls.openai.find(call => call.kind === 'answer').request.messages[0].content;
+    assert.ok(system.includes('Screened: 2026-11-24'));
+    assert.ok(system.includes('Screened: no'));
+    assert.ok(!system.includes('Held Name'), 'a held decision was given to the model');
+  } finally {
+    await server.close();
+  }
+});
+
+test('a banned decision in a live result is dropped, and is not saved in the search memory', async () => {
+  clearSearchCache();
+  const world = fakeWorld({ answer: `The scan should have been reported. ${DISCLAIMER}`, nyResults: [resultWithCluster(7, 'Banned Name v. Other'), resultWithCluster(9, 'Kept Name v. Other')] });
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(libraryHandler(world, { clear: 0, states: [['7', 'banned', '2026-11-20T05:00:00Z', '2026-11-20', 'citing']] }), async () => {
+      const { body } = await postJson(server.baseUrl, '/api/ask', { question: 'My radiologist missed a tumor.', mode: 'personal', sessionId: 'sess-lib-3', history: [] });
+      assert.deepEqual(body.cases.map(c => c.caseName), ['Kept Name v. Other']);
+    });
+    const saved = world.calls.sql.find(call => /^INSERT INTO search_cache/.test(call.query));
+    assert.ok(saved, 'the decisions found were not saved');
+    assert.deepEqual(JSON.parse(saved.params[1]).map(c => c.caseName), ['Kept Name v. Other']);
+  } finally {
+    await server.close();
+  }
+});
+
+test('a held decision is never picked from the library', async () => {
+  clearSearchCache();
+  const world = fakeWorld({ answer: `The scan should have been reported. ${DISCLAIMER}` });
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(libraryHandler(world, { clear: 5, picks: LIBRARY_FIVE }), async () => {
+      await postJson(server.baseUrl, '/api/ask', { question: 'My radiologist missed a tumor.', mode: 'personal', sessionId: 'sess-lib-4', history: [] });
+    });
+    const pick = world.calls.sql.find(call => /FROM case_library WHERE screen_state = 'clear' AND pinned = FALSE AND .* ORDER BY/.test(call.query));
+    assert.ok(pick, 'the library was not asked for decisions');
+    assert.match(pick.query, /screen_state = 'clear'/);
+    assert.ok(!/held|banned/.test(pick.query));
+  } finally {
+    await server.close();
+  }
+});
+
+test('when the library cannot be read the reply searches live, and when the screen state cannot be read it is given no decisions', async () => {
+  clearSearchCache();
+  usageInserts.length = 0;
+  const world = fakeWorld({ answer: `The scan should have been reported. ${DISCLAIMER}`, nyResults: [resultWithCluster(9, 'Kept Name v. Other')] });
+  const server = await startServer(app);
+  try {
+    const { logs } = await capturingLogs(() => withOutboundHttp(libraryHandler(world, { failing: 'count', clear: 9 }), async () => {
+      const { response, body } = await postJson(server.baseUrl, '/api/ask', { question: 'My radiologist missed a tumor.', mode: 'personal', sessionId: 'sess-lib-5', history: [] });
+      assert.equal(response.status, 200);
+      assert.deepEqual(body.cases.map(c => c.caseName), ['Kept Name v. Other']);
+    }));
+    assert.ok(world.calls.courtListener.length >= 1);
+    assert.deepEqual(repliesCounted(), [['replies-live', '1']]);
+    assert.ok(logs.some(line => /case library/i.test(line)), logs.join('\n'));
+
+    clearSearchCache();
+    const unchecked = fakeWorld({ answer: `The scan should have been reported. ${DISCLAIMER}`, nyResults: [resultWithCluster(9, 'Kept Name v. Other')] });
+    const second = await capturingLogs(() => withOutboundHttp(libraryHandler(unchecked, { failing: 'states' }), async () => {
+      const { response, body } = await postJson(server.baseUrl, '/api/ask', { question: 'My radiologist missed a tumor.', mode: 'personal', sessionId: 'sess-lib-6', history: [] });
+      assert.equal(response.status, 200);
+      assert.deepEqual(body.cases, []);
+    }));
+    assert.ok(second.logs.some(line => /screen/i.test(line)), second.logs.join('\n'));
+    assert.ok(!unchecked.calls.sql.some(call => /^INSERT INTO search_cache/.test(call.query)), 'unchecked decisions were saved');
+  } finally {
+    await server.close();
+  }
+});
+
+test('a recalled decision that is banned is dropped', async () => {
+  clearSearchCache();
+  const remembered = [
+    { caseName: 'Banned Name v. Other', url: 'https://www.courtlistener.com/opinion/7/banned/', absoluteUrl: 'https://www.courtlistener.com/opinion/7/banned/', scope: 'ny', court: 'x', dateFiled: '2024-01-01', snippet: 's' },
+    { caseName: 'Kept Name v. Other', url: 'https://www.courtlistener.com/opinion/9/kept/', absoluteUrl: 'https://www.courtlistener.com/opinion/9/kept/', scope: 'ny', court: 'x', dateFiled: '2024-01-01', snippet: 's' },
+  ];
+  const world = fakeWorld({ answer: `The scan should have been reported. ${DISCLAIMER}` });
+  const library = libraryHandler(world, { clear: 0, states: [['7', 'banned', '2026-11-20T05:00:00Z', '2026-11-20', 'citing']] });
+  const handler = async (url, init) => {
+    if (url.startsWith('https://www.courtlistener.com/')) return jsonResponse({ detail: 'Request was throttled.' }, 429);
+    if (url.endsWith('/sql') && /^SELECT cases FROM search_cache/.test(JSON.parse(init.body).query.replace(/\s+/g, ' ').trim())) return rowsResponse([['cases', JSONB]], [[JSON.stringify(remembered)]]);
+    return library(url, init);
+  };
+  const server = await startServer(app);
+  try {
+    await withOutboundHttp(handler, async () => {
+      const { body } = await postJson(server.baseUrl, '/api/ask', { question: 'My radiologist missed a tumor.', mode: 'personal', sessionId: 'sess-lib-7', history: [] });
+      assert.deepEqual(body.cases.map(c => c.caseName), ['Kept Name v. Other']);
+      assert.deepEqual(body.cases[0].screen, { state: 'unscreened', on: null });
+    });
+    assert.ok(!world.calls.sql.some(call => /^INSERT INTO search_cache/.test(call.query)), 'recalled decisions were saved again');
+  } finally {
+    await server.close();
+  }
+});
+
 // ─── Case law when CourtListener cannot be searched ───────────────────────────
 
-test('found decisions are saved for the case type, without the visitor words, and used when a later search fails', async () => {
+test('found decisions are saved for the case type on the live path, without the visitor words, and used when a later search fails', async () => {
   const question = 'My name is Jane Roe. My radiologist missed a tumor in March.';
   // 1) A search that works saves what it found, under the case type only.
   clearSearchCache();

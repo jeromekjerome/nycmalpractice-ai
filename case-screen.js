@@ -16,10 +16,12 @@ import { allowanceLeft, countRequests } from './courtlistener-usage.js';
 
 const PASSAGE_LIMIT = 600;
 const PHRASE_LIMIT = 60;
-// A hold lists the clusters of the hits it found, at most this many from one answer; a decision held again keeps the
-// union of its holds' lists, at most the second number, the newest kept.
+// A hold keeps one list of clusters seen for each question. The question it was found on adds the clusters of its first
+// hits, at most this many from one answer, and the cluster of the hit shown wherever it lies; a decision held again keeps
+// the union of that question's lists, at most the second number, the newest kept.
 const SEEN_PER_HOLD = 20;
 const SEEN_LIMIT = 200;
+const QUESTIONS = ['citing', 'higher-court'];
 // The words looked for near the party's name, each quoted so that it is searched as written, and how many words apart they
 // may be. Tuned on recorded answers (plan 4 Task 4): every form of the three verbs, at 15 apart.
 const TREATMENT_WORDS = [
@@ -81,10 +83,20 @@ export function screenQuestions(row) {
   return { citing, higherCourt };
 }
 
-// The clusters a row's last hold lists as seen, or none.
-const seenOf = hold => (Array.isArray(hold?.seen) ? hold.seen.map(Number).filter(id => Number.isFinite(id) && id > 0) : []);
+const idsOf = list => (Array.isArray(list) ? list.map(Number).filter(id => Number.isFinite(id) && id > 0) : []);
 
-// What a new hold lists as seen: the earlier holds' clusters and then the new hits', each once, the newest kept.
+// The clusters a row's last hold lists as seen, for each question: { citing: [ids], 'higher-court': [ids] }, both empty for a
+// row never held. A hold written with a single list, before the lists were kept per question, counts it for the question the
+// hold names, and for both questions when it names neither.
+function seenOf(hold) {
+  const seen = hold?.seen;
+  if (!Array.isArray(seen)) return Object.fromEntries(QUESTIONS.map(question => [question, idsOf(seen?.[question])]));
+  const named = QUESTIONS.includes(hold.question) ? hold.question : null;
+  return Object.fromEntries(QUESTIONS.map(question => [question, named === null || named === question ? idsOf(seen) : []]));
+}
+
+// What a new hold lists as seen on one question: that question's earlier clusters and then the new hits', each once, the
+// newest kept.
 const seenWith = (earlier, found) => [...new Set([...earlier, ...found])].slice(-SEEN_LIMIT);
 
 // A result's cluster id, from its cluster_id or else its address.
@@ -125,12 +137,12 @@ function readAnswer(answer) {
 
 // Asks a decision's questions in turn. Returns TIME_UP when the time ran out before a question, { refused }, { failed } or
 // { unreadable } with the status, { hold } for the first question that found something, or {} for nothing found. A hit is a
-// result that is neither the decision itself nor a cluster the row's last hold lists as seen. The owner is shown, for the
-// citing question, the first hit with a marked passage, else its first hit; for the higher court question, its first hit.
-// The hold counts the hits and adds the clusters of the first SEEN_PER_HOLD to what the last hold saw.
+// result that is neither the decision itself nor a cluster the row's last hold lists as seen on that question. The owner is
+// shown, for the citing question, the first hit with a marked passage, else its first hit; for the higher court question, its
+// first hit. The hold counts the hits and adds the clusters of the first SEEN_PER_HOLD, and of the hit shown, to that
+// question's list; the other question's list is carried over as it was.
 async function screenOne(row, questions, ask) {
   const seen = seenOf(row.hold);
-  const skipped = new Set([Number(row.cluster_id), ...seen]);
   for (const [question, params] of [['citing', questions.citing], ['higher-court', questions.higherCourt]]) {
     if (!params) continue;
     const answer = await ask(params);
@@ -139,11 +151,16 @@ async function screenOne(row, questions, ask) {
     if (read.refused !== undefined) return { refused: read.refused };
     if (read.failed !== undefined) return { failed: read.failed };
     if (!read.results) return { unreadable: read.unreadable };
+    const skipped = new Set([Number(row.cluster_id), ...seen[question]]);
     const hits = read.results.filter(result => !skipped.has(clusterOf(result)));
     if (!hits.length) continue;
     const shown = question === 'citing' ? (hits.find(hasMark) ?? hits[0]) : hits[0];
-    const found = hits.slice(0, SEEN_PER_HOLD).map(clusterOf).filter(id => id !== null);
-    return { hold: { question, later: laterOf(shown), passage: passageOf(shown), hits: hits.length, seen: seenWith(seen, found) } };
+    const found = [...hits.slice(0, SEEN_PER_HOLD), shown].map(clusterOf).filter(id => id !== null);
+    return {
+      hold: {
+        question, later: laterOf(shown), passage: passageOf(shown), hits: hits.length, seen: { ...seen, [question]: seenWith(seen[question], found) },
+      },
+    };
   }
   return {};
 }

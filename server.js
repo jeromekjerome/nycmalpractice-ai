@@ -1031,14 +1031,17 @@ app.get('/api/admin/decisions', async (req, res) => {
   } catch (err) { serverError(req, res, err); }
 });
 
-for (const [verb, decision, screenState] of [['clear', 'clear', 'clear'], ['ban', 'banned', 'banned']]) {
+// The answer names the state the decision was left in. A ban leaves it banned. A clear leaves it clear, or unscreened when
+// its hold answered no question (decideHeld sends it back to be screened), so the state is read from the row.
+for (const [verb, decision] of [['clear', 'clear'], ['ban', 'banned']]) {
   app.post(`/api/admin/decisions/:clusterId/${verb}`, async (req, res) => {
     if (!requireAdmin(req, res)) return;
     if (!/^\d{1,18}$/.test(req.params.clusterId)) return res.status(400).json({ error: 'Not a decision id' });
     try {
       const changed = await decideHeld(sql, req.params.clusterId, decision, new Date().toISOString());
       if (!changed) return res.status(409).json({ error: 'That decision is not held' });
-      res.json({ ok: true, cluster_id: Number(req.params.clusterId), screen_state: screenState });
+      const [row] = decision === 'banned' ? [{ screen_state: 'banned' }] : await sql`SELECT screen_state FROM case_library WHERE cluster_id = ${req.params.clusterId}`;
+      res.json({ ok: true, cluster_id: Number(req.params.clusterId), screen_state: row?.screen_state ?? null });
     } catch (err) { serverError(req, res, err); }
   });
 }

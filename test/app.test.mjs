@@ -8521,6 +8521,10 @@ test('the owner lists the held decisions, then clears or bans one; a decision th
       states.set(id, write[1] || write[2]);
       return rowsResponse([['cluster_id', TEXT]], [[id]], 'UPDATE');
     }
+    if (/^SELECT screen_state FROM case_library WHERE cluster_id = \$1$/.test(q)) {
+      const state = states.get(String(params[0]));
+      return state ? rowsResponse([['screen_state', TEXT]], [[state]]) : jsonResponse(EMPTY_ROWS);
+    }
     return jsonResponse(EMPTY_ROWS);
   };
   const server = await startServer(app);
@@ -8568,6 +8572,43 @@ test('the owner lists the held decisions, then clears or bans one; a decision th
         assert.equal(new Date(write.params[0]).toISOString(), write.params[0], 'the decision time is a timestamp');
         assert.equal(write.params[0], write.params[1], 'a clear writes one time to both columns');
       }
+    }));
+  } finally {
+    await server.close();
+  }
+});
+
+test('a clear of a hold that answered no question answers the state it left the decision in: back to be screened', async () => {
+  // Each held decision's hold question. The clear's write gives the state case-library.js's decideHeld gives: a hold that is
+  // unreadable or names no question goes back to unscreened, any other is clear.
+  const holds = new Map([['5685961', 'unreadable'], ['5685962', null], ['5685963', 'citing'], ['5685964', 'higher-court']]);
+  const states = new Map([...holds.keys()].map(id => [id, 'held']));
+  const handler = async (url, init = {}) => {
+    if (!url.endsWith('/sql')) throw new Error(`Unexpected outbound request in test: ${url}`);
+    const { query, params } = JSON.parse(init.body);
+    const q = query.replace(/\s+/g, ' ').trim();
+    if (/^UPDATE case_library SET screen_state = CASE WHEN COALESCE\(hold->>'question', 'unreadable'\) = 'unreadable' THEN 'unscreened' ELSE 'clear' END/.test(q)) {
+      const id = String(params.at(-1));
+      if (states.get(id) !== 'held') return rowsResponse([], [], 'UPDATE');
+      states.set(id, (holds.get(id) ?? 'unreadable') === 'unreadable' ? 'unscreened' : 'clear');
+      return rowsResponse([['cluster_id', TEXT]], [[id]], 'UPDATE');
+    }
+    if (/^SELECT screen_state FROM case_library WHERE cluster_id = \$1$/.test(q)) {
+      const state = states.get(String(params[0]));
+      return state ? rowsResponse([['screen_state', TEXT]], [[state]]) : jsonResponse(EMPTY_ROWS);
+    }
+    return jsonResponse(EMPTY_ROWS);
+  };
+  const server = await startServer(app);
+  try {
+    await capturingLogs(() => withOutboundHttp(handler, async () => {
+      const clear = id => fetch(`${server.baseUrl}/api/admin/decisions/${id}/clear`, { method: 'POST', headers: { 'x-admin-secret': process.env.ADMIN_SECRET } })
+        .then(async response => [response.status, await response.json()]);
+      assert.deepEqual(await clear(5685961), [200, { ok: true, cluster_id: 5685961, screen_state: 'unscreened' }], 'an unreadable hold');
+      assert.deepEqual(await clear(5685962), [200, { ok: true, cluster_id: 5685962, screen_state: 'unscreened' }], 'a hold that names no question');
+      assert.deepEqual(await clear(5685963), [200, { ok: true, cluster_id: 5685963, screen_state: 'clear' }], 'a citing hold');
+      assert.deepEqual(await clear(5685964), [200, { ok: true, cluster_id: 5685964, screen_state: 'clear' }], 'a higher court hold');
+      assert.deepEqual([...states.values()], ['unscreened', 'unscreened', 'clear', 'clear']);
     }));
   } finally {
     await server.close();

@@ -210,9 +210,10 @@ async function statuteWatchSection() {
 }
 
 // The daily summary's part on the case library (case-library.js): per case type the clear, unscreened and held decisions, the
-// types with too few clear ones to be offered to a reply, the day's CourtListener requests by job, the replies given from the
-// library and live (counted under the jobs below), and what the token has left today. This app has no pinned decisions, so the
-// section has no line for them. Never fails: what cannot be read says so, and the rest of the summary goes as it was.
+// types with too few clear ones to be offered to a reply, the previous New York day's CourtListener requests by job and the
+// replies given from the library and live (counted under the jobs below; the day is the New York day of 24 hours before the
+// summary is made), and what the token has left today. This app has no pinned decisions, so the section has no line for them.
+// Never fails: what cannot be read says so, and the rest of the summary goes as it was.
 const MIN_CLEAR_DECISIONS = 5;
 const REPLIES_FROM_LIBRARY = 'replies-library';
 const REPLIES_LIVE = 'replies-live';

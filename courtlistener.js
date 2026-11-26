@@ -95,8 +95,7 @@ function mapResult(r, scope) {
     dateFiled:   r.dateFiled || r.date_filed || '',
     // v4 nests the snippet under opinions[]; the top-level field only existed in v3.
     snippet:     plainText(r.snippet || r.opinions?.[0]?.snippet).slice(0, 600),
-    url,
-    absoluteUrl: url || null,        // the name the page script reads
+    url,                             // the address the page links the decision from
     scope,                           // 'ny' (court-filtered) | 'national' (fallback)
   };
 }

@@ -1088,7 +1088,9 @@ test('POST /api/ask searches New York courts first and falls back to a national 
       assert.equal(body.cases.length, 1);
       assert.equal(body.cases[0].scope, 'national');
       assert.equal(body.cases[0].snippet, 'The failure to diagnose was a departure from accepted practice.');
-      assert.equal(body.cases[0].absoluteUrl, 'https://www.courtlistener.com/opinion/1/patient-v-general-hospital/');
+      // The page links a decision from url; a live decision carries no second name for it.
+      assert.equal(body.cases[0].url, 'https://www.courtlistener.com/opinion/1/patient-v-general-hospital/');
+      assert.equal(Object.hasOwn(body.cases[0], 'absoluteUrl'), false);
       assert.equal(body.cases[0].clusterId, 1);
       assert.deepEqual(body.cases[0].screen, { state: 'unscreened', on: null });
       // The model is told the cases are not New York law, and is given every parallel citation.
@@ -1453,10 +1455,9 @@ test('the privacy policy describes the analytics and outside services the pages 
   // The statements the code contradicted are gone.
   assert.doesNotMatch(policy, /We use a single session cookie/);
   assert.doesNotMatch(policy, /No personal data is sent to CourtListener/);
-  assert.match(policy, /To find court decisions, our server searches CourtListener each night with search words we write, never words from a conversation, and each reply chooses from the decisions found\. While our collection for a type of case is still being built, a reply may instead send CourtListener a few search keywords based on your conversation, which can include words you typed\./);
+  assert.match(policy, /To find court decisions, our server searches CourtListener each night with search words we write, never words from a conversation, and each reply chooses from the decisions found\. While our collection for a type of case is still being built, a reply may instead send CourtListener a few search keywords based on your conversation, which can include words you typed\. Before a reply is shown, our server also sends CourtListener the case citations written in that reply, to look each one up\. It does not send your IP address or the conversation itself\./);
   assert.doesNotMatch(policy, /To find relevant cases/);
   assert.match(policy, /Case law searches use the CourtListener API \(Free Law Project\)\. To find court decisions/);
-  assert.match(policy, /which can include words you typed\. Before a reply is shown, our server also sends CourtListener the case citations written in that reply, to look each one up\. It does not send your IP address or the conversation itself\./);
 });
 
 // ─── Conversation steps ───────────────────────────────────────────────────────

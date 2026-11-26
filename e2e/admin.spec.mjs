@@ -281,6 +281,8 @@ test('the Decisions held section says how many later decisions were found, reads
     heldDecision(33, { hold: { found_at: '2026-11-23T23:00:00.000Z', question: 'unreadable', status: 0, later: null, passage: null, seen: [] } }),
     heldDecision(34, { hold: { found_at: '2026-11-22T23:00:00.000Z', question: 'something-else', later, passage: 'a passage' } }),
     heldDecision(35, { hold: null }),
+    heldDecision(36, { hold: { ...heldDecision(36).hold, hits: 20, more: true } }),
+    heldDecision(37, { hold: { ...heldDecision(37).hold, hits: 1, more: true } }),
   ];
   await page.route('**/api/admin/firms', route => route.fulfill(json({ firms: [], counts: { total: 0, active: 0 }, leadCounts: { total: 0 } })));
   await mockOperations(page);
@@ -299,6 +301,10 @@ test('the Decisions held section says how many later decisions were found, reads
   const row = id => body.locator('.decision-row', { hasText: `Party${id} v. Other` });
   await expect(row(31)).toContainText('3 later decisions were found. The first is shown below.');
   await expect(row(32)).toContainText('1 later decision was found. It is shown below.');
+  await expect(row(31)).not.toContainText('first page of results');
+  // When CourtListener had more pages of results than the one read, the count says it is of the first page.
+  await expect(row(36)).toContainText('20 later decisions were found on the first page of results, and there are more. The first is shown below.');
+  await expect(row(37)).toContainText('1 later decision was found on the first page of results, and there are more. It is shown below.');
   await expect(row(33)).toContainText("The screen could not read CourtListener's answer for this decision (no answer).");
   await expect(row(33)).not.toContainText('later decisions were found');
   await expect(row(34)).toContainText('The screen held this decision.');
@@ -320,7 +326,7 @@ test('the Decisions held section says how many later decisions were found, reads
   await row(33).getByRole('button', { name: 'Screen again' }).click();
   await expect.poll(() => posted).toEqual(['33/clear']);
   await expect(page.locator('#adminMsg')).toContainText('Party33 v. Other will be screened again');
-  await expect(body.locator('.decision-row')).toHaveCount(4);
+  await expect(body.locator('.decision-row')).toHaveCount(6);
 });
 
 test('after a failed clear, a 409 included, the Decisions held section reloads', async ({ page }) => {

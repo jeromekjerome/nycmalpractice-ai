@@ -316,6 +316,29 @@ test('the cluster of the hit shown is in the hold\'s list even when it lies beyo
   assert.deepEqual(hold.seen, seenLists([...results.slice(0, 20).map(result => result.cluster_id), 722]));
 });
 
+test('when CourtListener has more pages of results, the hold records it and the email says the count is of the first page', async () => {
+  const next = 'https://www.courtlistener.com/api/rest/v4/search/?cursor=made-up';
+  for (const [results, line] of [
+    [Array.from({ length: 20 }, (_, i) => hitOf(800 + i)), '20 later decisions were found on the first page of results, and there are more. The first is shown below.'],
+    [[hitOf(830)], '1 later decision was found on the first page of results, and there are more. It is shown below.'],
+  ]) {
+    const row = courtOfAppeals();
+    const db = fakeLibrary([row]);
+    const { mail } = await run({ db, search: answering(db, () => ({ status: 200, body: { count: 45, next, results } })).search });
+    const { hold } = db.row(row.cluster_id);
+    assert.deepEqual([hold.hits, hold.more], [results.length, true]);
+    assert.ok(mail.sent[0].html.includes(`<p>${line}</p>`), mail.sent[0].html);
+  }
+
+  // Without a next page the hold records nothing of it, and the count reads as before.
+  const row = courtOfAppeals();
+  const db = fakeLibrary([row]);
+  const { mail } = await run({ db, search: answering(db, () => ({ status: 200, body: { count: 2, next: null, results: [hitOf(840), hitOf(841)] } })).search });
+  assert.equal(Object.hasOwn(db.row(row.cluster_id).hold, 'more'), false);
+  assert.ok(mail.sent[0].html.includes('<p>2 later decisions were found. The first is shown below.</p>'), mail.sent[0].html);
+  assert.doesNotMatch(mail.sent[0].html, /first page of results/);
+});
+
 test('a held-again row keeps the union of what each hold saw on each question, at most 200, and the other question\'s list as it was', async () => {
   const lastHold = { found_at: ago(41), question: 'higher-court', later: null, passage: 'p', hits: 2, seen: seenLists([501], [601, 602]) };
   // Held again on the citing question: the citing list grows, the higher court list is carried over.

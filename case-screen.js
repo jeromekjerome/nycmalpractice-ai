@@ -125,13 +125,13 @@ const hasMark = hit => /<mark>/i.test(snippetOf(hit));
 // What an answer is:
 // - refused: 401, 403 or 429, CourtListener refusing the token or the rate, never the decision's doing;
 // - failed: no answer at all (status 0) or a 5xx;
-// - results: a 200 with a list of results;
+// - results: a 200 with a list of results, and `more` when the answer names a next page;
 // - unreadable: anything else, a question this decision's screen could not get answered.
 function readAnswer(answer) {
   const status = Number.isFinite(Number(answer?.status)) ? Number(answer.status) : 0;
   if ([401, 403, 429].includes(status)) return { refused: status };
   if (status === 0 || (status >= 500 && status <= 599)) return { failed: status };
-  if (status === 200 && Array.isArray(answer?.body?.results)) return { results: answer.body.results };
+  if (status === 200 && Array.isArray(answer?.body?.results)) return { results: answer.body.results, more: Boolean(answer.body.next) };
   return { unreadable: status };
 }
 
@@ -139,8 +139,9 @@ function readAnswer(answer) {
 // { unreadable } with the status, { hold } for the first question that found something, or {} for nothing found. A hit is a
 // result that is neither the decision itself nor a cluster the row's last hold lists as seen on that question. The owner is
 // shown, for the citing question, the first hit with a marked passage, else its first hit; for the higher court question, its
-// first hit. The hold counts the hits and adds the clusters of the first SEEN_PER_HOLD, and of the hit shown, to that
-// question's list; the other question's list is carried over as it was.
+// first hit. The hold counts the hits, which are of the answer's first page alone, and records `more: true` when CourtListener
+// had another page. It adds the clusters of the first SEEN_PER_HOLD hits, and of the hit shown, to that question's list; the
+// other question's list is carried over as it was.
 async function screenOne(row, questions, ask) {
   const seen = seenOf(row.hold);
   for (const [question, params] of [['citing', questions.citing], ['higher-court', questions.higherCourt]]) {
@@ -158,7 +159,8 @@ async function screenOne(row, questions, ask) {
     const found = [...hits.slice(0, SEEN_PER_HOLD), shown].map(clusterOf).filter(id => id !== null);
     return {
       hold: {
-        question, later: laterOf(shown), passage: passageOf(shown), hits: hits.length, seen: { ...seen, [question]: seenWith(seen[question], found) },
+        question, later: laterOf(shown), passage: passageOf(shown), hits: hits.length, ...(read.more ? { more: true } : {}),
+        seen: { ...seen, [question]: seenWith(seen[question], found) },
       },
     };
   }
@@ -173,8 +175,16 @@ const linkOf = url => {
   return String(url ?? '').startsWith('https://') ? `<a href="${shown}">${shown}</a>` : shown;
 };
 
-// How many later decisions a hold found, and that the one shown comes first.
-const foundCount = hits => (hits === 1 ? '1 later decision was found. It is shown below.' : `${hits} later decisions were found. The first is shown below.`);
+// How many later decisions a hold found, on the first page of results when CourtListener had more, and that the one shown
+// comes first.
+function foundCount(hits, more) {
+  if (more) {
+    return hits === 1
+      ? '1 later decision was found on the first page of results, and there are more. It is shown below.'
+      : `${hits} later decisions were found on the first page of results, and there are more. The first is shown below.`;
+  }
+  return hits === 1 ? '1 later decision was found. It is shown below.' : `${hits} later decisions were found. The first is shown below.`;
+}
 
 // The owner's email about one held decision: the decision, the count of later decisions found, the one shown and its passage,
 // every value escaped.
@@ -187,7 +197,7 @@ function holdEmail(row, hold, site) {
     `<h3>The decision</h3><p>${lines([escapeHtml(row.case_name), escapeHtml(citations[0]), escapeHtml([row.court, row.date_filed].filter(Boolean).join(', ')), linkOf(row.url)])}</p>`,
   ];
   if (hold.later) {
-    if (Number.isInteger(hold.hits) && hold.hits > 0) parts.push(`<p>${foundCount(hold.hits)}</p>`);
+    if (Number.isInteger(hold.hits) && hold.hits > 0) parts.push(`<p>${foundCount(hold.hits, hold.more === true)}</p>`);
     parts.push(`<h3>The later decision</h3><p>${lines([escapeHtml(hold.later.case_name), escapeHtml([hold.later.court, hold.later.date_filed].filter(Boolean).join(', ')), linkOf(hold.later.url)])}</p>`);
   }
   if (hold.passage) parts.push(`<h3>The passage</h3><blockquote>${escapeHtml(hold.passage)}</blockquote>`);

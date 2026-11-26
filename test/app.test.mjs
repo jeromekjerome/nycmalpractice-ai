@@ -19,8 +19,10 @@ process.env.TWILIO_PHONE_NUMBER ||= '+15555550123';
 process.env.CRON_SECRET ||= 'cron-secret';
 process.env.ADMIN_SECRET ||= 'admin-secret';
 process.env.APP_URL ||= 'https://example.test';
-process.env.SMTP_HOST ||= 'smtp.example.test';
-process.env.SMTP_PORT ||= '465';
+// A mail server that refuses every connection at once, with no DNS lookup: nothing is listening on this machine's port 9, or
+// on its 465, which the operator notices use whatever SMTP_PORT says.
+process.env.SMTP_HOST ||= '127.0.0.1';
+process.env.SMTP_PORT ||= '9';
 process.env.SMTP_USER ||= 'ops@example.test';
 process.env.SMTP_PASS ||= 'password';
 process.env.NOTIFICATION_EMAIL ||= 'ops@example.test';
@@ -4524,7 +4526,11 @@ test('the nightly job deletes conversations after 90 days and lead records after
   const handler = async (url, init) => {
     if (!url.endsWith('/sql')) throw new Error('Unexpected request ' + url);
     const { query, params } = JSON.parse(init.body);
-    calls.push({ query: query.replace(/\s+/g, ' ').trim(), params });
+    const q = query.replace(/\s+/g, ' ').trim();
+    calls.push({ query: q, params });
+    // No lead is overdue. Answered two rows like the rest, the claim of the next overdue lead would never come back empty,
+    // and the step would decline lead after lead, offering each one on, until its 30-second budget ran out (auction.js).
+    if (/^UPDATE leads SET status = 'declined', declined_at = NOW\(\), decline_reason = 'expired'/.test(q)) return rowsResponse([], [], 'UPDATE');
     return rowsResponse([['id', INT]], [['1'], ['2']], 'DELETE');
   };
   const server = await startServer(app);

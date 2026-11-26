@@ -691,6 +691,23 @@ test('an answer the screen cannot read holds the decision as unreadable, emails 
   }
 });
 
+test('the email about an unreadable hold says the owner can screen it again or ban it, and reads status 0 as no answer', async () => {
+  for (const [status, said] of [[0, '(no answer)'], [503, '(status 503)'], [400, '(status 400)']]) {
+    const repeat = courtOfAppeals({ screen_tried_at: ago(1) });
+    const db = fakeLibrary([repeat]);
+    const { mail } = await run({ db, search: answering(db, () => ({ status, body: null })).search });
+    const { html } = mail.sent[0];
+    assert.ok(html.includes(`The screen could not read CourtListener's answer for it ${said}.`), html);
+    assert.ok(html.includes('It waits for you on the admin page, where you can screen it again or ban it.</p>'), html);
+    assert.doesNotMatch(html, /status 0|clear it or ban it/);
+  }
+  // A hold that found a later decision is still one to clear or ban.
+  const row = courtOfAppeals();
+  const db = fakeLibrary([row]);
+  const { mail } = await run({ db, search: answering(db, () => ({ status: 200, body: { count: 1, results: [hitOf(850)] } })).search });
+  assert.ok(mail.sent[0].html.includes('It waits for you on the admin page, where you can clear it or ban it.</p>'), mail.sent[0].html);
+});
+
 test('one email for each decision newly held, and a second run sends none', async () => {
   const rows = [courtOfAppeals(), courtOfAppeals(), courtOfAppeals()];
   const db = fakeLibrary(rows);

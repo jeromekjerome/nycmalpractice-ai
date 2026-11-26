@@ -36,11 +36,11 @@ const CAPTION_STOP_WORDS = new Set([
   'people', 'state', 'city', 'county', 'town', 'village', 'new', 'york', 'matter', 'estate', 'the', 'and', 'inc', 'corp', 'llc',
   'authority', 'board', 'department', 'dept', 'company', 'co',
 ]);
-// What the owner is told the screen found, for each kind of hold.
+// What the owner is told the screen found, for each kind of hold. Status 0 is no answer at all, as the admin page words it.
 const FINDINGS = {
   citing: () => 'A later decision that cites it has one of the words the screen looks for (such as "overruled" or "abrogated") near its party\'s name.',
   'higher-court': () => 'A higher court has since filed a decision under a case name with the same party names.',
-  unreadable: hold => `The screen could not read CourtListener's answer for it (status ${hold.status}).`,
+  unreadable: hold => `The screen could not read CourtListener's answer for it (${hold.status === 0 ? 'no answer' : `status ${hold.status ?? 'unknown'}`}).`,
 };
 const TIME_UP = Symbol('time');
 
@@ -187,13 +187,14 @@ function foundCount(hits, more) {
 }
 
 // The owner's email about one held decision: the decision, the count of later decisions found, the one shown and its passage,
-// every value escaped.
+// every value escaped. An unreadable hold is screened again from the admin page (decideHeld in case-library.js), not cleared.
 function holdEmail(row, hold, site) {
   const citations = Array.isArray(row.citations) ? row.citations : [];
   const lines = values => values.filter(Boolean).join('<br>');
+  const choices = hold.question === 'unreadable' ? 'screen it again or ban it' : 'clear it or ban it';
   const parts = [
     `<p>The nightly screen held a court decision in the case library. ${escapeHtml(FINDINGS[hold.question](hold))}`
-      + ' While it is held it is not offered to replies. It waits for you on the admin page, where you can clear it or ban it.</p>',
+      + ` While it is held it is not offered to replies. It waits for you on the admin page, where you can ${choices}.</p>`,
     `<h3>The decision</h3><p>${lines([escapeHtml(row.case_name), escapeHtml(citations[0]), escapeHtml([row.court, row.date_filed].filter(Boolean).join(', ')), linkOf(row.url)])}</p>`,
   ];
   if (hold.later) {

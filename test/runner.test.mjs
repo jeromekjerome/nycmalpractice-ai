@@ -55,6 +55,10 @@ test('a run whose tests all pass prints what it always printed and exits 0, unde
   assert.deepEqual([child.status, child.signal], [0, null], child.err);
   assert.equal(child.out, 'PASS pass 1\nPASS pass 2\nPassed 2 test(s)\n');
   assert.equal(child.err, '');
-  // A limit that is not a positive number leaves the default.
-  for (const limit of ['abc', '0', '-5']) assert.equal(runCases(['pass'], limit).status, 0, limit);
+  // A limit that is not a positive number leaves the default: a test of 100 ms passes, where a limit read from the value
+  // itself would have run out first. With a limit of 50 ms, the same test fails.
+  for (const limit of ['abc', '0', '-5']) assert.equal(runCases(['slow'], limit).status, 0, limit);
+  const short = runCases(['slow'], 50);
+  assert.equal(short.status, 1);
+  assert.match(short.err, /^FAIL slow 1: it did not settle within 50 ms$/m);
 });

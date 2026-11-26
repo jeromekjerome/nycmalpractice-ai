@@ -4,6 +4,7 @@
 // A fixture for test/runner.test.mjs, which runs it as a child process; the suite never imports it. It registers one test
 // with the runner for each kind named on the command line, in order, and runs them as test/index.test.mjs does. The kinds:
 // - pass: settles at once;
+// - slow: settles after 100 ms;
 // - hang: never settles, and holds nothing open;
 // - hang-holding: never settles, and holds a timer open that would keep the process alive;
 // - throw: throws as it is called;
@@ -13,6 +14,7 @@ import { test, run } from './runner.mjs';
 
 const KINDS = {
   pass: () => {},
+  slow: () => new Promise(resolve => { setTimeout(resolve, 100); }),
   hang: () => new Promise(() => {}),
   'hang-holding': () => new Promise(() => { setInterval(() => {}, 1000); }),
   throw: () => { throw new Error('thrown as it was called'); },

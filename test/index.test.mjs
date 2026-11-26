@@ -29,6 +29,7 @@ import './measure-app.test.mjs';
 import './test-settings.test.mjs';
 import './library-refresh.test.mjs';
 import './case-screen.test.mjs';
+import './runner.test.mjs';
 
 import { run } from './runner.mjs';
 

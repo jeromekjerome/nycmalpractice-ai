@@ -8325,6 +8325,20 @@ test("the library route is closed without the scheduler's secret, refreshes the 
   }
 });
 
+test('a library search may take as long as a first search was measured to, and the last one still ends inside the jobs function', async () => {
+  const { LIBRARY_TIMEOUT_MS, LIBRARY_BUDGET_MS } = await import('../courtlistener.js');
+  // A topic search CourtListener had not run before took 78 s on 2026-11-26.
+  assert.ok(LIBRARY_TIMEOUT_MS >= 80_000, `a library request may take ${LIBRARY_TIMEOUT_MS} ms`);
+  // The refresh starts no request after its budget, so the last ends by budget + limit; 30 s are left for the run's own
+  // work after it (saving, recordJobRun, the failure email).
+  const vercel = JSON.parse(readFileSync(new URL('../vercel.json', import.meta.url), 'utf8'));
+  const functionMs = vercel.functions['api/jobs.js'].maxDuration * 1000;
+  assert.ok(LIBRARY_BUDGET_MS + LIBRARY_TIMEOUT_MS + 30_000 <= functionMs,
+    `budget ${LIBRARY_BUDGET_MS} + limit ${LIBRARY_TIMEOUT_MS} + 30000 must fit in ${functionMs}`);
+  // The route hands the budget to the refresh.
+  assert.match(readFileSync(new URL('../server.js', import.meta.url), 'utf8'), /refreshLibrary\(\{[\s\S]*?budgetMs: LIBRARY_BUDGET_MS,[\s\S]*?\}\);/);
+});
+
 test('the library route stops before any search when the allowance has nothing to spare', async () => {
   const world = libraryWorld({ usage: usageReportWith({ day: 30, hour: 50 }) });
   const server = await startServer(app);

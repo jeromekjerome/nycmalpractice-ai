@@ -20,7 +20,7 @@ import { refreshLibrary } from './library-refresh.js';
 import { heldDecisions, decideHeld, screenStates, shownScreen } from './case-library.js';
 import { screenDecisions } from './case-screen.js';
 import { CASE_TOPICS } from './case-topics.js';
-import { searchTopic, lookupCitations, searchForScreen } from './courtlistener.js';
+import { searchTopic, lookupCitations, searchForScreen, LIBRARY_BUDGET_MS } from './courtlistener.js';
 import { readAllowance } from './courtlistener-usage.js';
 import { sourceReader } from './statute-text.js';
 import { readLawFile, snapshotReader } from './law-file.js';
@@ -1292,6 +1292,7 @@ function refreshCaseLibrary() {
   return refreshLibrary({
     sqlClient: sql, topics: CASE_TOPICS, pins: [], search: searchTopic, lookupPins: lookupCitations,
     allowance: () => readAllowance({ token }), maxSearches: numberSetting('LIBRARY_SEARCHES_PER_NIGHT', 10), reserve: numberSetting('COURTLISTENER_RESERVE', 30),
+    budgetMs: LIBRARY_BUDGET_MS,
   });
 }
 

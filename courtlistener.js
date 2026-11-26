@@ -194,7 +194,13 @@ async function runSearch(paramsObject, limit, scope, deadline, { cacheOnly = fal
 // Each is one request with no ladder, no second try and no cache. The refresh's two are counted here under the job `library`
 // before they are sent (the count is awaited, so a function that stops after the job has lost nothing); the screen's search
 // is counted by the screen. None throws: status 0 is a network error or a timeout.
-const LIBRARY_TIMEOUT_MS = 20_000;
+// A topic search CourtListener has not run before can take far longer than one it has: on 2026-11-26 one took 78 s and
+// another 13 s, each sent once by hand, and the 20 s limit this had before failed a night at its first slow topic. So a
+// library request may take 90 s, and the refresh starts no request after LIBRARY_BUDGET_MS of its run: the last one, at its
+// full limit, and the run's own work after it (saving, the run's record, the failure email) still end inside the 300 s of
+// the jobs function (api/jobs.js).
+export const LIBRARY_TIMEOUT_MS = 90_000;
+export const LIBRARY_BUDGET_MS = 180_000;
 
 // One topic search: precedential New York decisions since 2015, best match first. Returns { results, status }.
 export async function searchTopic({ q, fetchImpl = fetch } = {}) {

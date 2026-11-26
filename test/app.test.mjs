@@ -3084,9 +3084,12 @@ test('citator CourtListener lookup: each lookup is counted before it is sent, a 
   await auditDraftCitations(unanchored, RETRIEVED_CASES, { enableCourtListener: false, fetchImpl, countLookup });
   assert.deepEqual(events, [], 'an anchored citation, or a lookup turned off, sends and counts nothing');
 
-  const { result: [item], logs } = await capturingLogs(() => auditDraftCitations(unanchored, RETRIEVED_CASES, { enableCourtListener: true, fetchImpl, countLookup: async () => { throw new Error('the count is down'); } }));
+  // A failed count is logged with nothing shaped like a key, even when its error quotes one (the key is made up).
+  const key = `sk-${'made0up1'.repeat(3)}`;
+  const { result: [item], logs } = await capturingLogs(() => auditDraftCitations(unanchored, RETRIEVED_CASES, { enableCourtListener: true, fetchImpl, countLookup: async () => { throw new Error(`the count is down for ${key}`); } }));
   assert.equal(item.courtlistener_status, 'NOT_FOUND_404', 'the lookup was still sent');
-  assert.ok(logs.some(line => /count/.test(line)), logs.join('\n'));
+  assert.ok(logs.some(line => line.includes('could not be counted: the count is down for [key withheld]')), logs.join('\n'));
+  assert.ok(!logs.some(line => line.includes(key)), logs.join('\n'));
 });
 
 test("the gate hands its lookup counter to each lookup of a reply, and a reply's gate counts under gate-lookup", async () => {
@@ -7294,6 +7297,23 @@ test('a recorded draft is graded as it is, and the answer model is not asked to 
     assert.deepEqual(world.calls.sql, []);
     assert.deepEqual(world.calls.courtListener, []);
   });
+});
+
+test('when the gate itself throws, the reply is served ungated and the log line withholds any key the error quotes', async () => {
+  // The recorded decision's address throws when it is read as text, which the gate's citation audit is the first to do
+  // (citator.js reads every retrieved decision's address). The key is made up.
+  const key = `sk-${'made0up1'.repeat(3)}`;
+  const address = { toString() { throw new Error(`the address could not be read with ${key}`); } };
+  const cases = [{ caseName: 'Patient v. Hospital', citation: '1 N.Y.3d 1', citations: ['1 N.Y.3d 1'], court: 'ny', dateFiled: '2020-01-01', snippet: 'x', url: address, scope: 'ny' }];
+  const draft = `Could you tell me more? ${DISCLAIMER}`;
+  const world = fakeWorld({ answer: 'UNUSED' });
+  const { result, logs } = await capturingLogs(() => withOutboundHttp(world.handler, () => answerUserQuestion({
+    question: 'A sponge was left inside me.', mode: 'personal', sessionId: 'gate-down-1', history: [], recorded: { caseType: 'surgical_error', cases, draft },
+  })));
+  assert.deepEqual([result.answer, result.evaluation], [draft, null], 'the reply is served, with no evaluation');
+  const line = logs.find(entry => entry.startsWith('[Gatekeeper] UNAVAILABLE — reply served UNGATED:'));
+  assert.ok(line?.includes('the address could not be read with [key withheld]'), logs.join('\n'));
+  assert.ok(!logs.some(entry => entry.includes(key)), logs.join('\n'));
 });
 
 test('the classification and the search can be run on their own, without the case memory', async () => {

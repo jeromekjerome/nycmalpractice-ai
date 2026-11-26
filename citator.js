@@ -14,6 +14,8 @@
 // Optionally, reporter citations that are not anchored are checked against CourtListener's
 // citation-lookup API to record whether they exist at all.
 
+import { withoutKeys } from './without-keys.js';
+
 const CL_CITATION_LOOKUP_URL = 'https://www.courtlistener.com/api/rest/v4/citation-lookup/';
 const CL_LOOKUP_TIMEOUT_MS = 4000;
 
@@ -982,7 +984,7 @@ export async function auditDraftCitations(draftText, retrievedCases = [], { enab
       try {
         await countLookup();
       } catch (err) {
-        console.warn(`[Citator] The CourtListener citation-lookup could not be counted: ${err?.message ?? err}`);
+        console.warn(`[Citator] The CourtListener citation-lookup could not be counted: ${withoutKeys(err?.message ?? err)}`);
       }
     }
     const answers = await lookupReporters(pending, token, injected ? fetchImpl : fetch);

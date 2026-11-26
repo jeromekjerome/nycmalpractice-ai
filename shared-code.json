@@ -1,6 +1,6 @@
 {
   "files": {
-    "citator.js": "8ad76112160c9652b4ef6732fcf592bcd87f456e54845d47676a5678799a243b",
+    "citator.js": "4d2f23511b993cc0ef57f21f02879c6a6ad337195e1665c658dddec3d35c3486",
     "backup.js": "9e99c47d5982b9177d488fd524990c3e247e11bc90317b1b2cacc835482c33a8",
     "ai-budget.js": "ea3c06940ad92c58c0a6a12392e9c668d146bfe512c79e9eb09a830a894f07e3",
     "test/ai-budget.test.mjs": "ea576293fb8255348dd0c69138b30bc5be9bdefe62b5a64d9f7d5a73dee0e00f",

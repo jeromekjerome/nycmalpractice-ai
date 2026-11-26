@@ -281,8 +281,9 @@ export async function answerUserQuestion({ question, mode = 'personal', sessionI
     evaluation = gated.evaluation;
   } catch (err) {
     // The gate itself is broken (for example a rubric file missing from the deployment). Keep
-    // answering, but make the failure impossible to miss in the logs.
-    console.error('[Gatekeeper] UNAVAILABLE — reply served UNGATED:', err);
+    // answering, but make the failure impossible to miss in the logs: the error's stack, with
+    // nothing shaped like a key.
+    console.error('[Gatekeeper] UNAVAILABLE — reply served UNGATED:', withoutKeys(err?.stack ?? err));
   }
   await remembering;
   await pendingCounts();

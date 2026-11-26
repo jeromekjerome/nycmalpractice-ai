@@ -1032,18 +1032,33 @@ app.get('/api/admin/decisions', async (req, res) => {
 });
 
 // The answer names the state the decision was left in. A ban leaves it banned. A clear leaves it clear, or unscreened when
-// its hold answered no question (decideHeld sends it back to be screened), so the state is read from the row.
+// its hold answered no question (decideHeld sends it back to be screened), so the state is read from the row after the clear.
+// The hold's question is read before it, for the answer to fall back on (stateAfterClear).
 for (const [verb, decision] of [['clear', 'clear'], ['ban', 'banned']]) {
   app.post(`/api/admin/decisions/:clusterId/${verb}`, async (req, res) => {
     if (!requireAdmin(req, res)) return;
     if (!/^\d{1,18}$/.test(req.params.clusterId)) return res.status(400).json({ error: 'Not a decision id' });
+    const id = req.params.clusterId;
     try {
-      const changed = await decideHeld(sql, req.params.clusterId, decision, new Date().toISOString());
+      const [held] = decision === 'clear' ? await sql`SELECT hold->>'question' AS question FROM case_library WHERE cluster_id = ${id}` : [];
+      const changed = await decideHeld(sql, id, decision, new Date().toISOString());
       if (!changed) return res.status(409).json({ error: 'That decision is not held' });
-      const [row] = decision === 'banned' ? [{ screen_state: 'banned' }] : await sql`SELECT screen_state FROM case_library WHERE cluster_id = ${req.params.clusterId}`;
-      res.json({ ok: true, cluster_id: Number(req.params.clusterId), screen_state: row?.screen_state ?? null });
+      res.json({ ok: true, cluster_id: Number(id), screen_state: decision === 'banned' ? 'banned' : await stateAfterClear(id, held?.question) });
     } catch (err) { serverError(req, res, err); }
   });
+}
+
+// The state a clear left a decision in, read from its row. The clear is made by then, so a read that fails is logged and the
+// answer is the state decideHeld gives a hold with that question: unscreened for an unreadable hold or one that names none,
+// else clear.
+async function stateAfterClear(clusterId, question) {
+  try {
+    const [row] = await sql`SELECT screen_state FROM case_library WHERE cluster_id = ${clusterId}`;
+    if (row?.screen_state) return row.screen_state;
+  } catch (err) {
+    console.error(`Could not read the state of decision ${clusterId} after it was cleared:`, withoutKeys(err?.message ?? err));
+  }
+  return (question ?? 'unreadable') === 'unreadable' ? 'unscreened' : 'clear';
 }
 
 // ─── Admin: the models ───────────────────────────────────────────────────────

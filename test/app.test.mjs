@@ -8642,6 +8642,48 @@ test('a clear of a hold that answered no question answers the state it left the 
   }
 });
 
+test('a clear whose row cannot be read once it is made still answers 200, with the state its hold gives, and logs the failure without keys', async () => {
+  // Each held decision's hold question. The hold is read before the clear; the read of the state after it fails, with an
+  // error that quotes a made-up key.
+  const key = `sk-${'made0up1'.repeat(3)}`;
+  const holds = new Map([['5685971', 'unreadable'], ['5685972', 'citing'], ['5685973', null]]);
+  const states = new Map([...holds.keys()].map(id => [id, 'held']));
+  const handler = async (url, init = {}) => {
+    if (!url.endsWith('/sql')) throw new Error(`Unexpected outbound request in test: ${url}`);
+    const { query, params } = JSON.parse(init.body);
+    const q = query.replace(/\s+/g, ' ').trim();
+    if (/^SELECT hold->>'question' AS question FROM case_library WHERE cluster_id = \$1$/.test(q)) {
+      const id = String(params[0]);
+      return holds.has(id) ? rowsResponse([['question', TEXT]], [[holds.get(id)]]) : jsonResponse(EMPTY_ROWS);
+    }
+    if (/^UPDATE case_library SET screen_state = CASE WHEN COALESCE\(hold->>'question', 'unreadable'\) = 'unreadable' THEN 'unscreened' ELSE 'clear' END/.test(q)) {
+      const id = String(params.at(-1));
+      if (states.get(id) !== 'held') return rowsResponse([], [], 'UPDATE');
+      states.set(id, (holds.get(id) ?? 'unreadable') === 'unreadable' ? 'unscreened' : 'clear');
+      return rowsResponse([['cluster_id', TEXT]], [[id]], 'UPDATE');
+    }
+    if (/^SELECT screen_state FROM case_library WHERE cluster_id = \$1$/.test(q)) return jsonResponse({ message: `the connection dropped for ${key}`, code: '08006' }, 400);
+    return jsonResponse(EMPTY_ROWS);
+  };
+  const server = await startServer(app);
+  try {
+    const { logs } = await capturingLogs(() => withOutboundHttp(handler, async () => {
+      const clear = id => fetch(`${server.baseUrl}/api/admin/decisions/${id}/clear`, { method: 'POST', headers: { 'x-admin-secret': process.env.ADMIN_SECRET } })
+        .then(async response => [response.status, await response.json()]);
+      assert.deepEqual(await clear(5685971), [200, { ok: true, cluster_id: 5685971, screen_state: 'unscreened' }], 'an unreadable hold');
+      assert.deepEqual(await clear(5685972), [200, { ok: true, cluster_id: 5685972, screen_state: 'clear' }], 'a citing hold');
+      assert.deepEqual(await clear(5685973), [200, { ok: true, cluster_id: 5685973, screen_state: 'unscreened' }], 'a hold that names no question');
+      assert.deepEqual([...states.values()], ['unscreened', 'clear', 'unscreened'], 'each clear was made');
+    }));
+    for (const id of holds.keys()) {
+      assert.ok(logs.some(line => line.includes(`Could not read the state of decision ${id} after it was cleared:`) && line.includes('[key withheld]')), logs.join('\n'));
+    }
+    assert.ok(!logs.some(line => line.includes(key)), logs.join('\n'));
+  } finally {
+    await server.close();
+  }
+});
+
 test('the admin routes answer 500 with the generic message when the database fails, and log no key', async () => {
   const handler = async url => {
     if (!url.endsWith('/sql')) throw new Error(`Unexpected outbound request in test: ${url}`);
